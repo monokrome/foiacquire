@@ -155,6 +155,8 @@ pub struct Document {
     pub created_at: DateTime<Utc>,
     /// When the document was last modified.
     pub updated_at: DateTime<Utc>,
+    /// How this document was discovered (import, crawl, discover).
+    pub discovery_method: String,
 }
 
 impl Document {
@@ -166,6 +168,19 @@ impl Document {
         source_url: String,
         version: DocumentVersion,
         metadata: serde_json::Value,
+    ) -> Self {
+        Self::with_discovery_method(id, source_id, title, source_url, version, metadata, "import".to_string())
+    }
+
+    /// Create a new document with explicit discovery method.
+    pub fn with_discovery_method(
+        id: String,
+        source_id: String,
+        title: String,
+        source_url: String,
+        version: DocumentVersion,
+        metadata: serde_json::Value,
+        discovery_method: String,
     ) -> Self {
         let now = Utc::now();
         Self {
@@ -181,6 +196,7 @@ impl Document {
             metadata,
             created_at: now,
             updated_at: now,
+            discovery_method,
         }
     }
 

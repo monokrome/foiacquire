@@ -324,13 +324,14 @@ impl DownloadService {
                             let _ = doc_repo.save(&doc);
                         }
                     } else {
-                        let doc = Document::new(
+                        let doc = Document::with_discovery_method(
                             uuid::Uuid::new_v4().to_string(),
                             crawl_url.source_id.clone(),
                             title,
                             url.clone(),
                             version,
                             serde_json::json!({}),
+                            "crawl".to_string(),
                         );
                         let _ = doc_repo.save(&doc);
                     }

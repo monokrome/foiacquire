@@ -62,7 +62,7 @@ fn mime_type_condition(category: &str) -> Option<String> {
 }
 
 /// Current storage format version. Increment when changing file naming scheme.
-const STORAGE_FORMAT_VERSION: i32 = 7;
+const STORAGE_FORMAT_VERSION: i32 = 12;
 
 /// Partial document data loaded from a row, before versions are attached.
 /// Used internally by bulk-load methods to avoid N+1 queries.
@@ -78,6 +78,7 @@ struct DocumentPartial {
     metadata: serde_json::Value,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+    discovery_method: String,
 }
 
 impl DocumentPartial {
@@ -95,6 +96,7 @@ impl DocumentPartial {
             metadata: self.metadata,
             created_at: self.created_at,
             updated_at: self.updated_at,
+            discovery_method: self.discovery_method,
         }
     }
 }
@@ -190,7 +192,13 @@ impl DocumentRepository {
                 status TEXT NOT NULL,
                 metadata TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                estimated_date TEXT,
+                date_confidence TEXT,
+                date_source TEXT,
+                manual_date TEXT,
+                discovery_method TEXT NOT NULL DEFAULT 'import',
+                category_id TEXT REFERENCES file_categories(id)
             );
 
             CREATE TABLE IF NOT EXISTS document_versions (
@@ -257,6 +265,10 @@ impl DocumentRepository {
                 ON document_versions(document_id);
             CREATE INDEX IF NOT EXISTS idx_versions_hash
                 ON document_versions(content_hash);
+            CREATE INDEX IF NOT EXISTS idx_versions_mime_type
+                ON document_versions(mime_type);
+            CREATE INDEX IF NOT EXISTS idx_documents_updated_at
+                ON documents(updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_virtual_files_document
                 ON virtual_files(document_id);
             CREATE INDEX IF NOT EXISTS idx_virtual_files_version
@@ -269,6 +281,100 @@ impl DocumentRepository {
                 ON document_pages(version_id);
             CREATE INDEX IF NOT EXISTS idx_document_pages_ocr_status
                 ON document_pages(ocr_status);
+
+            -- Composite indexes for common query patterns
+            -- Browse queries filtered by source with sorting
+            CREATE INDEX IF NOT EXISTS idx_documents_source_updated
+                ON documents(source_id, updated_at DESC);
+
+            -- OCR queries filter by source + status
+            CREATE INDEX IF NOT EXISTS idx_documents_source_status
+                ON documents(source_id, status);
+
+            -- Summarization queries check synopsis IS NULL
+            CREATE INDEX IF NOT EXISTS idx_documents_synopsis_null
+                ON documents(source_id) WHERE synopsis IS NULL;
+
+            -- Version lookups with mime_type filter (JOIN optimization)
+            CREATE INDEX IF NOT EXISTS idx_versions_doc_mime
+                ON document_versions(document_id, mime_type);
+
+            -- Page lookups for specific document+version
+            CREATE INDEX IF NOT EXISTS idx_pages_doc_version
+                ON document_pages(document_id, version_id);
+
+            -- Pages with OCR text (for summarization queries)
+            CREATE INDEX IF NOT EXISTS idx_pages_with_text
+                ON document_pages(document_id) WHERE final_text IS NOT NULL;
+
+            -- Date-based filtering
+            CREATE INDEX IF NOT EXISTS idx_documents_estimated_date
+                ON documents(estimated_date) WHERE estimated_date IS NOT NULL;
+
+            -- Documents with tags (for tag stats - only ~0.3% of docs have tags)
+            CREATE INDEX IF NOT EXISTS idx_documents_with_tags
+                ON documents(id) WHERE tags IS NOT NULL AND tags != '[]';
+
+            -- NOTE: Category indexes and triggers are created by migration v12
+            -- (init_schema runs before migrations, so category_id may not exist yet)
+
+            CREATE TABLE IF NOT EXISTS document_annotations (
+                document_id TEXT NOT NULL,
+                annotation_type TEXT NOT NULL,
+                completed_at TEXT,
+                version INTEGER NOT NULL DEFAULT 1,
+                result TEXT,
+                error TEXT,
+                PRIMARY KEY (document_id, annotation_type),
+                FOREIGN KEY (document_id) REFERENCES documents(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_annotations_type
+                ON document_annotations(annotation_type);
+            CREATE INDEX IF NOT EXISTS idx_annotations_completed
+                ON document_annotations(completed_at);
+
+            CREATE TABLE IF NOT EXISTS page_ocr_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                page_id INTEGER NOT NULL,
+                backend TEXT NOT NULL,
+                ocr_text TEXT,
+                confidence REAL,
+                processing_time_ms INTEGER,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (page_id) REFERENCES document_pages(id),
+                UNIQUE(page_id, backend)
+            );
+            CREATE INDEX IF NOT EXISTS idx_page_ocr_results_page
+                ON page_ocr_results(page_id);
+            CREATE INDEX IF NOT EXISTS idx_page_ocr_results_backend
+                ON page_ocr_results(backend);
+
+            -- Document counts by source (maintained by triggers for O(1) lookups)
+            CREATE TABLE IF NOT EXISTS document_counts (
+                source_id TEXT PRIMARY KEY,
+                count INTEGER NOT NULL DEFAULT 0
+            );
+
+            -- Trigger to increment count on document INSERT
+            -- Note: INSERT OR REPLACE is DELETE + INSERT, so this works correctly
+            CREATE TRIGGER IF NOT EXISTS tr_documents_insert
+            AFTER INSERT ON documents
+            BEGIN
+                INSERT INTO document_counts (source_id, count)
+                VALUES (NEW.source_id, 1)
+                ON CONFLICT(source_id) DO UPDATE SET count = count + 1;
+            END;
+
+            -- Trigger to decrement count on document DELETE
+            CREATE TRIGGER IF NOT EXISTS tr_documents_delete
+            AFTER DELETE ON documents
+            BEGIN
+                UPDATE document_counts SET count = count - 1
+                WHERE source_id = OLD.source_id;
+            END;
+
+            -- NOTE: file_categories table and triggers are created by migration v12
+            -- (init_schema runs before migrations, so category_id may not exist yet)
         "#,
         )?;
         Ok(())
@@ -416,6 +522,264 @@ impl DocumentRepository {
             info!("Added page_count column to document_versions");
         }
 
+        // Add date estimation and annotations for version 8
+        if current_version < 8 {
+            // Add estimated date columns to documents
+            let _ = conn.execute(
+                "ALTER TABLE documents ADD COLUMN estimated_date TEXT",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE documents ADD COLUMN date_confidence TEXT",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE documents ADD COLUMN date_source TEXT",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE documents ADD COLUMN manual_date TEXT",
+                [],
+            );
+            info!("Added date estimation columns to documents");
+
+            // Create document_annotations table
+            conn.execute_batch(
+                r#"
+                CREATE TABLE IF NOT EXISTS document_annotations (
+                    document_id TEXT NOT NULL,
+                    annotation_type TEXT NOT NULL,
+                    completed_at TEXT,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    result TEXT,
+                    error TEXT,
+                    PRIMARY KEY (document_id, annotation_type),
+                    FOREIGN KEY (document_id) REFERENCES documents(id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_annotations_type
+                    ON document_annotations(annotation_type);
+                CREATE INDEX IF NOT EXISTS idx_annotations_completed
+                    ON document_annotations(completed_at);
+            "#,
+            )?;
+            info!("Added document_annotations table");
+        }
+
+        // Add page_ocr_results table for version 9 (alternative OCR backends)
+        if current_version < 9 {
+            conn.execute_batch(
+                r#"
+                CREATE TABLE IF NOT EXISTS page_ocr_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    page_id INTEGER NOT NULL,
+                    backend TEXT NOT NULL,
+                    ocr_text TEXT,
+                    confidence REAL,
+                    processing_time_ms INTEGER,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (page_id) REFERENCES document_pages(id),
+                    UNIQUE(page_id, backend)
+                );
+                CREATE INDEX IF NOT EXISTS idx_page_ocr_results_page
+                    ON page_ocr_results(page_id);
+                CREATE INDEX IF NOT EXISTS idx_page_ocr_results_backend
+                    ON page_ocr_results(backend);
+            "#,
+            )?;
+            info!("Added page_ocr_results table for alternative OCR backends");
+        }
+
+        // Add discovery_method column for version 10 (tracking document provenance)
+        if current_version < 10 {
+            conn.execute_batch(
+                r#"
+                ALTER TABLE documents ADD COLUMN discovery_method TEXT NOT NULL DEFAULT 'import';
+            "#,
+            )?;
+            info!("Added discovery_method column to documents table");
+        }
+
+        // Add document_counts table with triggers for version 11 (O(1) count lookups)
+        if current_version < 11 {
+            conn.execute_batch(
+                r#"
+                -- Create counts table
+                CREATE TABLE IF NOT EXISTS document_counts (
+                    source_id TEXT PRIMARY KEY,
+                    count INTEGER NOT NULL DEFAULT 0
+                );
+
+                -- Populate initial counts from existing documents
+                INSERT OR REPLACE INTO document_counts (source_id, count)
+                SELECT source_id, COUNT(*) FROM documents GROUP BY source_id;
+
+                -- Create triggers (DROP first in case schema changed)
+                DROP TRIGGER IF EXISTS tr_documents_insert;
+                DROP TRIGGER IF EXISTS tr_documents_delete;
+
+                CREATE TRIGGER tr_documents_insert
+                AFTER INSERT ON documents
+                BEGIN
+                    INSERT INTO document_counts (source_id, count)
+                    VALUES (NEW.source_id, 1)
+                    ON CONFLICT(source_id) DO UPDATE SET count = count + 1;
+                END;
+
+                CREATE TRIGGER tr_documents_delete
+                AFTER DELETE ON documents
+                BEGIN
+                    UPDATE document_counts SET count = count - 1
+                    WHERE source_id = OLD.source_id;
+                END;
+            "#,
+            )?;
+            info!("Added document_counts table with triggers for O(1) count lookups");
+        }
+
+        // Add file_categories table and category_id column for version 12
+        if current_version < 12 {
+            // Add category_id column to documents
+            let _ = conn.execute(
+                "ALTER TABLE documents ADD COLUMN category_id TEXT REFERENCES file_categories(id)",
+                [],
+            );
+
+            // Create file_categories table
+            conn.execute_batch(
+                r#"
+                CREATE TABLE IF NOT EXISTS file_categories (
+                    id TEXT PRIMARY KEY,
+                    description TEXT,
+                    doc_count INTEGER NOT NULL DEFAULT 0
+                );
+
+                -- Pre-populate categories
+                INSERT OR IGNORE INTO file_categories (id, description, doc_count) VALUES
+                    ('documents', 'PDF, Word, text, and email documents', 0),
+                    ('images', 'Image files (PNG, JPG, GIF, etc.)', 0),
+                    ('data', 'Spreadsheets, CSV, JSON, and XML files', 0),
+                    ('archives', 'ZIP, TAR, and other archive files', 0),
+                    ('other', 'Other file types', 0);
+
+                -- Create indexes for category filtering
+                CREATE INDEX IF NOT EXISTS idx_documents_category
+                    ON documents(category_id) WHERE category_id IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_documents_category_updated
+                    ON documents(category_id, updated_at DESC) WHERE category_id IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_documents_category_source_updated
+                    ON documents(category_id, source_id, updated_at DESC) WHERE category_id IS NOT NULL;
+
+                -- Triggers to maintain file_categories.doc_count
+                DROP TRIGGER IF EXISTS tr_category_count_insert;
+                DROP TRIGGER IF EXISTS tr_category_count_delete;
+                DROP TRIGGER IF EXISTS tr_category_count_update;
+
+                CREATE TRIGGER tr_category_count_insert
+                AFTER INSERT ON documents
+                WHEN NEW.category_id IS NOT NULL
+                BEGIN
+                    UPDATE file_categories SET doc_count = doc_count + 1
+                    WHERE id = NEW.category_id;
+                END;
+
+                CREATE TRIGGER tr_category_count_delete
+                AFTER DELETE ON documents
+                WHEN OLD.category_id IS NOT NULL
+                BEGIN
+                    UPDATE file_categories SET doc_count = doc_count - 1
+                    WHERE id = OLD.category_id;
+                END;
+
+                CREATE TRIGGER tr_category_count_update
+                AFTER UPDATE OF category_id ON documents
+                WHEN OLD.category_id IS NOT NEW.category_id
+                BEGIN
+                    UPDATE file_categories SET doc_count = doc_count - 1
+                    WHERE id = OLD.category_id AND OLD.category_id IS NOT NULL;
+                    UPDATE file_categories SET doc_count = doc_count + 1
+                    WHERE id = NEW.category_id AND NEW.category_id IS NOT NULL;
+                END;
+            "#,
+            )?;
+
+            // Backfill category_id based on existing document_versions mime_type
+            // Uses the same logic as mime_type_condition but maps to category IDs
+            info!("Backfilling category_id for existing documents...");
+            conn.execute_batch(
+                r#"
+                -- Disable triggers temporarily for backfill (we'll compute counts at the end)
+                DROP TRIGGER IF EXISTS tr_category_count_insert;
+                DROP TRIGGER IF EXISTS tr_category_count_delete;
+                DROP TRIGGER IF EXISTS tr_category_count_update;
+
+                -- Set category_id based on first version's mime_type
+                UPDATE documents SET category_id = (
+                    SELECT CASE
+                        WHEN dv.mime_type = 'application/pdf' THEN 'documents'
+                        WHEN dv.mime_type LIKE '%word%' THEN 'documents'
+                        WHEN dv.mime_type = 'application/msword' THEN 'documents'
+                        WHEN dv.mime_type LIKE '%rfc822%' THEN 'documents'
+                        WHEN dv.mime_type LIKE 'message/%' THEN 'documents'
+                        WHEN dv.mime_type LIKE 'text/%' AND dv.mime_type != 'text/csv' THEN 'documents'
+                        WHEN dv.mime_type LIKE 'image/%' THEN 'images'
+                        WHEN dv.mime_type LIKE '%spreadsheet%' THEN 'data'
+                        WHEN dv.mime_type LIKE '%excel%' THEN 'data'
+                        WHEN dv.mime_type = 'application/vnd.ms-excel' THEN 'data'
+                        WHEN dv.mime_type = 'text/csv' THEN 'data'
+                        WHEN dv.mime_type = 'application/json' THEN 'data'
+                        WHEN dv.mime_type = 'application/xml' THEN 'data'
+                        WHEN dv.mime_type LIKE '%zip%' THEN 'archives'
+                        WHEN dv.mime_type LIKE '%tar%' THEN 'archives'
+                        WHEN dv.mime_type LIKE '%gzip%' THEN 'archives'
+                        WHEN dv.mime_type LIKE '%compress%' THEN 'archives'
+                        WHEN dv.mime_type = 'application/x-7z-compressed' THEN 'archives'
+                        WHEN dv.mime_type = 'application/x-rar-compressed' THEN 'archives'
+                        ELSE 'other'
+                    END
+                    FROM document_versions dv
+                    WHERE dv.document_id = documents.id
+                    ORDER BY dv.acquired_at ASC
+                    LIMIT 1
+                )
+                WHERE category_id IS NULL;
+
+                -- Compute counts from actual data
+                UPDATE file_categories SET doc_count = (
+                    SELECT COUNT(*) FROM documents WHERE category_id = file_categories.id
+                );
+
+                -- Re-create triggers
+                CREATE TRIGGER tr_category_count_insert
+                AFTER INSERT ON documents
+                WHEN NEW.category_id IS NOT NULL
+                BEGIN
+                    UPDATE file_categories SET doc_count = doc_count + 1
+                    WHERE id = NEW.category_id;
+                END;
+
+                CREATE TRIGGER tr_category_count_delete
+                AFTER DELETE ON documents
+                WHEN OLD.category_id IS NOT NULL
+                BEGIN
+                    UPDATE file_categories SET doc_count = doc_count - 1
+                    WHERE id = OLD.category_id;
+                END;
+
+                CREATE TRIGGER tr_category_count_update
+                AFTER UPDATE OF category_id ON documents
+                WHEN OLD.category_id IS NOT NEW.category_id
+                BEGIN
+                    UPDATE file_categories SET doc_count = doc_count - 1
+                    WHERE id = OLD.category_id AND OLD.category_id IS NOT NULL;
+                    UPDATE file_categories SET doc_count = doc_count + 1
+                    WHERE id = NEW.category_id AND NEW.category_id IS NOT NULL;
+                END;
+            "#,
+            )?;
+
+            info!("Added file_categories table and backfilled category_id for all documents");
+        }
+
         // Get all versions that need migration
         let mut stmt = conn.prepare(
             "SELECT dv.id, dv.content_hash, dv.file_path, dv.mime_type, dv.source_url, d.title
@@ -553,6 +917,39 @@ impl DocumentRepository {
             .optional()?;
 
         Ok(doc)
+    }
+
+    /// Get just the source URLs for a source (lightweight, for URL analysis).
+    pub fn get_urls_by_source(&self, source_id: &str) -> Result<Vec<String>> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare("SELECT source_url FROM documents WHERE source_id = ?")?;
+        let urls = stmt
+            .query_map(params![source_id], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<String>, _>>()?;
+        Ok(urls)
+    }
+
+    /// Get all source URLs as a HashSet for fast duplicate detection during import.
+    /// This is much faster than checking each URL individually against the database.
+    pub fn get_all_urls_set(&self) -> Result<std::collections::HashSet<String>> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare("SELECT source_url FROM documents")?;
+        let urls = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(urls)
+    }
+
+    /// Get all content hashes as a HashSet for fast content deduplication during import.
+    pub fn get_all_content_hashes(&self) -> Result<std::collections::HashSet<String>> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare("SELECT DISTINCT content_hash FROM document_versions")?;
+        let hashes = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(hashes)
     }
 
     /// Get all documents from a source.
@@ -768,8 +1165,8 @@ impl DocumentRepository {
 
             conn.execute(
                 r#"
-                INSERT INTO documents (id, source_id, title, source_url, extracted_text, synopsis, tags, status, metadata, created_at, updated_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                INSERT INTO documents (id, source_id, title, source_url, extracted_text, synopsis, tags, status, metadata, created_at, updated_at, discovery_method)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                 ON CONFLICT(id) DO UPDATE SET
                     title = excluded.title,
                     source_url = excluded.source_url,
@@ -792,6 +1189,7 @@ impl DocumentRepository {
                     serde_json::to_string(&doc.metadata)?,
                     doc.created_at.to_rfc3339(),
                     doc.updated_at.to_rfc3339(),
+                    doc.discovery_method,
                 ],
             )?;
 
@@ -865,30 +1263,38 @@ impl DocumentRepository {
         Ok(count > 0)
     }
 
-    /// Count total documents.
+    /// Count total documents in O(1) time.
+    /// Uses the trigger-maintained document_counts table.
     pub fn count(&self) -> Result<u64> {
         let conn = self.connect()?;
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))?;
-        Ok(count as u64)
-    }
-
-    /// Count documents for a specific source.
-    pub fn count_by_source(&self, source_id: &str) -> Result<u64> {
-        let conn = self.connect()?;
         let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM documents WHERE source_id = ?",
-            params![source_id],
+            "SELECT COALESCE(SUM(count), 0) FROM document_counts",
+            [],
             |row| row.get(0),
         )?;
         Ok(count as u64)
     }
 
-    /// Get document counts for all sources in a single query.
+    /// Count documents for a specific source in O(1) time.
+    /// Uses the trigger-maintained document_counts table.
+    pub fn count_by_source(&self, source_id: &str) -> Result<u64> {
+        let conn = self.connect()?;
+        let count: i64 = conn
+            .query_row(
+                "SELECT COALESCE(count, 0) FROM document_counts WHERE source_id = ?",
+                params![source_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        Ok(count as u64)
+    }
+
+    /// Get document counts for all sources in O(1) time.
+    /// Uses the trigger-maintained document_counts table.
     /// Returns a HashMap of source_id -> count.
     pub fn get_all_source_counts(&self) -> Result<std::collections::HashMap<String, u64>> {
         let conn = self.connect()?;
-        let mut stmt =
-            conn.prepare("SELECT source_id, COUNT(*) as cnt FROM documents GROUP BY source_id")?;
+        let mut stmt = conn.prepare("SELECT source_id, count FROM document_counts")?;
 
         let mut counts = std::collections::HashMap::new();
         let rows = stmt.query_map([], |row| {
@@ -1147,28 +1553,29 @@ impl DocumentRepository {
     }
 
     /// Get all unique tags across all documents.
+    /// Optimized: uses SQLite json_each function instead of parsing in Rust.
     pub fn get_all_tags(&self) -> Result<Vec<(String, usize)>> {
         let conn = self.connect()?;
 
-        let mut stmt =
-            conn.prepare("SELECT tags FROM documents WHERE tags IS NOT NULL AND tags != '[]'")?;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        // Use SQLite's json_each to expand tags array and count in SQL
+        // This is much faster than loading all rows and parsing JSON in Rust
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT LOWER(json_each.value) as tag, COUNT(*) as cnt
+            FROM documents, json_each(tags)
+            WHERE tags IS NOT NULL AND tags != '[]'
+            GROUP BY LOWER(json_each.value)
+            ORDER BY cnt DESC
+            "#,
+        )?;
 
-        let mut tag_counts: std::collections::HashMap<String, usize> =
-            std::collections::HashMap::new();
+        let tags = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
 
-        for tags_json in rows.flatten() {
-            if let Ok(tags) = serde_json::from_str::<Vec<String>>(&tags_json) {
-                for tag in tags {
-                    *tag_counts.entry(tag.to_lowercase()).or_insert(0) += 1;
-                }
-            }
-        }
-
-        let mut tag_vec: Vec<_> = tag_counts.into_iter().collect();
-        tag_vec.sort_by(|a, b| b.1.cmp(&a.1)); // Sort by count descending
-
-        Ok(tag_vec)
+        Ok(tags)
     }
 
     /// Get the documents directory.
@@ -1207,18 +1614,62 @@ impl DocumentRepository {
         }
     }
 
-    /// Get document type statistics.
+    /// Get category statistics from file_categories table.
+    /// O(1) lookup using pre-computed counts maintained by triggers.
+    /// Returns (category_id, doc_count) pairs.
+    pub fn get_category_stats(&self, source_id: Option<&str>) -> Result<Vec<(String, u64)>> {
+        let conn = self.connect()?;
+
+        if let Some(sid) = source_id {
+            // Source-filtered: count from documents table
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT category_id, COUNT(*) as count
+                FROM documents
+                WHERE source_id = ? AND category_id IS NOT NULL
+                GROUP BY category_id
+                ORDER BY count DESC
+            "#,
+            )?;
+            let stats = stmt
+                .query_map(params![sid], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(stats)
+        } else {
+            // Global stats: read directly from file_categories (instant)
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT id, doc_count
+                FROM file_categories
+                WHERE doc_count > 0
+                ORDER BY doc_count DESC
+            "#,
+            )?;
+            let stats = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(stats)
+        }
+    }
+
+    /// Get document type statistics (raw MIME types).
+    /// NOTE: For category-based stats, use get_category_stats() which is faster.
+    /// This method is kept for detailed MIME type analysis.
     pub fn get_type_stats(&self, source_id: Option<&str>) -> Result<Vec<(String, u64)>> {
         let conn = self.connect()?;
 
         if let Some(sid) = source_id {
+            // Source-filtered: must join to documents table
             let mut stmt = conn.prepare(
                 r#"
-                SELECT dv.mime_type, COUNT(*) as count
-                FROM documents d
-                JOIN document_versions dv ON d.id = dv.document_id
+                SELECT dv.mime_type, COUNT(DISTINCT dv.document_id) as count
+                FROM document_versions dv
+                JOIN documents d ON dv.document_id = d.id
                 WHERE d.source_id = ?
-                AND dv.id = (SELECT MAX(id) FROM document_versions WHERE document_id = d.id)
                 GROUP BY dv.mime_type
                 ORDER BY count DESC
             "#,
@@ -1230,13 +1681,12 @@ impl DocumentRepository {
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             Ok(stats)
         } else {
+            // Global stats: no join needed, much faster
             let mut stmt = conn.prepare(
                 r#"
-                SELECT dv.mime_type, COUNT(*) as count
-                FROM documents d
-                JOIN document_versions dv ON d.id = dv.document_id
-                WHERE dv.id = (SELECT MAX(id) FROM document_versions WHERE document_id = d.id)
-                GROUP BY dv.mime_type
+                SELECT mime_type, COUNT(DISTINCT document_id) as count
+                FROM document_versions
+                GROUP BY mime_type
                 ORDER BY count DESC
             "#,
             )?;
@@ -1346,159 +1796,145 @@ impl DocumentRepository {
         }
     }
 
-    /// Get documents with combined filters using cursor-based pagination.
+    /// Get documents with combined filters using offset-based pagination.
     ///
-    /// Optimized to use a single query that returns documents directly with
-    /// pagination info, avoiding multiple expensive window function queries.
+    /// Optimized query that filters documents first, then joins versions.
+    /// Uses OFFSET for pagination which works well with our indexes.
+    ///
+    /// If `cached_total` is provided, it will be used instead of computing the count.
+    /// This allows the caller to provide a cached count for better performance.
     pub fn browse(
         &self,
         types: &[String],
         tags: &[String],
         source_id: Option<&str>,
         query: Option<&str>,
-        cursor: Option<&str>,
+        page: usize,
         limit: usize,
+        cached_total: Option<u64>,
     ) -> Result<BrowseResult> {
         let conn = self.connect()?;
         let limit = limit.clamp(1, 200);
+        let page = page.max(1);
+        let offset = (page - 1) * limit;
 
         // Build filter conditions
-        let conditions = self.build_browse_conditions(types, source_id, tags, query);
+        let doc_conditions = self.build_browse_conditions(types, source_id, tags, query);
+        let type_condition = self.build_type_conditions(types);
 
-        // Single optimized query that:
-        // 1. Gets document data directly (no second fetch needed)
-        // 2. Calculates position and total
-        // 3. Gets prev/next cursors using FIRST_VALUE window functions
-        // This replaces 3 separate window function queries + N get() calls
-        let sql = format!(
-            r#"WITH filtered AS (
-                SELECT
-                    d.*,
-                    dv.mime_type,
-                    dv.file_size,
-                    dv.file_path,
+        // Optimized query using CTE to filter documents first, then join versions.
+        // Note: We skip the MAX(id) subquery for version selection because 99.99%
+        // of documents have only one version. For rare multi-version docs, we'll
+        // get any version which is acceptable for browse listings.
+        let sql = if let Some(type_cond) = type_condition {
+            // With type filter: use index hint to force source_updated index scan
+            // This is faster than letting SQLite choose version-first scan
+            format!(
+                r#"SELECT
+                    d.id, d.source_id, d.source_url, d.title, d.synopsis, d.tags,
+                    d.extracted_text, d.created_at, d.updated_at, d.status,
+                    dv.mime_type, dv.file_size, dv.file_path,
                     dv.acquired_at as version_acquired_at,
-                    dv.original_filename,
-                    dv.server_date,
-                    dv.content_hash,
-                    ROW_NUMBER() OVER (ORDER BY d.updated_at DESC, d.id ASC) as row_num
-                FROM documents d
+                    dv.original_filename, dv.server_date, dv.content_hash,
+                    d.discovery_method
+                FROM documents d INDEXED BY idx_documents_source_updated
                 JOIN document_versions dv ON d.id = dv.document_id
-                WHERE {}
-            ),
-            total_count AS (SELECT COUNT(*) as cnt FROM filtered),
-            cursor_pos AS (
-                SELECT COALESCE(
-                    (SELECT row_num FROM filtered WHERE id = ?),
-                    1
-                ) as start_row
+                WHERE {} AND {}
+                ORDER BY d.updated_at DESC
+                LIMIT ? OFFSET ?"#,
+                doc_conditions.join(" AND "),
+                type_cond
             )
-            SELECT
-                f.id, f.source_id, f.source_url, f.title, f.synopsis, f.tags,
-                f.extracted_text, f.created_at, f.updated_at, f.status,
-                f.mime_type, f.file_size, f.file_path, f.version_acquired_at,
-                f.original_filename, f.server_date, f.content_hash,
-                f.row_num,
-                tc.cnt as total,
-                cp.start_row
-            FROM filtered f, total_count tc, cursor_pos cp
-            WHERE f.row_num >= cp.start_row AND f.row_num < cp.start_row + ?
-            ORDER BY f.row_num"#,
-            conditions.join(" AND ")
-        );
+        } else {
+            // No type filter: use CTE for better performance
+            format!(
+                r#"WITH filtered_docs AS (
+                    SELECT id FROM documents d
+                    WHERE {}
+                    ORDER BY updated_at DESC
+                    LIMIT ? OFFSET ?
+                )
+                SELECT
+                    d.id, d.source_id, d.source_url, d.title, d.synopsis, d.tags,
+                    d.extracted_text, d.created_at, d.updated_at, d.status,
+                    dv.mime_type, dv.file_size, dv.file_path,
+                    dv.acquired_at as version_acquired_at,
+                    dv.original_filename, dv.server_date, dv.content_hash,
+                    d.discovery_method
+                FROM filtered_docs fd
+                JOIN documents d ON fd.id = d.id
+                JOIN document_versions dv ON d.id = dv.document_id"#,
+                doc_conditions.join(" AND ")
+            )
+        };
 
-        // Build params
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         self.add_browse_params(&mut params_vec, source_id, tags, query);
-        params_vec.push(Box::new(cursor.unwrap_or("").to_string()));
-        params_vec.push(Box::new((limit + 1) as i64));
+        params_vec.push(Box::new((limit + 1) as i64)); // Fetch one extra to detect next page
+        params_vec.push(Box::new(offset as i64));
 
         let params_refs: Vec<&dyn rusqlite::ToSql> =
             params_vec.iter().map(|p| p.as_ref()).collect();
         let mut stmt = conn.prepare(&sql)?;
 
-        // Parse results directly into documents
-        let mut documents = Vec::with_capacity(limit);
-        let mut total: u64 = 0;
-        let mut start_position: u64 = 0;
-        let mut last_row_num: i64 = 0;
-
+        let mut documents = Vec::with_capacity(limit + 1);
         let mut rows = stmt.query(params_refs.as_slice())?;
         while let Some(row) = rows.next()? {
-            let row_num: i64 = row.get(17)?;
-            total = row.get::<_, i64>(18)? as u64;
-            let start_row: i64 = row.get(19)?;
+            let tags_json: Option<String> = row.get(5)?;
+            let tags: Vec<String> = tags_json
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default();
+            let file_path: String = row.get(12)?;
+            let status_str: String = row.get(9)?;
 
-            if start_position == 0 {
-                start_position = start_row as u64;
-            }
-            last_row_num = row_num;
-
-            // Only take up to limit (we fetch limit+1 to check for next page)
-            if documents.len() < limit {
-                let tags_json: String = row.get(5)?;
-                let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-
-                let file_path: String = row.get(12)?;
-                let status_str: String = row.get(9)?;
-
-                let doc = Document {
-                    id: row.get(0)?,
-                    source_id: row.get(1)?,
-                    source_url: row.get(2)?,
-                    title: row.get(3)?,
-                    synopsis: row.get(4)?,
-                    tags,
-                    extracted_text: row.get(6)?,
-                    created_at: parse_datetime(&row.get::<_, String>(7)?),
-                    updated_at: parse_datetime(&row.get::<_, String>(8)?),
-                    status: DocumentStatus::from_str(&status_str)
-                        .unwrap_or(DocumentStatus::Pending),
-                    metadata: serde_json::Value::Null,
-                    versions: vec![crate::models::DocumentVersion {
-                        id: 0, // Not needed for display
-                        content_hash: row.get(16)?,
-                        file_path: std::path::PathBuf::from(file_path),
-                        file_size: row.get::<_, i64>(11)? as u64,
-                        mime_type: row.get(10)?,
-                        acquired_at: parse_datetime(&row.get::<_, String>(13)?),
-                        source_url: None,
-                        original_filename: row.get(14)?,
-                        server_date: row
-                            .get::<_, Option<String>>(15)?
-                            .map(|s| parse_datetime(&s)),
-                        page_count: None,
-                    }],
-                };
-                documents.push(doc);
-            }
+            documents.push(Document {
+                id: row.get(0)?,
+                source_id: row.get(1)?,
+                source_url: row.get(2)?,
+                title: row.get(3)?,
+                synopsis: row.get(4)?,
+                tags,
+                extracted_text: row.get(6)?,
+                created_at: parse_datetime(&row.get::<_, String>(7)?),
+                updated_at: parse_datetime(&row.get::<_, String>(8)?),
+                status: DocumentStatus::from_str(&status_str).unwrap_or(DocumentStatus::Pending),
+                metadata: serde_json::Value::Null,
+                versions: vec![crate::models::DocumentVersion {
+                    id: 0,
+                    content_hash: row.get(16)?,
+                    file_path: std::path::PathBuf::from(file_path),
+                    file_size: row.get::<_, i64>(11)? as u64,
+                    mime_type: row.get(10)?,
+                    acquired_at: parse_datetime(&row.get::<_, String>(13)?),
+                    source_url: None,
+                    original_filename: row.get(14)?,
+                    server_date: row.get::<_, Option<String>>(15)?.map(|s| parse_datetime(&s)),
+                    page_count: None,
+                }],
+                discovery_method: row.get(17)?,
+            });
         }
 
-        let has_next = last_row_num >= start_position as i64 + limit as i64;
+        // Check if there's a next page (we fetched limit+1)
+        let has_next = documents.len() > limit;
+        if has_next {
+            documents.pop(); // Remove the extra document
+        }
 
-        // Calculate cursors from position info (no extra queries needed)
-        let prev_cursor = if start_position > 1 {
-            // Get first doc of prev page - it's at position (start_position - limit)
-            let prev_pos = (start_position as i64 - limit as i64).max(1);
-            self.get_doc_id_at_position(&conn, &conditions, source_id, tags, query, prev_pos)?
+        // Get total count for pagination info (use cached if provided)
+        let total = match cached_total {
+            Some(count) => count,
+            None => self.browse_count(types, tags, source_id, query)?,
+        };
+
+        let start_position = offset as u64 + 1;
+        let prev_cursor = if page > 1 {
+            Some((page - 1).to_string())
         } else {
             None
         };
-
         let next_cursor = if has_next {
-            // Next cursor is the doc right after our page
-            documents.last().and_then(|_| {
-                self.get_doc_id_at_position(
-                    &conn,
-                    &conditions,
-                    source_id,
-                    tags,
-                    query,
-                    start_position as i64 + limit as i64,
-                )
-                .ok()
-                .flatten()
-            })
+            Some((page + 1).to_string())
         } else {
             None
         };
@@ -1544,6 +1980,7 @@ impl DocumentRepository {
     }
 
     /// Build filter conditions for browse queries.
+    /// Uses category_id for type filtering (no version join needed).
     fn build_browse_conditions(
         &self,
         types: &[String],
@@ -1551,24 +1988,43 @@ impl DocumentRepository {
         tags: &[String],
         query: Option<&str>,
     ) -> Vec<String> {
-        let mut conditions: Vec<String> = vec![
-            "dv.id = (SELECT MAX(id) FROM document_versions WHERE document_id = d.id)".to_string(),
-        ];
-
-        // Type filter
-        if !types.is_empty() {
-            let type_conditions: Vec<String> = types
-                .iter()
-                .filter_map(|t| mime_type_condition(t))
-                .collect();
-
-            if !type_conditions.is_empty() {
-                conditions.push(format!("({})", type_conditions.join(" OR ")));
-            }
-        }
+        let mut conditions: Vec<String> = vec!["1=1".to_string()];
 
         if source_id.is_some() {
             conditions.push("d.source_id = ?".to_string());
+        }
+
+        // Type filtering via category_id (denormalized, no JOIN needed)
+        if !types.is_empty() {
+            let valid_categories: Vec<&str> = types
+                .iter()
+                .filter_map(|t| match t.to_lowercase().as_str() {
+                    "documents" | "pdf" | "text" | "email" => Some("documents"),
+                    "images" => Some("images"),
+                    "data" => Some("data"),
+                    "archives" => Some("archives"),
+                    "other" => Some("other"),
+                    _ => None,
+                })
+                .collect();
+
+            if !valid_categories.is_empty() {
+                // Deduplicate categories
+                let mut unique_cats: Vec<&str> = valid_categories.clone();
+                unique_cats.sort();
+                unique_cats.dedup();
+
+                if unique_cats.len() == 1 {
+                    conditions.push(format!("d.category_id = '{}'", unique_cats[0]));
+                } else {
+                    let in_list = unique_cats
+                        .iter()
+                        .map(|c| format!("'{}'", c))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    conditions.push(format!("d.category_id IN ({})", in_list));
+                }
+            }
         }
 
         for _ in tags.iter() {
@@ -1580,6 +2036,15 @@ impl DocumentRepository {
         }
 
         conditions
+    }
+
+    /// Build type filter conditions for document versions.
+    /// NOTE: Deprecated - type filtering now uses category_id in build_browse_conditions.
+    /// Kept for backward compatibility but always returns None.
+    fn build_type_conditions(&self, _types: &[String]) -> Option<String> {
+        // Type filtering is now handled via category_id in build_browse_conditions
+        // No longer need JOIN to document_versions for type filtering
+        None
     }
 
     /// Add browse filter parameters to a params vector.
@@ -1607,6 +2072,7 @@ impl DocumentRepository {
     }
 
     /// Count documents matching the browse filters (for pagination).
+    /// Optimized: skips version join when no type filter is specified.
     pub fn browse_count(
         &self,
         types: &[String],
@@ -1616,60 +2082,31 @@ impl DocumentRepository {
     ) -> Result<u64> {
         let conn = self.connect()?;
 
-        let mut conditions: Vec<String> = vec![
-            "dv.id = (SELECT MAX(id) FROM document_versions WHERE document_id = d.id)".to_string(),
-        ];
+        let type_condition = self.build_type_conditions(types);
+        let doc_conditions = self.build_browse_conditions(types, source_id, tags, query);
 
-        // Type filter (same logic as browse)
-        if !types.is_empty() {
-            let type_conditions: Vec<String> = types
-                .iter()
-                .filter_map(|t| mime_type_condition(t))
-                .collect();
+        // Build params
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        self.add_browse_params(&mut params_vec, source_id, tags, query);
 
-            if !type_conditions.is_empty() {
-                conditions.push(format!("({})", type_conditions.join(" OR ")));
-            }
-        }
-
-        if source_id.is_some() {
-            conditions.push("d.source_id = ?".to_string());
-        }
-
-        for _ in tags.iter() {
-            conditions.push("LOWER(d.tags) LIKE ?".to_string());
-        }
-
-        if query.is_some() {
-            conditions.push("(d.title LIKE ? OR d.synopsis LIKE ?)".to_string());
-        }
-
-        let sql = format!(
-            r#"SELECT COUNT(*) FROM documents d
-               JOIN document_versions dv ON d.id = dv.document_id
-               WHERE {}"#,
-            conditions.join(" AND ")
-        );
+        let sql = if let Some(type_cond) = type_condition {
+            // Need version join for type filtering - use optimized approach
+            format!(
+                r#"SELECT COUNT(DISTINCT d.id) FROM documents d
+                   JOIN document_versions dv ON d.id = dv.document_id
+                   WHERE {} AND {}"#,
+                doc_conditions.join(" AND "),
+                type_cond
+            )
+        } else {
+            // No type filter - count documents directly (much faster)
+            format!(
+                "SELECT COUNT(*) FROM documents d WHERE {}",
+                doc_conditions.join(" AND ")
+            )
+        };
 
         let mut stmt = conn.prepare(&sql)?;
-
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-
-        if let Some(sid) = source_id {
-            params_vec.push(Box::new(sid.to_string()));
-        }
-
-        for tag in tags {
-            let tag_pattern = format!("%\"{}%", tag.to_lowercase());
-            params_vec.push(Box::new(tag_pattern));
-        }
-
-        if let Some(q) = query {
-            let query_pattern = format!("%{}%", q);
-            params_vec.push(Box::new(query_pattern.clone()));
-            params_vec.push(Box::new(query_pattern));
-        }
-
         let params_refs: Vec<&dyn rusqlite::ToSql> =
             params_vec.iter().map(|p| p.as_ref()).collect();
         let count: i64 = stmt.query_row(params_refs.as_slice(), |row| row.get(0))?;
@@ -1911,6 +2348,7 @@ impl DocumentRepository {
             updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>("updated_at")?)
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now()),
+            discovery_method: row.get("discovery_method")?,
         })
     }
 
@@ -1952,6 +2390,7 @@ impl DocumentRepository {
             updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>("updated_at")?)
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now()),
+            discovery_method: row.get("discovery_method")?,
         })
     }
 
@@ -2684,6 +3123,320 @@ impl DocumentRepository {
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now()),
         })
+    }
+
+    // === Date estimation methods ===
+
+    /// Update estimated date for a document.
+    pub fn update_estimated_date(
+        &self,
+        document_id: &str,
+        estimated_date: DateTime<Utc>,
+        confidence: &str,
+        source: &str,
+    ) -> Result<()> {
+        let conn = self.connect()?;
+        conn.execute(
+            "UPDATE documents SET estimated_date = ?, date_confidence = ?, date_source = ?, updated_at = ? WHERE id = ?",
+            params![
+                estimated_date.to_rfc3339(),
+                confidence,
+                source,
+                Utc::now().to_rfc3339(),
+                document_id
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Set manual date override for a document.
+    pub fn set_manual_date(&self, document_id: &str, manual_date: DateTime<Utc>) -> Result<()> {
+        let conn = self.connect()?;
+        conn.execute(
+            "UPDATE documents SET manual_date = ?, updated_at = ? WHERE id = ?",
+            params![manual_date.to_rfc3339(), Utc::now().to_rfc3339(), document_id],
+        )?;
+        Ok(())
+    }
+
+    /// Get documents that need date estimation.
+    /// Returns documents where:
+    /// - estimated_date is NULL
+    /// - manual_date is NULL
+    /// - No "date_detection" annotation exists (hasn't been processed yet)
+    pub fn get_documents_needing_date_estimation(
+        &self,
+        source_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<(String, Option<String>, Option<DateTime<Utc>>, DateTime<Utc>, Option<String>)>> {
+        let conn = self.connect()?;
+
+        let base_query = r#"
+            SELECT d.id, dv.original_filename, dv.server_date, dv.acquired_at, d.source_url
+            FROM documents d
+            JOIN document_versions dv ON d.id = dv.document_id
+            WHERE d.estimated_date IS NULL
+              AND d.manual_date IS NULL
+              AND dv.id = (SELECT MAX(dv2.id) FROM document_versions dv2 WHERE dv2.document_id = d.id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM document_annotations da
+                  WHERE da.document_id = d.id AND da.annotation_type = 'date_detection'
+              )
+        "#;
+
+        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::ToSql>>) = match source_id {
+            Some(sid) => (
+                format!("{} AND d.source_id = ? LIMIT {}", base_query, limit),
+                vec![Box::new(sid.to_string()) as Box<dyn rusqlite::ToSql>],
+            ),
+            None => (format!("{} LIMIT {}", base_query, limit), vec![]),
+        };
+
+        let mut stmt = conn.prepare(&sql)?;
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let rows = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                let server_date: Option<DateTime<Utc>> = row
+                    .get::<_, Option<String>>("server_date")?
+                    .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+                    .map(|dt| dt.with_timezone(&Utc));
+
+                let acquired_at = DateTime::parse_from_rfc3339(&row.get::<_, String>("acquired_at")?)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now());
+
+                Ok((
+                    row.get::<_, String>("id")?,
+                    row.get::<_, Option<String>>("original_filename")?,
+                    server_date,
+                    acquired_at,
+                    row.get::<_, Option<String>>("source_url")?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        Ok(rows)
+    }
+
+    /// Count documents needing date estimation.
+    /// Must match criteria in get_documents_needing_date_estimation.
+    pub fn count_documents_needing_date_estimation(&self, source_id: Option<&str>) -> Result<u64> {
+        let conn = self.connect()?;
+
+        // Must match the criteria in get_documents_needing_date_estimation
+        // (including the JOIN to ensure we only count documents with versions)
+        let base_query = r#"
+            SELECT COUNT(*) FROM documents d
+            JOIN document_versions dv ON d.id = dv.document_id
+            WHERE d.estimated_date IS NULL
+              AND d.manual_date IS NULL
+              AND dv.id = (SELECT MAX(dv2.id) FROM document_versions dv2 WHERE dv2.document_id = d.id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM document_annotations da
+                  WHERE da.document_id = d.id AND da.annotation_type = 'date_detection'
+              )
+        "#;
+
+        let count: i64 = match source_id {
+            Some(sid) => conn.query_row(
+                &format!("{} AND d.source_id = ?", base_query),
+                params![sid],
+                |row| row.get(0),
+            )?,
+            None => conn.query_row(base_query, [], |row| row.get(0))?,
+        };
+
+        Ok(count as u64)
+    }
+
+    // === Annotation tracking methods ===
+
+    /// Record that an annotation was completed for a document.
+    pub fn record_annotation(
+        &self,
+        document_id: &str,
+        annotation_type: &str,
+        version: i32,
+        result: Option<&str>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.connect()?;
+        conn.execute(
+            r#"
+            INSERT INTO document_annotations (document_id, annotation_type, completed_at, version, result, error)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(document_id, annotation_type) DO UPDATE SET
+                completed_at = excluded.completed_at,
+                version = excluded.version,
+                result = excluded.result,
+                error = excluded.error
+            "#,
+            params![
+                document_id,
+                annotation_type,
+                Utc::now().to_rfc3339(),
+                version,
+                result,
+                error
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Check if a specific annotation type has been completed for a document.
+    pub fn has_annotation(&self, document_id: &str, annotation_type: &str) -> Result<bool> {
+        let conn = self.connect()?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM document_annotations WHERE document_id = ? AND annotation_type = ?",
+            params![document_id, annotation_type],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    /// Get documents missing a specific annotation type.
+    pub fn get_documents_missing_annotation(
+        &self,
+        annotation_type: &str,
+        source_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        let conn = self.connect()?;
+
+        let base_query = r#"
+            SELECT d.id FROM documents d
+            WHERE NOT EXISTS (
+                SELECT 1 FROM document_annotations da
+                WHERE da.document_id = d.id AND da.annotation_type = ?
+            )
+        "#;
+
+        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::ToSql>>) = match source_id {
+            Some(sid) => (
+                format!("{} AND d.source_id = ? LIMIT {}", base_query, limit),
+                vec![
+                    Box::new(annotation_type.to_string()) as Box<dyn rusqlite::ToSql>,
+                    Box::new(sid.to_string()),
+                ],
+            ),
+            None => (
+                format!("{} LIMIT {}", base_query, limit),
+                vec![Box::new(annotation_type.to_string()) as Box<dyn rusqlite::ToSql>],
+            ),
+        };
+
+        let mut stmt = conn.prepare(&sql)?;
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let ids = stmt
+            .query_map(params_refs.as_slice(), |row| row.get(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        Ok(ids)
+    }
+
+    // === Alternative OCR results methods ===
+
+    /// Store an alternative OCR result for a page.
+    pub fn store_page_ocr_result(
+        &self,
+        page_id: i64,
+        backend: &str,
+        ocr_text: Option<&str>,
+        confidence: Option<f64>,
+        processing_time_ms: Option<u64>,
+    ) -> Result<()> {
+        let conn = self.connect()?;
+        conn.execute(
+            r#"
+            INSERT INTO page_ocr_results (page_id, backend, ocr_text, confidence, processing_time_ms, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(page_id, backend) DO UPDATE SET
+                ocr_text = excluded.ocr_text,
+                confidence = excluded.confidence,
+                processing_time_ms = excluded.processing_time_ms,
+                created_at = excluded.created_at
+            "#,
+            params![
+                page_id,
+                backend,
+                ocr_text,
+                confidence,
+                processing_time_ms.map(|t| t as i64),
+                Utc::now().to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get all OCR results for a page (including alternative backends).
+    pub fn get_page_ocr_results(
+        &self,
+        page_id: i64,
+    ) -> Result<Vec<(String, Option<String>, Option<f64>, Option<i64>)>> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT backend, ocr_text, confidence, processing_time_ms
+            FROM page_ocr_results
+            WHERE page_id = ?
+            ORDER BY created_at DESC
+            "#,
+        )?;
+
+        let results = stmt
+            .query_map(params![page_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<f64>>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        Ok(results)
+    }
+
+    /// Check if a page has OCR result from a specific backend.
+    pub fn has_page_ocr_result(&self, page_id: i64, backend: &str) -> Result<bool> {
+        let conn = self.connect()?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM page_ocr_results WHERE page_id = ? AND backend = ?",
+            params![page_id, backend],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    /// Get page IDs for a document that don't have OCR from a specific backend.
+    pub fn get_pages_without_backend(
+        &self,
+        document_id: &str,
+        backend: &str,
+    ) -> Result<Vec<(i64, i32)>> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT dp.id, dp.page_number
+            FROM document_pages dp
+            WHERE dp.document_id = ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM page_ocr_results por
+                  WHERE por.page_id = dp.id AND por.backend = ?
+              )
+            ORDER BY dp.page_number
+            "#,
+        )?;
+
+        let results = stmt
+            .query_map(params![document_id, backend], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, i32>(1)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        Ok(results)
     }
 }
 

@@ -9,37 +9,46 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 /// Default prompt for generating document synopsis.
-pub const DEFAULT_SYNOPSIS_PROMPT: &str = r#"You are analyzing a FOIA (Freedom of Information Act) document. Based on the content below, provide a brief synopsis (2-3 sentences) summarizing the key information in this document.
+pub const DEFAULT_SYNOPSIS_PROMPT: &str = r#"You are analyzing a FOIA (Freedom of Information Act) document. Read the ENTIRE content and identify the MAIN SUBJECT and KEY FINDINGS - not just what's in the introduction.
+
+Your synopsis should answer:
+1. What is this document ABOUT? (the central topic or investigation)
+2. What are the KEY FACTS revealed? (dates, names, actions, decisions)
+3. Why is this document SIGNIFICANT? (what does it reveal or document?)
+
+IMPORTANT: Do NOT just summarize the first paragraph. Scan the WHOLE document for the most important information. If the document discusses multiple topics, focus on the PRIMARY subject.
 
 Document Title: {title}
 
 Document Content:
 {content}
 
-Respond with ONLY the synopsis, no additional text or formatting."#;
+Respond with ONLY a 2-3 sentence synopsis focusing on the document's main subject and key revelations. No formatting or preamble."#;
 
 /// Default prompt for generating document tags.
-pub const DEFAULT_TAGS_PROMPT: &str = r#"You are analyzing a FOIA (Freedom of Information Act) document. Generate 3-5 high-quality, REUSABLE tags that would help categorize this document alongside thousands of other FOIA documents.
+pub const DEFAULT_TAGS_PROMPT: &str = r#"You are analyzing a FOIA document to generate USEFUL SEARCH TAGS. Read the ENTIRE document before tagging.
 
-Use this hierarchical format with prefixes:
-- agency: for government agencies (e.g., agency:fbi, agency:doj, agency:state-dept, agency:local-police)
-- topic: for broad subject areas (e.g., topic:surveillance, topic:immigration, topic:environment, topic:civil-rights, topic:public-safety)
-- type: for document types (e.g., type:correspondence, type:report, type:memo, type:invoice, type:contract, type:complaint)
-- entity: ONLY for major organizations or well-known people likely to appear in multiple documents (e.g., entity:aclu, entity:epa)
+Generate 3-5 simple, lowercase tags that capture:
+- Government agencies involved (e.g., cia, fbi, nsa, state-dept)
+- Main subject matter (e.g., surveillance, assassination, nuclear-weapons)
+- Specific programs or operations mentioned (e.g., mkultra, cointelpro, phoenix)
+- Key entities or people if significant (e.g., castro, soviet-union, aclu)
+- Document type if notable (e.g., memo, cable, briefing)
 
-IMPORTANT RULES:
-- Prefer BROAD, REUSABLE tags over specific one-off details
-- Do NOT create tags for specific dates, case numbers, or minor details
-- Do NOT create tags for obscure individuals or one-time events
-- Choose tags that would likely match OTHER documents in a large FOIA archive
-- Limit to 3-5 tags maximum
+CRITICAL INSTRUCTIONS:
+1. Read BEYOND the first paragraph - the main topic is often revealed deeper in the document
+2. Be SPECIFIC - "soviet-intelligence" is better than "foreign-policy"
+3. Focus on what makes this document FINDABLE - what would someone search for?
+4. Use lowercase with hyphens for multi-word tags (e.g., cold-war, mind-control)
+5. Avoid vague tags like "government", "information", "document" - be precise
+6. Do NOT use prefixes like "agency:" or "topic:" - just the tag itself
 
 Document Title: {title}
 
 Document Content:
 {content}
 
-Respond with ONLY a comma-separated list of tags. Example: agency:state-dept, topic:travel, type:correspondence"#;
+Respond with ONLY 3-5 comma-separated lowercase tags. Example: cia, mind-control, mkultra, memo, cold-war"#;
 
 /// Configuration for LLM client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -456,16 +465,17 @@ mod tests {
         let tags = client.parse_tags("Budget, POLICY, Environmental");
         assert_eq!(tags, vec!["budget", "policy", "environmental"]);
 
-        // Hierarchical tags with colons
-        let tags = client.parse_tags("agency:fbi, topic:surveillance, type:memo");
-        assert_eq!(tags, vec!["agency:fbi", "topic:surveillance", "type:memo"]);
+        // Simple tags (no prefixes)
+        let tags = client.parse_tags("fbi, surveillance, memo");
+        assert_eq!(tags, vec!["fbi", "surveillance", "memo"]);
 
-        // Mixed hierarchical and simple
-        let tags = client.parse_tags("agency:state-dept, topic:travel, type:correspondence");
-        assert_eq!(
-            tags,
-            vec!["agency:state-dept", "topic:travel", "type:correspondence"]
-        );
+        // Hyphenated multi-word tags
+        let tags = client.parse_tags("state-dept, cold-war, mind-control");
+        assert_eq!(tags, vec!["state-dept", "cold-war", "mind-control"]);
+
+        // Real-world example
+        let tags = client.parse_tags("cia, mkultra, cold-war, memo");
+        assert_eq!(tags, vec!["cia", "mkultra", "cold-war", "memo"]);
     }
 
     #[test]

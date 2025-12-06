@@ -350,6 +350,7 @@ pub struct PageData {
     pub final_text: Option<String>,
     pub image_base64: Option<String>,
     pub ocr_status: String,
+    pub deepseek_text: Option<String>,
 }
 
 /// Pages API response.
@@ -419,6 +420,21 @@ pub async fn api_document_pages(
         .take(limit as usize)
         .collect();
 
+    // Build a map of page_id -> deepseek_text for comparison view
+    let mut deepseek_map: std::collections::HashMap<i64, Option<String>> =
+        std::collections::HashMap::new();
+    for page in &selected_pages {
+        if let Ok(ocr_results) = state.doc_repo.get_page_ocr_results(page.id) {
+            // Find DeepSeek result
+            for (backend, text, _, _) in ocr_results {
+                if backend == "deepseek" {
+                    deepseek_map.insert(page.id, text);
+                    break;
+                }
+            }
+        }
+    }
+
     // Render pages to images if this is a PDF
     // Use spawn_blocking to avoid blocking the async runtime
     let is_pdf = version.mime_type.contains("pdf");
@@ -430,10 +446,12 @@ pub async fn api_document_pages(
         for page in selected_pages {
             let path = pdf_path.clone();
             let page_num = page.page_number;
+            let page_id = page.id;
             let ocr_text = page.ocr_text;
             let pdf_text = page.pdf_text;
             let final_text = page.final_text;
             let ocr_status = page.ocr_status.as_str().to_string();
+            let deepseek_text = deepseek_map.get(&page_id).cloned().flatten();
 
             let handle = tokio::task::spawn_blocking(move || {
                 let image_base64 = render_pdf_page_to_base64(&path, page_num);
@@ -444,6 +462,7 @@ pub async fn api_document_pages(
                     final_text,
                     image_base64,
                     ocr_status,
+                    deepseek_text,
                 }
             });
             handles.push(handle);
@@ -463,13 +482,17 @@ pub async fn api_document_pages(
         // Non-PDF: no image rendering needed
         selected_pages
             .into_iter()
-            .map(|page| PageData {
-                page_number: page.page_number,
-                ocr_text: page.ocr_text,
-                pdf_text: page.pdf_text,
-                final_text: page.final_text,
-                image_base64: None,
-                ocr_status: page.ocr_status.as_str().to_string(),
+            .map(|page| {
+                let deepseek_text = deepseek_map.get(&page.id).cloned().flatten();
+                PageData {
+                    page_number: page.page_number,
+                    ocr_text: page.ocr_text,
+                    pdf_text: page.pdf_text,
+                    final_text: page.final_text,
+                    image_base64: None,
+                    ocr_status: page.ocr_status.as_str().to_string(),
+                    deepseek_text,
+                }
             })
             .collect()
     };
@@ -524,61 +547,6 @@ fn render_pdf_page_to_base64(pdf_path: &std::path::Path, page_number: u32) -> Op
     None
 }
 
-/// Document pages view (HTML page with infinite scroll).
-pub async fn document_pages_view(
-    State(state): State<AppState>,
-    Path(doc_id): Path<String>,
-    Query(params): Query<PagesParams>,
-) -> impl IntoResponse {
-    let doc = match state.doc_repo.get(&doc_id) {
-        Ok(Some(d)) => d,
-        Ok(None) => {
-            return Html(templates::base_template(
-                "Not Found",
-                "<p>Document not found.</p>",
-                None,
-            ));
-        }
-        Err(e) => {
-            return Html(templates::base_template(
-                "Error",
-                &format!("<p>Failed to load document: {}</p>", e),
-                None,
-            ));
-        }
-    };
-
-    // Get version ID
-    let version_id = params
-        .version
-        .or_else(|| doc.current_version().map(|v| v.id));
-    let version_id = match version_id {
-        Some(id) => id,
-        None => {
-            return Html(templates::base_template(
-                "Error",
-                "<p>No version found for this document.</p>",
-                None,
-            ));
-        }
-    };
-
-    // Get page count
-    let page_count = state
-        .doc_repo
-        .get_pages(&doc_id, version_id)
-        .map(|p| p.len() as u32)
-        .unwrap_or(0);
-
-    let content =
-        templates::document_pages_view(&doc_id, &doc.title, &doc.source_id, version_id, page_count);
-
-    Html(templates::base_template(
-        &format!("{} - Pages", doc.title),
-        &content,
-        None,
-    ))
-}
 
 /// Serve a document file.
 pub async fn serve_file(State(state): State<AppState>, Path(path): Path<String>) -> Response {
@@ -930,21 +898,50 @@ pub async fn list_tag_documents(
 
 /// API endpoint to get all tags as JSON.
 pub async fn api_tags(State(state): State<AppState>) -> impl IntoResponse {
-    match state.doc_repo.get_all_tags() {
-        Ok(tags) => {
-            let tags_json: Vec<_> = tags
-                .into_iter()
-                .map(|(tag, count)| {
-                    serde_json::json!({
-                        "tag": tag,
-                        "count": count
-                    })
-                })
-                .collect();
-            axum::Json(tags_json).into_response()
-        }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
+    // Use cache to avoid expensive query
+    let tags = state.stats_cache.get_all_tags().unwrap_or_else(|| {
+        let tags = state.doc_repo.get_all_tags().unwrap_or_default();
+        state.stats_cache.set_all_tags(tags.clone());
+        tags
+    });
+
+    let tags_json: Vec<_> = tags
+        .into_iter()
+        .map(|(tag, count)| {
+            serde_json::json!({
+                "tag": tag,
+                "count": count
+            })
+        })
+        .collect();
+    axum::Json(tags_json).into_response()
+}
+
+/// API endpoint to get all sources with document counts.
+pub async fn api_sources(State(state): State<AppState>) -> impl IntoResponse {
+    // Get source counts (cached)
+    let source_counts = state.stats_cache.get_source_counts().unwrap_or_else(|| {
+        let counts = state.doc_repo.get_all_source_counts().unwrap_or_default();
+        state.stats_cache.set_source_counts(counts.clone());
+        counts
+    });
+
+    let sources: Vec<_> = state
+        .source_repo
+        .get_all()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| {
+            let count = source_counts.get(&s.id).copied().unwrap_or(0);
+            serde_json::json!({
+                "id": s.id,
+                "name": s.name,
+                "count": count
+            })
+        })
+        .collect();
+
+    axum::Json(sources).into_response()
 }
 
 /// API endpoint to get overall database status.
@@ -1174,23 +1171,32 @@ pub async fn api_type_stats(
     State(state): State<AppState>,
     Query(params): Query<SourceFilterParams>,
 ) -> impl IntoResponse {
-    match state.doc_repo.get_type_stats(params.source.as_deref()) {
-        Ok(stats) => {
-            let stats_json: Vec<_> = stats
-                .into_iter()
-                .map(|(mime, count)| {
-                    let category = mime_to_category(&mime);
-                    serde_json::json!({
-                        "mime_type": mime,
-                        "category": category,
-                        "count": count
-                    })
-                })
-                .collect();
-            axum::Json(stats_json).into_response()
-        }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
+    // Use get_category_stats for instant O(1) lookup from file_categories table
+    let stats = if params.source.is_none() {
+        // Check cache first for unfiltered global stats
+        state.stats_cache.get_type_stats().unwrap_or_else(|| {
+            let stats = state.doc_repo.get_category_stats(None).unwrap_or_default();
+            state.stats_cache.set_type_stats(stats.clone());
+            stats
+        })
+    } else {
+        // Source-filtered stats - compute from documents table
+        state
+            .doc_repo
+            .get_category_stats(params.source.as_deref())
+            .unwrap_or_default()
+    };
+
+    let stats_json: Vec<_> = stats
+        .into_iter()
+        .map(|(category, count)| {
+            serde_json::json!({
+                "category": category,
+                "count": count
+            })
+        })
+        .collect();
+    axum::Json(stats_json).into_response()
 }
 
 /// List all type categories.
@@ -1295,8 +1301,8 @@ pub struct BrowseParams {
     pub source: Option<String>,
     /// Search query
     pub q: Option<String>,
-    /// Cursor: document ID to start from (cursor-based pagination)
-    pub page: Option<String>,
+    /// Page number (1-indexed)
+    pub page: Option<usize>,
     /// Items per page (default 50)
     pub per_page: Option<usize>,
 }
@@ -1332,57 +1338,162 @@ pub async fn browse_documents(
         })
         .unwrap_or_default();
 
-    // Cursor-based pagination: page param is document ID to start from
-    let cursor = params.page.as_deref();
+    // Page-based pagination (1-indexed)
+    let page = params.page.unwrap_or(1);
 
-    let browse_result = match state.doc_repo.browse(
-        &types,
-        &tags,
-        params.source.as_deref(),
-        params.q.as_deref(),
-        cursor,
-        per_page,
-    ) {
-        Ok(result) => result,
-        Err(e) => {
+    // Get count: O(1) for unfiltered queries via trigger-maintained table.
+    // For filtered queries, use cache or skip count entirely (expensive COUNT DISTINCT).
+    let (cached_total, skip_count) = if types.is_empty() && tags.is_empty() && params.q.is_none() {
+        // Simple source-only filter: O(1) via document_counts table
+        let count = if let Some(source_id) = params.source.as_deref() {
+            state.doc_repo.count_by_source(source_id).ok()
+        } else {
+            // No filters: O(1) total count
+            state.doc_repo.count().ok()
+        };
+        (count, false)
+    } else {
+        // Complex filters: check browse_count cache
+        let cache_key = super::cache::StatsCache::browse_count_key(
+            params.source.as_deref(),
+            &types,
+            &tags,
+            params.q.as_deref(),
+        );
+        let cached = state.stats_cache.get_browse_count(&cache_key);
+        // If no cache hit, skip the expensive count query - just paginate without total
+        (cached, cached.is_none())
+    };
+
+    // Run browse query (always needed)
+    let state_browse = state.clone();
+    let types_browse = types.clone();
+    let tags_browse = tags.clone();
+    let source_browse = params.source.clone();
+    let q_browse = params.q.clone();
+
+    // When skip_count is true, pass 0 as total to avoid expensive COUNT query.
+    // The real count will be computed in background and cached for next request.
+    let effective_total = if skip_count { Some(0) } else { cached_total };
+
+    let browse_handle = tokio::task::spawn_blocking(move || {
+        state_browse.doc_repo.browse(
+            &types_browse,
+            &tags_browse,
+            source_browse.as_deref(),
+            q_browse.as_deref(),
+            page,
+            per_page,
+            effective_total,
+        )
+    });
+
+    // Check if we have filters active (affects which stats we load)
+    let has_filters = !types.is_empty() || !tags.is_empty() || params.q.is_some();
+
+    // Always load type_stats - it's now O(1) from file_categories table
+    let state_types = state.clone();
+    let type_stats_handle = tokio::task::spawn_blocking(move || {
+        state_types.doc_repo.get_category_stats(None).unwrap_or_default()
+    });
+
+    // Only load tags and sources when no filters (they're slower and less needed when filtering)
+    let (tags_handle, sources_handle) = if has_filters {
+        (None, None)
+    } else {
+        let state_tags = state.clone();
+        let tags_handle = Some(tokio::task::spawn_blocking(move || {
+            state_tags.doc_repo.get_all_tags().unwrap_or_default()
+        }));
+
+        let state_sources = state.clone();
+        let sources_handle = Some(tokio::task::spawn_blocking(move || {
+            let counts = state_sources.doc_repo.get_all_source_counts().unwrap_or_default();
+            let sources = state_sources.source_repo.get_all().unwrap_or_default();
+            sources
+                .into_iter()
+                .map(|s| {
+                    let count = counts.get(&s.id).copied().unwrap_or(0);
+                    (s.id, s.name, count)
+                })
+                .collect::<Vec<_>>()
+        }));
+
+        (tags_handle, sources_handle)
+    };
+
+    // Await browse result (always)
+    let browse_res = browse_handle.await;
+
+    // Await type_stats (always loaded - O(1) query)
+    let type_stats_res = type_stats_handle.await;
+
+    // Await other stats results (only if we started them)
+    let tags_res = match tags_handle {
+        Some(h) => Some(h.await),
+        None => None,
+    };
+    let sources_res = match sources_handle {
+        Some(h) => Some(h.await),
+        None => None,
+    };
+
+    let browse_result = match browse_res {
+        Ok(Ok(result)) => result,
+        Ok(Err(e)) => {
             return Html(templates::base_template(
                 "Error",
                 &format!("<p>Failed to load documents: {}</p>", e),
                 None,
             ));
         }
+        Err(e) => {
+            return Html(templates::base_template(
+                "Error",
+                &format!("<p>Task failed: {}</p>", e),
+                None,
+            ));
+        }
     };
 
-    // Get type stats for the toggles
-    let type_stats: Vec<(String, u64)> = state
-        .doc_repo
-        .get_type_stats(None)
-        .ok()
-        .map(|stats| {
-            let mut cat_counts: std::collections::HashMap<String, u64> =
-                std::collections::HashMap::new();
-            for (mime, count) in stats {
-                let cat = mime_to_category(&mime).to_string();
-                *cat_counts.entry(cat).or_default() += count;
+    // Spawn background count computation for filtered queries (if not cached)
+    if skip_count {
+        let state_for_count = state.clone();
+        let state_for_cache = state.clone();
+        let types_bg = types.clone();
+        let tags_bg = tags.clone();
+        let source_bg = params.source.clone();
+        let q_bg = params.q.clone();
+
+        // Precompute cache key before spawning
+        let cache_key = super::cache::StatsCache::browse_count_key(
+            source_bg.as_deref(),
+            &types_bg,
+            &tags_bg,
+            q_bg.as_deref(),
+        );
+
+        tokio::spawn(async move {
+            // Compute count in blocking task
+            if let Ok(count) = tokio::task::spawn_blocking(move || {
+                state_for_count
+                    .doc_repo
+                    .browse_count(&types_bg, &tags_bg, source_bg.as_deref(), q_bg.as_deref())
+            })
+            .await
+            {
+                if let Ok(count) = count {
+                    state_for_cache.stats_cache.set_browse_count(cache_key, count);
+                }
             }
-            cat_counts.into_iter().collect()
-        })
-        .unwrap_or_default();
+        });
+    }
 
-    // Get all tags for the autocomplete
-    let all_tags = state.doc_repo.get_all_tags().unwrap_or_default();
+    // Category stats are already aggregated from get_category_stats
+    let type_stats: Vec<(String, u64)> = type_stats_res.unwrap_or_else(|_| Vec::new());
 
-    // Get all sources for the dropdown
-    let sources: Vec<(String, String, u64)> = state
-        .source_repo
-        .get_all()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|s| {
-            let count = state.doc_repo.count_by_source(&s.id).unwrap_or(0);
-            (s.id, s.name, count)
-        })
-        .collect();
+    let all_tags: Vec<(String, usize)> = tags_res.and_then(|r| r.ok()).unwrap_or_default();
+    let sources: Vec<(String, String, u64)> = sources_res.and_then(|r| r.ok()).unwrap_or_default();
 
     // Build timeline data from the filtered documents
     let timeline = build_timeline_data(&browse_result.documents);
@@ -1479,4 +1590,319 @@ fn mime_to_category(mime: &str) -> &'static str {
         m if m.starts_with("image/") => "images",
         _ => "other",
     }
+}
+
+/// Request body for re-OCR API.
+#[derive(Debug, Deserialize)]
+pub struct ReOcrRequest {
+    /// Backend to use (currently only "deepseek" supported)
+    #[serde(default = "default_backend")]
+    pub backend: String,
+}
+
+fn default_backend() -> String {
+    "deepseek".to_string()
+}
+
+/// Response for re-OCR API.
+#[derive(Debug, Serialize)]
+pub struct ReOcrResponse {
+    pub document_id: String,
+    pub backend: String,
+    pub pages_processed: u32,
+    pub pages_total: u32,
+    pub status: String,
+    pub message: Option<String>,
+}
+
+/// Trigger re-OCR for a document using an alternative backend.
+/// POST /api/documents/{id}/reocr
+///
+/// This starts a background job and returns immediately.
+/// Poll GET /api/documents/reocr/status for progress.
+pub async fn api_reocr_document(
+    State(state): State<AppState>,
+    Path(document_id): Path<String>,
+    axum::Json(request): axum::Json<ReOcrRequest>,
+) -> impl IntoResponse {
+    use crate::ocr::{DeepSeekBackend, OcrBackend, OcrConfig};
+
+    // Validate backend
+    if request.backend != "deepseek" {
+        return axum::Json(ReOcrResponse {
+            document_id,
+            backend: request.backend,
+            pages_processed: 0,
+            pages_total: 0,
+            status: "error".to_string(),
+            message: Some("Only 'deepseek' backend is currently supported".to_string()),
+        })
+        .into_response();
+    }
+
+    // Check if a job is already running
+    {
+        let job_status = state.deepseek_job.read().await;
+        if job_status.document_id.is_some() && !job_status.completed {
+            return (
+                StatusCode::CONFLICT,
+                axum::Json(ReOcrResponse {
+                    document_id: document_id.clone(),
+                    backend: request.backend,
+                    pages_processed: job_status.pages_processed,
+                    pages_total: job_status.total_pages,
+                    status: "busy".to_string(),
+                    message: Some(format!(
+                        "DeepSeek OCR is already running on document '{}' ({}/{} pages)",
+                        job_status.document_id.as_ref().unwrap_or(&"unknown".to_string()),
+                        job_status.pages_processed,
+                        job_status.total_pages
+                    )),
+                }),
+            )
+                .into_response();
+        }
+    }
+
+    // Get document
+    let doc = match state.doc_repo.get(&document_id) {
+        Ok(Some(d)) => d,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                axum::Json(ReOcrResponse {
+                    document_id,
+                    backend: request.backend,
+                    pages_processed: 0,
+                    pages_total: 0,
+                    status: "error".to_string(),
+                    message: Some("Document not found".to_string()),
+                }),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(ReOcrResponse {
+                    document_id,
+                    backend: request.backend,
+                    pages_processed: 0,
+                    pages_total: 0,
+                    status: "error".to_string(),
+                    message: Some(format!("Database error: {}", e)),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // Get latest version's file path
+    let version = match doc.versions.last() {
+        Some(v) => v,
+        None => {
+            return axum::Json(ReOcrResponse {
+                document_id,
+                backend: request.backend,
+                pages_processed: 0,
+                pages_total: 0,
+                status: "error".to_string(),
+                message: Some("Document has no versions".to_string()),
+            })
+            .into_response();
+        }
+    };
+
+    // Only support PDF for now
+    if version.mime_type != "application/pdf" {
+        return axum::Json(ReOcrResponse {
+            document_id,
+            backend: request.backend,
+            pages_processed: 0,
+            pages_total: 0,
+            status: "error".to_string(),
+            message: Some("Only PDF documents are supported for re-OCR".to_string()),
+        })
+        .into_response();
+    }
+
+    let pdf_path = state.documents_dir.join(&version.file_path);
+
+    // Check if DeepSeek is available
+    let config = OcrConfig {
+        use_gpu: true,
+        ..Default::default()
+    };
+    let backend = DeepSeekBackend::with_config(config);
+
+    if !backend.is_available() {
+        return axum::Json(ReOcrResponse {
+            document_id,
+            backend: request.backend,
+            pages_processed: 0,
+            pages_total: 0,
+            status: "error".to_string(),
+            message: Some(format!(
+                "DeepSeek backend not available. {}",
+                backend.availability_hint()
+            )),
+        })
+        .into_response();
+    }
+
+    // Get pages without DeepSeek OCR
+    let pages_needing_ocr = match state
+        .doc_repo
+        .get_pages_without_backend(&document_id, "deepseek")
+    {
+        Ok(pages) => pages,
+        Err(e) => {
+            return axum::Json(ReOcrResponse {
+                document_id,
+                backend: request.backend,
+                pages_processed: 0,
+                pages_total: 0,
+                status: "error".to_string(),
+                message: Some(format!("Failed to get pages: {}", e)),
+            })
+            .into_response();
+        }
+    };
+
+    if pages_needing_ocr.is_empty() {
+        return axum::Json(ReOcrResponse {
+            document_id,
+            backend: request.backend,
+            pages_processed: 0,
+            pages_total: 0,
+            status: "complete".to_string(),
+            message: Some("All pages already have DeepSeek OCR results".to_string()),
+        })
+        .into_response();
+    }
+
+    let total_pages = pages_needing_ocr.len() as u32;
+
+    // Initialize job status
+    {
+        let mut job_status = state.deepseek_job.write().await;
+        *job_status = super::DeepSeekJobStatus {
+            document_id: Some(document_id.clone()),
+            pages_processed: 0,
+            total_pages,
+            error: None,
+            completed: false,
+        };
+    }
+
+    // Clone what we need for the background task
+    let job_state = state.clone();
+    let job_doc_id = document_id.clone();
+
+    // Spawn background task
+    tokio::spawn(async move {
+        let mut processed = 0u32;
+
+        for (page_id, page_number) in pages_needing_ocr {
+            // Run OCR in blocking task to not block async runtime
+            let pdf_path_clone = pdf_path.clone();
+            let ocr_result = tokio::task::spawn_blocking(move || {
+                let config = OcrConfig {
+                    use_gpu: true,
+                    ..Default::default()
+                };
+                let backend = DeepSeekBackend::with_config(config);
+                backend.ocr_pdf_page(&pdf_path_clone, page_number as u32)
+            })
+            .await;
+
+            match ocr_result {
+                Ok(Ok(result)) => {
+                    // Store result
+                    if let Err(e) = job_state.doc_repo.store_page_ocr_result(
+                        page_id,
+                        "deepseek",
+                        Some(&result.text),
+                        result.confidence.map(|c| c as f64),
+                        Some(result.processing_time_ms),
+                    ) {
+                        tracing::error!(
+                            "Failed to store OCR result for page {}: {}",
+                            page_number,
+                            e
+                        );
+                    } else {
+                        processed += 1;
+                    }
+                }
+                Ok(Err(e)) => {
+                    tracing::error!("OCR failed for page {}: {:?}", page_number, e);
+                    // Store error as null text
+                    let _ = job_state.doc_repo.store_page_ocr_result(
+                        page_id, "deepseek", None, None, None,
+                    );
+                }
+                Err(e) => {
+                    tracing::error!("Task panic for page {}: {:?}", page_number, e);
+                }
+            }
+
+            // Update progress
+            {
+                let mut job_status = job_state.deepseek_job.write().await;
+                job_status.pages_processed = processed;
+            }
+        }
+
+        // Mark job complete
+        {
+            let mut job_status = job_state.deepseek_job.write().await;
+            job_status.pages_processed = processed;
+            job_status.completed = true;
+        }
+
+        tracing::info!(
+            "DeepSeek OCR complete for {}: {}/{} pages",
+            job_doc_id,
+            processed,
+            total_pages
+        );
+    });
+
+    // Return immediately
+    axum::Json(ReOcrResponse {
+        document_id,
+        backend: request.backend,
+        pages_processed: 0,
+        pages_total: total_pages,
+        status: "started".to_string(),
+        message: Some(format!(
+            "DeepSeek OCR started for {} pages. Poll /api/documents/reocr/status for progress.",
+            total_pages
+        )),
+    })
+    .into_response()
+}
+
+/// Get the current status of a DeepSeek OCR job.
+/// GET /api/documents/reocr/status
+pub async fn api_reocr_status(State(state): State<AppState>) -> impl IntoResponse {
+    let job_status = state.deepseek_job.read().await;
+
+    let (status, document_id) = if job_status.document_id.is_none() {
+        ("idle".to_string(), String::new())
+    } else if job_status.completed {
+        ("complete".to_string(), job_status.document_id.clone().unwrap_or_default())
+    } else {
+        ("running".to_string(), job_status.document_id.clone().unwrap_or_default())
+    };
+
+    axum::Json(ReOcrResponse {
+        document_id,
+        backend: "deepseek".to_string(),
+        pages_processed: job_status.pages_processed,
+        pages_total: job_status.total_pages,
+        status,
+        message: job_status.error.clone(),
+    })
 }

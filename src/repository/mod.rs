@@ -42,6 +42,12 @@ pub fn connect(db_path: &Path) -> Result<Connection> {
         PRAGMA synchronous = NORMAL;
         PRAGMA foreign_keys = ON;
         PRAGMA busy_timeout = 30000;
+
+        -- Performance optimizations
+        PRAGMA cache_size = -64000;        -- 64MB cache (negative = KB)
+        PRAGMA mmap_size = 268435456;      -- 256MB memory-mapped I/O
+        PRAGMA temp_store = MEMORY;        -- Store temp tables in memory
+        PRAGMA page_size = 4096;           -- Optimal page size
     "#,
     )?;
 

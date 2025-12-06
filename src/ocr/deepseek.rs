@@ -6,6 +6,12 @@
 //!
 //! Install deepseek-ocr.rs from:
 //! https://github.com/TimmyOVO/deepseek-ocr.rs
+//!
+//! ```bash
+//! git clone https://github.com/TimmyOVO/deepseek-ocr.rs
+//! cd deepseek-ocr.rs
+//! cargo install --path crates/cli --features cuda  # or --features metal for Mac
+//! ```
 
 #![allow(dead_code)]
 
@@ -34,7 +40,7 @@ impl DeepSeekBackend {
     pub fn new() -> Self {
         Self {
             config: OcrConfig::default(),
-            binary_path: PathBuf::from("deepseek-ocr"),
+            binary_path: PathBuf::from("deepseek-ocr-cli"),
             device: "cpu".to_string(),
             dtype: "f32".to_string(),
             model: "deepseek-ocr".to_string(),
@@ -48,7 +54,7 @@ impl DeepSeekBackend {
 
         Self {
             config,
-            binary_path: PathBuf::from("deepseek-ocr"),
+            binary_path: PathBuf::from("deepseek-ocr-cli"),
             device: device.to_string(),
             dtype: dtype.to_string(),
             model: "deepseek-ocr".to_string(),
@@ -101,6 +107,7 @@ impl DeepSeekBackend {
         let prompt = "Extract all text from this image. Return only the extracted text, nothing else. <image>";
 
         let output = Command::new(&self.binary_path)
+            .arg("--quiet") // Suppress logs, output only the result
             .args(["--prompt", prompt])
             .args(["--image", &image_path.to_string_lossy()])
             .args(["--device", &self.device])
@@ -200,8 +207,8 @@ impl OcrBackend for DeepSeekBackend {
         if !self.check_binary() {
             format!(
                 "DeepSeek-OCR not found at '{}'. Install from: https://github.com/TimmyOVO/deepseek-ocr.rs\n\
-                 Build with: cargo build -p deepseek-ocr-cli --release\n\
-                 For GPU: add --features cuda (NVIDIA) or --features metal (Apple)",
+                 git clone https://github.com/TimmyOVO/deepseek-ocr.rs && cd deepseek-ocr.rs\n\
+                 cargo install --path crates/cli --features cuda  # or --features metal for Mac",
                 self.binary_path.display()
             )
         } else if !Self::check_pdftoppm() {

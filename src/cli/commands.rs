@@ -129,15 +129,12 @@ enum Commands {
         /// Page range (e.g., "1", "1-5", "1,3,5-10"). Default: all pages
         #[arg(short, long)]
         pages: Option<String>,
-        /// Backends to compare (comma-separated: tesseract,ocrs,paddleocr,deepseek)
+        /// Backends to compare (e.g. tesseract,deepseek:gpu,deepseek:cpu,paddleocr:gpu)
         #[arg(short, long, default_value = "tesseract")]
         backends: String,
         /// DeepSeek binary path (if not in PATH)
         #[arg(long)]
         deepseek_path: Option<std::path::PathBuf>,
-        /// Use GPU for DeepSeek (--device cuda)
-        #[arg(long)]
-        gpu: bool,
     },
 
     /// Start web server to browse documents
@@ -169,6 +166,18 @@ enum Commands {
         /// Limit number of documents to process (0 = unlimited)
         #[arg(short, long, default_value = "0")]
         limit: usize,
+    },
+
+    /// Detect and estimate publication dates for documents
+    DetectDates {
+        /// Source ID (optional, processes all sources if not specified)
+        source_id: Option<String>,
+        /// Limit number of documents to process (0 = unlimited)
+        #[arg(short, long, default_value = "0")]
+        limit: usize,
+        /// Only show what would be detected, don't update database
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// List available LLM models
@@ -232,6 +241,42 @@ enum Commands {
         limit: usize,
     },
 
+    /// Import documents from WARC (Web Archive) files
+    Import {
+        /// WARC file(s) to import (supports .warc and .warc.gz)
+        files: Vec<PathBuf>,
+        /// Source ID to associate imported documents with (auto-detected from URLs if not specified)
+        #[arg(short, long)]
+        source: Option<String>,
+        /// URL pattern filter (regex, e.g. "\.pdf$" for PDFs only)
+        #[arg(short, long)]
+        filter: Option<String>,
+        /// Limit number of records to import (0 = unlimited)
+        #[arg(short, long, default_value = "0")]
+        limit: usize,
+        /// Limit number of records to scan (0 = unlimited). Useful for testing with large archives.
+        #[arg(long, default_value = "0")]
+        scan_limit: usize,
+        /// Dry run - show what would be imported without saving
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Discover new document URLs by analyzing patterns in existing URLs
+    Discover {
+        /// Source ID to analyze and generate URLs for
+        source_id: String,
+        /// Limit number of candidate URLs to generate (0 = unlimited)
+        #[arg(short, long, default_value = "0")]
+        limit: usize,
+        /// Show what would be discovered without adding to queue
+        #[arg(long)]
+        dry_run: bool,
+        /// Minimum number of URL examples before generating candidates
+        #[arg(long, default_value = "3")]
+        min_examples: usize,
+    },
+
     /// Test browser-based fetching (requires --features browser)
     #[cfg(feature = "browser")]
     BrowserTest {
@@ -271,6 +316,16 @@ enum Commands {
 enum SourceCommands {
     /// List configured sources
     List,
+    /// Rename a source (updates all associated documents)
+    Rename {
+        /// Current source ID
+        old_id: String,
+        /// New source ID
+        new_id: String,
+        /// Skip confirmation prompt
+        #[arg(long)]
+        confirm: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -303,6 +358,11 @@ pub async fn run() -> anyhow::Result<()> {
         Commands::Init => cmd_init(&settings).await,
         Commands::Source { command } => match command {
             SourceCommands::List => cmd_source_list(&settings).await,
+            SourceCommands::Rename {
+                old_id,
+                new_id,
+                confirm,
+            } => cmd_source_rename(&settings, &old_id, &new_id, confirm).await,
         },
         Commands::Crawl { source_id, limit } => cmd_crawl(&settings, &source_id, limit).await,
         Commands::Download {
@@ -337,8 +397,7 @@ pub async fn run() -> anyhow::Result<()> {
             pages,
             backends,
             deepseek_path,
-            gpu,
-        } => cmd_ocr_compare(&file, pages.as_deref(), &backends, deepseek_path, gpu).await,
+        } => cmd_ocr_compare(&file, pages.as_deref(), &backends, deepseek_path).await,
         Commands::Serve { bind } => cmd_serve(&settings, &bind).await,
         Commands::Refresh {
             source_id,
@@ -349,6 +408,11 @@ pub async fn run() -> anyhow::Result<()> {
         Commands::Annotate { source_id, limit } => {
             cmd_annotate(&settings, source_id.as_deref(), limit).await
         }
+        Commands::DetectDates {
+            source_id,
+            limit,
+            dry_run,
+        } => cmd_detect_dates(&settings, source_id.as_deref(), limit, dry_run).await,
         Commands::LlmModels => cmd_llm_models(&settings).await,
         Commands::Archive {
             source_id,
@@ -379,6 +443,20 @@ pub async fn run() -> anyhow::Result<()> {
             source,
             limit,
         } => cmd_search(&settings, &query, source.as_deref(), limit).await,
+        Commands::Import {
+            files,
+            source,
+            filter,
+            limit,
+            scan_limit,
+            dry_run,
+        } => cmd_import(&settings, &files, source.as_deref(), filter.as_deref(), limit, scan_limit, dry_run).await,
+        Commands::Discover {
+            source_id,
+            limit,
+            dry_run,
+            min_examples,
+        } => cmd_discover(&settings, &source_id, limit, dry_run, min_examples).await,
         #[cfg(feature = "browser")]
         Commands::BrowserTest {
             url,
@@ -484,6 +562,107 @@ async fn cmd_source_list(settings: &Settings) -> anyhow::Result<()> {
             last_scraped
         );
     }
+
+    Ok(())
+}
+
+async fn cmd_source_rename(
+    settings: &Settings,
+    old_id: &str,
+    new_id: &str,
+    confirm: bool,
+) -> anyhow::Result<()> {
+    use std::io::{self, Write};
+
+    let db_path = settings.database_path();
+    let source_repo = SourceRepository::new(&db_path)?;
+    let doc_repo = DocumentRepository::new(&db_path, &settings.documents_dir)?;
+    let crawl_repo = CrawlRepository::new(&db_path)?;
+
+    // Check old source exists
+    let old_source = source_repo.get(old_id)?;
+    if old_source.is_none() {
+        println!(
+            "{} Source '{}' not found",
+            style("✗").red(),
+            old_id
+        );
+        return Ok(());
+    }
+
+    // Check new source doesn't exist
+    if source_repo.get(new_id)?.is_some() {
+        println!(
+            "{} Source '{}' already exists. Use a different name or delete it first.",
+            style("✗").red(),
+            new_id
+        );
+        return Ok(());
+    }
+
+    // Count affected documents
+    let doc_count = doc_repo.count_by_source(old_id)?;
+    let crawl_count = crawl_repo.count_by_source(old_id)?;
+
+    println!(
+        "\n{} Rename source '{}' → '{}'",
+        style("→").cyan(),
+        style(old_id).yellow(),
+        style(new_id).green()
+    );
+    println!("  Documents to update: {}", doc_count);
+    println!("  Crawl URLs to update: {}", crawl_count);
+
+    // Confirm
+    if !confirm {
+        print!("\nProceed? [y/N] ");
+        io::stdout().flush()?;
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!("{} Cancelled", style("!").yellow());
+            return Ok(());
+        }
+    }
+
+    // Perform the rename using direct SQL for atomicity
+    let conn = rusqlite::Connection::open(&db_path)?;
+    conn.execute("BEGIN TRANSACTION", [])?;
+
+    // Update documents
+    let docs_updated = conn.execute(
+        "UPDATE documents SET source_id = ?1 WHERE source_id = ?2",
+        rusqlite::params![new_id, old_id],
+    )?;
+
+    // Update crawl_urls
+    let crawls_updated = conn.execute(
+        "UPDATE crawl_urls SET source_id = ?1 WHERE source_id = ?2",
+        rusqlite::params![new_id, old_id],
+    )?;
+
+    // Update crawl_state
+    conn.execute(
+        "UPDATE crawl_state SET source_id = ?1 WHERE source_id = ?2",
+        rusqlite::params![new_id, old_id],
+    )?;
+
+    // Update source itself
+    conn.execute(
+        "UPDATE sources SET id = ?1 WHERE id = ?2",
+        rusqlite::params![new_id, old_id],
+    )?;
+
+    conn.execute("COMMIT", [])?;
+
+    println!(
+        "\n{} Renamed '{}' → '{}'",
+        style("✓").green(),
+        old_id,
+        new_id
+    );
+    println!("  Documents updated: {}", docs_updated);
+    println!("  Crawl URLs updated: {}", crawls_updated);
 
     Ok(())
 }
@@ -1449,13 +1628,88 @@ struct PageResult {
     text: String,
 }
 
+/// Backend configuration for comparison (includes device setting).
+struct BackendConfig {
+    name: String,
+    backend_type: crate::ocr::OcrBackendType,
+    use_gpu: bool,
+}
+
+/// Parse backend string into configurations.
+/// Syntax: backend[:device] where device is 'gpu' or 'cpu'
+/// Examples: tesseract, deepseek:gpu, deepseek:cpu, paddleocr:gpu
+/// Defaults: deepseek -> gpu, others -> cpu
+fn parse_backend_configs(backends_str: &str) -> Result<Vec<BackendConfig>, String> {
+    use crate::ocr::OcrBackendType;
+
+    let mut configs = Vec::new();
+    for spec in backends_str.split(',').map(|s| s.trim()) {
+        let (backend_name, device) = if let Some(idx) = spec.find(':') {
+            let (name, dev) = spec.split_at(idx);
+            (name, Some(&dev[1..])) // Skip the ':'
+        } else {
+            (spec, None)
+        };
+
+        let backend_name_lower = backend_name.to_lowercase();
+        let Some(backend_type) = OcrBackendType::from_str(&backend_name_lower) else {
+            return Err(format!(
+                "Unknown backend '{}'. Available: tesseract, ocrs, paddleocr, deepseek",
+                backend_name
+            ));
+        };
+
+        // Determine GPU setting based on device flag and backend capabilities
+        let use_gpu = match device.map(|d| d.to_lowercase()).as_deref() {
+            Some("gpu") => {
+                // Check if backend supports GPU
+                match backend_type {
+                    OcrBackendType::Tesseract => {
+                        return Err("tesseract does not support GPU acceleration".to_string());
+                    }
+                    #[cfg(feature = "ocr-ocrs")]
+                    OcrBackendType::Ocrs => {
+                        return Err("ocrs does not support GPU acceleration".to_string());
+                    }
+                    _ => true,
+                }
+            }
+            Some("cpu") => false,
+            Some(other) => {
+                return Err(format!(
+                    "Unknown device '{}'. Use :gpu or :cpu",
+                    other
+                ));
+            }
+            None => {
+                // Defaults: deepseek -> GPU (CPU is impractically slow), others -> CPU
+                matches!(backend_type, OcrBackendType::DeepSeek)
+            }
+        };
+
+        let display_name = if device.is_some() {
+            spec.to_string()
+        } else if use_gpu {
+            format!("{}:gpu", backend_name_lower)
+        } else {
+            backend_name_lower.to_string()
+        };
+
+        configs.push(BackendConfig {
+            name: display_name,
+            backend_type,
+            use_gpu,
+        });
+    }
+    Ok(configs)
+}
+
 /// Compare OCR backends on an image or PDF.
 async fn cmd_ocr_compare(
     file: &std::path::Path,
     pages_str: Option<&str>,
     backends_str: &str,
     deepseek_path: Option<std::path::PathBuf>,
-    use_gpu: bool,
 ) -> anyhow::Result<()> {
     use crate::ocr::{DeepSeekBackend, OcrBackend, OcrBackendType, OcrConfig, TesseractBackend};
     use std::collections::HashMap;
@@ -1481,20 +1735,11 @@ async fn cmd_ocr_compare(
         vec![1] // Images only have one "page"
     };
 
-    // Parse requested backends
-    let mut backend_types: Vec<OcrBackendType> = Vec::new();
-    for name in backends_str.split(',').map(|s| s.trim()) {
-        if let Some(bt) = OcrBackendType::from_str(name) {
-            backend_types.push(bt);
-        } else {
-            eprintln!(
-                "Warning: Unknown backend '{}'. Available: tesseract, ocrs, paddleocr, deepseek",
-                name
-            );
-        }
-    }
+    // Parse requested backends with their configurations
+    let backend_configs = parse_backend_configs(backends_str)
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    if backend_types.is_empty() {
+    if backend_configs.is_empty() {
         anyhow::bail!("No valid backends specified");
     }
 
@@ -1502,7 +1747,7 @@ async fn cmd_ocr_compare(
     eprintln!(
         "Processing {} with {} backend(s) across {} page(s)...",
         file.display(),
-        backend_types.len(),
+        backend_configs.len(),
         pages.len()
     );
 
@@ -1511,8 +1756,8 @@ async fn cmd_ocr_compare(
     let mut errors: HashMap<String, String> = HashMap::new();
     let mut total_times: HashMap<String, u64> = HashMap::new();
 
-    for backend_type in &backend_types {
-        let backend_name = backend_type.as_str().to_string();
+    for config in &backend_configs {
+        let backend_name = config.name.clone();
         let mut page_results: HashMap<u32, PageResult> = HashMap::new();
         let mut total_time_ms: u64 = 0;
         let mut had_error = false;
@@ -1522,7 +1767,7 @@ async fn cmd_ocr_compare(
         std::io::stderr().flush().ok();
 
         for (i, &page) in pages.iter().enumerate() {
-            let result = match backend_type {
+            let result = match config.backend_type {
                 OcrBackendType::Tesseract => {
                     let backend = TesseractBackend::new();
                     if !backend.is_available() {
@@ -1537,15 +1782,15 @@ async fn cmd_ocr_compare(
                     }
                 }
                 OcrBackendType::DeepSeek => {
-                    let config = OcrConfig {
-                        use_gpu,
+                    let ocr_config = OcrConfig {
+                        use_gpu: config.use_gpu,
                         ..Default::default()
                     };
-                    let mut backend = DeepSeekBackend::with_config(config);
+                    let mut backend = DeepSeekBackend::with_config(ocr_config);
                     if let Some(ref path) = deepseek_path {
                         backend = backend.with_binary_path(path);
                     }
-                    if use_gpu {
+                    if config.use_gpu {
                         backend = backend.with_device("cuda").with_dtype("f16");
                     }
                     if !backend.is_available() {
@@ -2534,6 +2779,145 @@ async fn cmd_annotate(
     Ok(())
 }
 
+/// Detect and estimate publication dates for documents.
+async fn cmd_detect_dates(
+    settings: &Settings,
+    source_id: Option<&str>,
+    limit: usize,
+    dry_run: bool,
+) -> anyhow::Result<()> {
+    use crate::services::date_detection::{detect_date, DateConfidence};
+
+    let db_path = settings.database_path();
+    let doc_repo = DocumentRepository::new(&db_path, &settings.documents_dir)?;
+
+    // Count documents needing date estimation
+    let total_count = doc_repo.count_documents_needing_date_estimation(source_id)?;
+
+    if total_count == 0 {
+        println!("{} No documents need date estimation", style("!").yellow());
+        println!("  All documents already have estimated_date or manual_date set");
+        return Ok(());
+    }
+
+    let effective_limit = if limit > 0 { limit } else { total_count as usize };
+
+    if dry_run {
+        println!(
+            "{} Dry run - showing what would be detected for up to {} documents",
+            style("→").cyan(),
+            effective_limit
+        );
+    } else {
+        println!(
+            "{} Detecting dates for up to {} documents",
+            style("→").cyan(),
+            effective_limit
+        );
+    }
+
+    // Fetch documents needing estimation
+    let documents = doc_repo.get_documents_needing_date_estimation(source_id, effective_limit)?;
+
+    let pb = ProgressBar::new(documents.len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{bar:30.cyan/blue}] {pos}/{len} {wide_msg}")
+            .unwrap()
+            .progress_chars("█▓░"),
+    );
+    pb.set_message("Analyzing...");
+
+    let mut detected = 0u64;
+    let mut no_date = 0u64;
+
+    for (doc_id, filename, server_date, acquired_at, source_url) in documents {
+        pb.set_message(truncate(&doc_id, 36));
+
+        // Run date detection
+        let estimate = detect_date(
+            server_date,
+            acquired_at,
+            filename.as_deref(),
+            source_url.as_deref(),
+        );
+
+        if let Some(est) = estimate {
+            detected += 1;
+
+            if dry_run {
+                let confidence_str = match est.confidence {
+                    DateConfidence::High => style("high").green(),
+                    DateConfidence::Medium => style("medium").yellow(),
+                    DateConfidence::Low => style("low").red(),
+                };
+                pb.println(format!(
+                    "  {} {} → {} ({}, {})",
+                    style("✓").green(),
+                    &doc_id[..8],
+                    est.date.format("%Y-%m-%d"),
+                    confidence_str,
+                    est.source.as_str()
+                ));
+            } else {
+                // Update database with detected date
+                doc_repo.update_estimated_date(
+                    &doc_id,
+                    est.date,
+                    est.confidence.as_str(),
+                    est.source.as_str(),
+                )?;
+                // Record that we processed this document
+                doc_repo.record_annotation(
+                    &doc_id,
+                    "date_detection",
+                    1,
+                    Some(&format!("detected:{}", est.source.as_str())),
+                    None,
+                )?;
+            }
+        } else {
+            no_date += 1;
+            if !dry_run {
+                // Record that we tried but found no date
+                doc_repo.record_annotation(&doc_id, "date_detection", 1, Some("no_date"), None)?;
+            }
+        }
+
+        pb.inc(1);
+    }
+
+    pb.finish_and_clear();
+
+    println!(
+        "{} Date detection complete: {} detected, {} no date found",
+        style("✓").green(),
+        detected,
+        no_date
+    );
+
+    if dry_run && detected > 0 {
+        println!(
+            "  {} Run without --dry-run to update database",
+            style("→").dim()
+        );
+    }
+
+    // Use saturating subtraction to avoid underflow
+    // (can happen if count query and get query have slightly different criteria)
+    let processed = detected + no_date;
+    if processed < total_count {
+        let remaining = total_count - processed;
+        println!(
+            "  {} {} documents still need date estimation",
+            style("→").dim(),
+            remaining
+        );
+    }
+
+    Ok(())
+}
+
 /// List available LLM models.
 async fn cmd_llm_models(_settings: &Settings) -> anyhow::Result<()> {
     let config = Config::load().await;
@@ -3387,6 +3771,772 @@ async fn cmd_browser_test(
     }
 
     fetcher.close().await;
+
+    Ok(())
+}
+
+/// Import documents from WARC archive files.
+async fn cmd_import(
+    settings: &Settings,
+    files: &[PathBuf],
+    source_id: Option<&str>,
+    filter: Option<&str>,
+    limit: usize,
+    scan_limit: usize,
+    dry_run: bool,
+) -> anyhow::Result<()> {
+    use std::collections::{HashMap, HashSet};
+    use warc::{WarcHeader, WarcReader};
+
+    let db_path = settings.database_path();
+    let documents_dir = settings.documents_dir.clone();
+    let doc_repo = DocumentRepository::new(&db_path, &documents_dir)?;
+    let source_repo = SourceRepository::new(&db_path)?;
+
+    // Pre-load all existing URLs into a HashSet for O(1) duplicate detection.
+    // This is much faster than querying the DB for each WARC record.
+    println!("{} Loading existing URLs for duplicate detection...", style("→").cyan());
+    let mut existing_urls: HashSet<String> = doc_repo.get_all_urls_set().unwrap_or_default();
+    println!("  {} existing URLs loaded", existing_urls.len());
+
+    // Load all sources for URL matching
+    let all_sources = source_repo.get_all()?;
+
+    // Build URL prefix -> source_id map for auto-detection
+    let source_map: HashMap<String, String> = all_sources
+        .iter()
+        .map(|s| (s.base_url.clone(), s.id.clone()))
+        .collect();
+
+    // If source_id provided, verify it exists
+    if let Some(sid) = source_id {
+        if source_repo.get(sid)?.is_none() {
+            println!(
+                "{} Source '{}' not found. Use 'source list' to see available sources.",
+                style("✗").red(),
+                sid
+            );
+            return Ok(());
+        }
+    }
+
+    // Helper to find source from URL
+    let find_source_for_url = |url: &str| -> Option<String> {
+        // If explicitly provided, use that
+        if let Some(sid) = source_id {
+            return Some(sid.to_string());
+        }
+        // Otherwise, match against source base_urls
+        for (base_url, sid) in &source_map {
+            if url.starts_with(base_url) {
+                return Some(sid.clone());
+            }
+        }
+        None
+    };
+
+    // Compile filter regex if provided
+    let filter_regex = if let Some(pattern) = filter {
+        Some(regex::Regex::new(pattern)?)
+    } else {
+        None
+    };
+
+    if dry_run {
+        println!("{} Dry run mode - no changes will be made", style("!").yellow());
+    }
+
+    let mut total_imported = 0;
+    let mut total_skipped = 0;
+    let mut total_filtered = 0;
+    let mut total_no_source = 0;
+    let mut total_errors = 0;
+    let mut total_scanned = 0usize;
+
+    for warc_path in files {
+        println!(
+            "\n{} Processing: {}",
+            style("→").cyan(),
+            warc_path.display()
+        );
+
+        if !warc_path.exists() {
+            println!("{} File not found: {}", style("✗").red(), warc_path.display());
+            total_errors += 1;
+            continue;
+        }
+
+        // Detect if gzipped
+        let is_gzip = warc_path
+            .extension()
+            .is_some_and(|ext| ext == "gz")
+            || warc_path
+                .to_string_lossy()
+                .contains(".warc.gz");
+
+        // Progress bar
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.cyan} {msg}")
+                .unwrap(),
+        );
+        pb.enable_steady_tick(Duration::from_millis(100));
+
+        let mut file_imported = 0;
+        let mut file_skipped = 0;
+        let mut file_filtered = 0;
+        let mut file_no_source = 0;
+
+        // Process based on compression - use macro to avoid code duplication
+        macro_rules! process_warc {
+            ($reader:expr) => {
+                for record_result in $reader.iter_records() {
+                    // Check import limit
+                    if limit > 0 && total_imported >= limit {
+                        pb.finish_with_message(format!("Import limit reached ({} documents)", limit));
+                        break;
+                    }
+
+                    // Check scan limit
+                    if scan_limit > 0 && total_scanned >= scan_limit {
+                        pb.finish_with_message(format!("Scan limit reached ({} records)", scan_limit));
+                        break;
+                    }
+
+                    total_scanned += 1;
+
+                    let record = match record_result {
+                        Ok(r) => r,
+                        Err(e) => {
+                            tracing::debug!("Skipping malformed record: {}", e);
+                            continue;
+                        }
+                    };
+
+                    // Only process response records
+                    let warc_type = record.header(WarcHeader::WarcType);
+                    if warc_type.as_deref() != Some("response") {
+                        continue;
+                    }
+
+                    // Get target URI
+                    let target_uri = match record.header(WarcHeader::TargetURI) {
+                        Some(uri) => uri.to_string(),
+                        None => continue,
+                    };
+
+                    // Apply filter
+                    if let Some(ref regex) = filter_regex {
+                        if !regex.is_match(&target_uri) {
+                            file_filtered += 1;
+                            continue;
+                        }
+                    }
+
+                    pb.set_message(format!(
+                        "Processing: {}",
+                        &target_uri[..target_uri.len().min(60)]
+                    ));
+
+                    // Get body content
+                    let body = record.body();
+                    if body.is_empty() {
+                        continue;
+                    }
+
+                    // Parse HTTP response from body
+                    let (headers, content) = match parse_http_response(body) {
+                        Some(parsed) => parsed,
+                        None => {
+                            tracing::debug!("Could not parse HTTP response for {}", target_uri);
+                            continue;
+                        }
+                    };
+
+                    // Skip non-success responses
+                    if !headers.status_ok {
+                        continue;
+                    }
+
+                    // Skip empty content
+                    if content.is_empty() {
+                        continue;
+                    }
+
+                    // Auto-detect source from URL
+                    let detected_source = find_source_for_url(&target_uri);
+                    let effective_source_id = match &detected_source {
+                        Some(sid) => sid.as_str(),
+                        None => {
+                            file_no_source += 1;
+                            tracing::debug!("No matching source for URL: {}", target_uri);
+                            continue;
+                        }
+                    };
+
+                    // Check if document already exists (O(1) HashSet lookup)
+                    if existing_urls.contains(&target_uri) {
+                        file_skipped += 1;
+                        continue;
+                    }
+
+                    // Extract title from URL
+                    let title = crate::scrapers::extract_title_from_url(&target_uri);
+
+                    // Determine MIME type
+                    let mime_type = headers
+                        .content_type
+                        .clone()
+                        .unwrap_or_else(|| guess_mime_type(&target_uri));
+
+                    if dry_run {
+                        println!(
+                            "  {} [{}] {} ({}, {} bytes)",
+                            style("+").green(),
+                            effective_source_id,
+                            target_uri,
+                            mime_type,
+                            content.len()
+                        );
+                        file_imported += 1;
+                        total_imported += 1;
+                    } else {
+                        // Create ScraperResult for helper
+                        let result = crate::scrapers::ScraperResult::new(
+                            target_uri.clone(),
+                            title,
+                            content.to_vec(),
+                            mime_type,
+                        );
+
+                        // Save using existing helper
+                        match super::helpers::save_scraped_document(
+                            &doc_repo,
+                            content,
+                            &result,
+                            effective_source_id,
+                            &documents_dir,
+                        ) {
+                            Ok(_) => {
+                                // Add to URL cache to avoid re-importing in same session
+                                existing_urls.insert(target_uri.clone());
+                                file_imported += 1;
+                                total_imported += 1;
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to import {}: {}", target_uri, e);
+                                total_errors += 1;
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
+        // Open and process WARC file
+        if is_gzip {
+            match WarcReader::from_path_gzip(warc_path) {
+                Ok(reader) => process_warc!(reader),
+                Err(e) => {
+                    println!("{} Failed to open WARC file: {}", style("✗").red(), e);
+                    total_errors += 1;
+                    continue;
+                }
+            }
+        } else {
+            match WarcReader::from_path(warc_path) {
+                Ok(reader) => process_warc!(reader),
+                Err(e) => {
+                    println!("{} Failed to open WARC file: {}", style("✗").red(), e);
+                    total_errors += 1;
+                    continue;
+                }
+            }
+        }
+
+        pb.finish_and_clear();
+
+        println!(
+            "  {} imported, {} skipped (existing), {} filtered, {} no source",
+            style(file_imported).green(),
+            style(file_skipped).yellow(),
+            style(file_filtered).dim(),
+            style(file_no_source).dim()
+        );
+
+        total_skipped += file_skipped;
+        total_filtered += file_filtered;
+        total_no_source += file_no_source;
+    }
+
+    // Summary
+    println!("\n{} Import complete:", style("✓").green());
+    println!("  Records scanned:    {}", style(total_scanned).dim());
+    println!("  Documents imported: {}", style(total_imported).green());
+    println!("  Documents skipped:  {}", style(total_skipped).yellow());
+    println!("  Records filtered:   {}", style(total_filtered).dim());
+    if total_no_source > 0 {
+        println!(
+            "  No matching source: {} (use --source to specify)",
+            style(total_no_source).yellow()
+        );
+    }
+    if total_errors > 0 {
+        println!("  Errors:             {}", style(total_errors).red());
+    }
+
+    Ok(())
+}
+
+/// Parse HTTP response from WARC body bytes.
+/// Returns (headers, body content) if successful.
+fn parse_http_response(data: &[u8]) -> Option<(HttpResponseHeaders, &[u8])> {
+    // Find header/body separator (double CRLF)
+    let separator = b"\r\n\r\n";
+    let sep_pos = data
+        .windows(separator.len())
+        .position(|w| w == separator)?;
+
+    let header_bytes = &data[..sep_pos];
+    let body = &data[sep_pos + separator.len()..];
+
+    // Parse status line and headers
+    let header_str = std::str::from_utf8(header_bytes).ok()?;
+    let mut lines = header_str.lines();
+
+    // Parse status line: "HTTP/1.1 200 OK"
+    let status_line = lines.next()?;
+    let status_ok = status_line.contains(" 200 ") || status_line.contains(" 206 ");
+
+    // Parse headers
+    let mut content_type = None;
+    for line in lines {
+        if let Some((key, value)) = line.split_once(':') {
+            let key = key.trim().to_lowercase();
+            let value = value.trim();
+            if key == "content-type" {
+                // Extract just the MIME type, not charset etc.
+                content_type = Some(
+                    value
+                        .split(';')
+                        .next()
+                        .unwrap_or(value)
+                        .trim()
+                        .to_string(),
+                );
+            }
+        }
+    }
+
+    Some((
+        HttpResponseHeaders {
+            status_ok,
+            content_type,
+        },
+        body,
+    ))
+}
+
+/// HTTP response headers extracted from WARC body.
+struct HttpResponseHeaders {
+    status_ok: bool,
+    content_type: Option<String>,
+}
+
+/// Guess MIME type from URL extension.
+fn guess_mime_type(url: &str) -> String {
+    let path = url.split('?').next().unwrap_or(url);
+    if path.ends_with(".pdf") || path.ends_with(".PDF") {
+        "application/pdf".to_string()
+    } else if path.ends_with(".html") || path.ends_with(".htm") {
+        "text/html".to_string()
+    } else if path.ends_with(".txt") {
+        "text/plain".to_string()
+    } else if path.ends_with(".jpg") || path.ends_with(".jpeg") {
+        "image/jpeg".to_string()
+    } else if path.ends_with(".png") {
+        "image/png".to_string()
+    } else if path.ends_with(".gif") {
+        "image/gif".to_string()
+    } else if path.ends_with(".doc") {
+        "application/msword".to_string()
+    } else if path.ends_with(".docx") {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document".to_string()
+    } else {
+        "application/octet-stream".to_string()
+    }
+}
+
+/// Discover new document URLs by analyzing patterns in existing URLs.
+async fn cmd_discover(
+    settings: &Settings,
+    source_id: &str,
+    limit: usize,
+    dry_run: bool,
+    min_examples: usize,
+) -> anyhow::Result<()> {
+    use crate::models::{CrawlUrl, DiscoveryMethod};
+    use regex::Regex;
+    use std::collections::{HashMap, HashSet};
+
+    let db_path = settings.database_path();
+    let doc_repo = DocumentRepository::new(&db_path, &settings.documents_dir)?;
+    let crawl_repo = CrawlRepository::new(&db_path)?;
+
+    println!(
+        "{} Analyzing URL patterns for source: {}",
+        style("🔍").cyan(),
+        style(source_id).bold()
+    );
+
+    // Get just the URLs for this source (lightweight query)
+    let urls = doc_repo.get_urls_by_source(source_id)?;
+    if urls.is_empty() {
+        println!("{} No documents found for source {}", style("!").yellow(), source_id);
+        return Ok(());
+    }
+
+    println!("  Found {} existing document URLs", urls.len());
+
+    // === PHASE 1: Parent Directory Discovery ===
+    // Extract unique parent directories from URLs that might have directory listings
+    println!(
+        "\n{} Phase 1: Analyzing parent directories...",
+        style("📁").cyan()
+    );
+
+    let mut parent_dirs: HashSet<String> = HashSet::new();
+
+    // Sample URLs if there are too many (parent dirs converge quickly)
+    let sample_size = 10000.min(urls.len());
+    let sample_urls: Vec<_> = if urls.len() > sample_size {
+        println!("  Sampling {} of {} URLs for directory analysis", sample_size, urls.len());
+        urls.iter().step_by(urls.len() / sample_size).take(sample_size).collect()
+    } else {
+        urls.iter().collect()
+    };
+
+    for url in sample_urls {
+        if let Ok(parsed) = url::Url::parse(url) {
+            let mut path = parsed.path().to_string();
+
+            // Remove the filename to get the directory
+            if let Some(last_slash) = path.rfind('/') {
+                path = path[..=last_slash].to_string();
+            }
+
+            // Walk up the directory tree
+            while path.len() > 1 {
+                // Reconstruct the full URL with this path
+                let mut parent_url = parsed.clone();
+                parent_url.set_path(&path);
+                parent_url.set_query(None);
+                parent_url.set_fragment(None);
+
+                let parent_str = parent_url.to_string();
+
+                // Don't add if it matches an existing document URL
+                if !urls.contains(&parent_str) {
+                    parent_dirs.insert(parent_str);
+                }
+
+                // Move up one level
+                if path.ends_with('/') {
+                    path = path[..path.len() - 1].to_string();
+                }
+                if let Some(last_slash) = path.rfind('/') {
+                    path = path[..=last_slash].to_string();
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    println!(
+        "  Found {} unique parent directories",
+        parent_dirs.len()
+    );
+
+    // === PHASE 2: Numeric Pattern Enumeration ===
+    println!(
+        "\n{} Phase 2: Analyzing numeric patterns...",
+        style("🔢").cyan()
+    );
+
+    // Find patterns with numeric sequences
+    // Pattern: look for numbers in URLs and try to find ranges
+    let num_regex = Regex::new(r"\d+").unwrap();
+
+    // Group URLs by their "template" (URL with numbers replaced by placeholder)
+    let mut templates: HashMap<String, Vec<(String, Vec<u64>)>> = HashMap::new();
+
+    for url in &urls {
+        // Find all numeric sequences in the URL
+        let nums: Vec<u64> = num_regex
+            .find_iter(url)
+            .filter_map(|m| m.as_str().parse().ok())
+            .collect();
+
+        if nums.is_empty() {
+            continue;
+        }
+
+        // Create template by replacing all numbers with {N} for grouping
+        let template = num_regex.replace_all(url, "{N}").to_string();
+        templates
+            .entry(template)
+            .or_default()
+            .push((url.to_string(), nums));
+    }
+
+    // Filter to templates with enough examples
+    let viable_templates: Vec<_> = templates
+        .iter()
+        .filter(|(_, examples)| examples.len() >= min_examples)
+        .collect();
+
+    if viable_templates.is_empty() {
+        println!(
+            "{} No URL patterns found with at least {} examples",
+            style("!").yellow(),
+            min_examples
+        );
+        return Ok(());
+    }
+
+    println!(
+        "\n{} Found {} URL pattern(s) with {} or more examples:",
+        style("📊").cyan(),
+        viable_templates.len(),
+        min_examples
+    );
+
+    let mut total_candidates = 0;
+    let mut new_urls: Vec<String> = Vec::new();
+
+    // Get existing URLs to avoid duplicates
+    let existing_urls: HashSet<String> = urls.iter().cloned().collect();
+    let queued_urls: HashSet<String> = crawl_repo
+        .get_pending_urls(source_id, 0)?
+        .into_iter()
+        .map(|u| u.url)
+        .collect();
+
+    for (template, examples) in viable_templates {
+        println!("\n  Template: {}", style(template).dim());
+        println!("  Examples: {} URLs", examples.len());
+
+        // For each position in the template, find the range of numbers
+        if examples.is_empty() {
+            continue;
+        }
+
+        // Get the number of numeric positions from first example
+        let num_positions = examples[0].1.len();
+        if num_positions == 0 {
+            continue;
+        }
+
+        // Focus on the last numeric position (most likely to be the document ID)
+        let last_pos = num_positions - 1;
+        let mut seen_nums: Vec<u64> = examples.iter().map(|(_, nums)| nums[last_pos]).collect();
+        seen_nums.sort();
+        seen_nums.dedup();
+
+        if seen_nums.len() < 2 {
+            continue;
+        }
+
+        let min_num = *seen_nums.first().unwrap();
+        let max_num = *seen_nums.last().unwrap();
+        let gaps: Vec<u64> = (min_num..=max_num)
+            .filter(|n| !seen_nums.contains(n))
+            .collect();
+
+        println!(
+            "  Last numeric position: {} - {} ({} gaps)",
+            min_num,
+            max_num,
+            gaps.len()
+        );
+
+        // Generate candidate URLs for gaps
+        let base_url = &examples[0].0;
+        let base_nums = &examples[0].1;
+
+        for gap_num in &gaps {
+            // Reconstruct URL with the gap number
+            let mut candidate = base_url.clone();
+            let mut offset = 0i64;
+
+            for (idx, m) in num_regex.find_iter(base_url).enumerate() {
+                let replacement = if idx == last_pos {
+                    gap_num.to_string()
+                } else {
+                    base_nums[idx].to_string()
+                };
+
+                let start = (m.start() as i64 + offset) as usize;
+                let end = (m.end() as i64 + offset) as usize;
+                let old_len = end - start;
+                let new_len = replacement.len();
+
+                candidate = format!(
+                    "{}{}{}",
+                    &candidate[..start],
+                    replacement,
+                    &candidate[end..]
+                );
+                offset += new_len as i64 - old_len as i64;
+            }
+
+            if !existing_urls.contains(&candidate) && !queued_urls.contains(&candidate) {
+                new_urls.push(candidate);
+                total_candidates += 1;
+
+                if limit > 0 && total_candidates >= limit {
+                    break;
+                }
+            }
+        }
+
+        // Also try extending beyond the range
+        let extend_count = 10.min(max_num - min_num + 1);
+        for i in 1..=extend_count {
+            let extended_num = max_num + i;
+
+            // Reconstruct URL with the extended number
+            let mut candidate = base_url.clone();
+            let mut offset = 0i64;
+
+            for (idx, m) in num_regex.find_iter(base_url).enumerate() {
+                let replacement = if idx == last_pos {
+                    extended_num.to_string()
+                } else {
+                    base_nums[idx].to_string()
+                };
+
+                let start = (m.start() as i64 + offset) as usize;
+                let end = (m.end() as i64 + offset) as usize;
+                let old_len = end - start;
+                let new_len = replacement.len();
+
+                candidate = format!(
+                    "{}{}{}",
+                    &candidate[..start],
+                    replacement,
+                    &candidate[end..]
+                );
+                offset += new_len as i64 - old_len as i64;
+            }
+
+            if !existing_urls.contains(&candidate) && !queued_urls.contains(&candidate) {
+                new_urls.push(candidate);
+                total_candidates += 1;
+
+                if limit > 0 && total_candidates >= limit {
+                    break;
+                }
+            }
+        }
+
+        if limit > 0 && total_candidates >= limit {
+            break;
+        }
+    }
+
+    // Filter parent directories to exclude already queued ones
+    let new_parent_dirs: Vec<String> = parent_dirs
+        .into_iter()
+        .filter(|u| !existing_urls.contains(u) && !queued_urls.contains(u))
+        .collect();
+
+    println!(
+        "\n{} Summary:",
+        style("📊").cyan()
+    );
+    println!("  {} parent directories to explore", new_parent_dirs.len());
+    println!("  {} candidate URLs from patterns", new_urls.len());
+
+    let total_new = new_parent_dirs.len() + new_urls.len();
+    if total_new == 0 {
+        println!("\n{} No new URLs to discover (all already queued or fetched)", style("!").yellow());
+        return Ok(());
+    }
+
+    if dry_run {
+        println!("\n{} Dry run - would add these URLs:", style("ℹ").blue());
+
+        println!("\n  Parent directories (for directory listing discovery):");
+        for url in new_parent_dirs.iter().take(10) {
+            println!("    {}", url);
+        }
+        if new_parent_dirs.len() > 10 {
+            println!("    ... and {} more directories", new_parent_dirs.len() - 10);
+        }
+
+        println!("\n  Pattern-enumerated URLs:");
+        for url in new_urls.iter().take(10) {
+            println!("    {}", url);
+        }
+        if new_urls.len() > 10 {
+            println!("    ... and {} more pattern URLs", new_urls.len() - 10);
+        }
+    } else {
+        println!("\n{} Adding URLs to crawl queue...", style("📥").cyan());
+
+        let mut added = 0;
+
+        // Add parent directories (these will be crawled for links, not as documents)
+        for url in &new_parent_dirs {
+            let crawl_url = CrawlUrl::new(
+                url.clone(),
+                source_id.to_string(),
+                DiscoveryMethod::PatternEnumeration, // Use same method for now
+                None,
+                0,
+            );
+
+            match crawl_repo.add_url(&crawl_url) {
+                Ok(true) => added += 1,
+                Ok(false) => {}
+                Err(e) => tracing::warn!("Failed to add directory URL {}: {}", url, e),
+            }
+        }
+
+        // Add pattern-enumerated URLs
+        for url in &new_urls {
+            let crawl_url = CrawlUrl::new(
+                url.clone(),
+                source_id.to_string(),
+                DiscoveryMethod::PatternEnumeration,
+                None,
+                0,
+            );
+
+            match crawl_repo.add_url(&crawl_url) {
+                Ok(true) => added += 1,
+                Ok(false) => {}
+                Err(e) => tracing::warn!("Failed to add URL {}: {}", url, e),
+            }
+        }
+
+        println!(
+            "{} Added {} URLs to crawl queue",
+            style("✓").green(),
+            added
+        );
+        println!(
+            "  Run {} to crawl discovered URLs",
+            style(format!("foiacquire crawl {}", source_id)).cyan()
+        );
+        println!(
+            "  Run {} to download discovered documents",
+            style(format!("foiacquire download {}", source_id)).cyan()
+        );
+    }
 
     Ok(())
 }

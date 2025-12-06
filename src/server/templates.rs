@@ -178,7 +178,7 @@ pub fn document_list(
     )
 }
 
-/// Render document detail page with version history.
+/// Render document detail page with page viewer as main focus.
 pub fn document_detail(
     doc_id: &str,
     title: &str,
@@ -194,7 +194,7 @@ pub fn document_detail(
     )],
     other_sources: &[String],
     extracted_text: Option<&str>,
-    synopsis: Option<&str>,
+    _synopsis: Option<&str>, // Not used in detail view (for index only)
     virtual_files: &[VirtualFile],
     prev_id: Option<&str>,
     prev_title: Option<&str>,
@@ -206,191 +206,51 @@ pub fn document_detail(
     page_count: Option<u32>,
     current_version_id: Option<i64>,
 ) -> String {
-    let mut version_rows = String::new();
+    // Build version timeline (compact horizontal display)
+    let version_timeline = if !versions.is_empty() {
+        let mut items = String::new();
+        for (i, (_hash, path, size, acquired_at, original_filename, server_date)) in
+            versions.iter().enumerate()
+        {
+            let is_current = i == 0;
+            let date_str = server_date
+                .map(|dt| dt.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|| acquired_at.format("%Y-%m-%d").to_string());
+            let size_str = format_size(*size);
+            let filename = original_filename
+                .as_ref()
+                .map(|f| html_escape(f))
+                .unwrap_or_else(|| "unknown".to_string());
 
-    for (i, (hash, path, size, acquired_at, original_filename, server_date)) in
-        versions.iter().enumerate()
-    {
-        let current = if i == 0 { " (current)" } else { "" };
-        let size_str = format_size(*size);
-        let acquired_str = acquired_at.format("%Y-%m-%d %H:%M:%S").to_string();
-        let server_date_str = server_date
-            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-            .unwrap_or_else(|| "—".to_string());
-        let filename_str = original_filename
-            .as_ref()
-            .map(|f| html_escape(f))
-            .unwrap_or_else(|| "—".to_string());
-
-        version_rows.push_str(&format!(
-            r#"
-        <tr>
-            <td><a href="/files/{}">{}{}</a></td>
-            <td title="{}">{}</td>
-            <td>{}</td>
-            <td>{}</td>
-            <td>{}</td>
-        </tr>
-        "#,
-            path,
-            hash.chars().take(8).collect::<String>(),
-            current,
-            filename_str,
-            filename_str,
-            size_str,
-            server_date_str,
-            acquired_str
-        ));
-    }
+            items.push_str(&format!(
+                r#"<a href="/files/{}" class="version-item{}" title="{} ({})">
+                    <span class="version-date">{}</span>
+                    <span class="version-size">{}</span>
+                </a>"#,
+                path,
+                if is_current { " current" } else { "" },
+                filename,
+                size_str,
+                date_str,
+                size_str
+            ));
+        }
+        format!(
+            r#"<div class="version-timeline"><span class="timeline-label">Versions:</span>{}</div>"#,
+            items
+        )
+    } else {
+        String::new()
+    };
 
     let other_sources_section = if !other_sources.is_empty() {
         format!(
-            r#"
-        <section class="also-in">
-            <h3>Also available from:</h3>
-            <ul>
-                {}
-            </ul>
-        </section>
-        "#,
+            r#"<div class="also-in-compact">Also in: {}</div>"#,
             other_sources
                 .iter()
-                .map(|s| format!("<li><a href=\"/sources/{}\">{}</a></li>", s, s))
+                .map(|s| format!("<a href=\"/sources/{}\">{}</a>", s, s))
                 .collect::<Vec<_>>()
-                .join("\n")
-        )
-    } else {
-        String::new()
-    };
-
-    let text_section = if let Some(text) = extracted_text {
-        format!(
-            r#"
-        <section class="extracted-text">
-            <h3>Extracted Text</h3>
-            <pre>{}</pre>
-        </section>
-        "#,
-            html_escape(text)
-        )
-    } else {
-        String::new()
-    };
-
-    // Archive contents section (virtual files)
-    let archive_section = if !virtual_files.is_empty() {
-        let mut file_rows = String::new();
-        for vf in virtual_files {
-            let icon = mime_icon(&vf.mime_type);
-            let size_str = format_size(vf.file_size);
-            let status_badge = match vf.status {
-                VirtualFileStatus::Pending => {
-                    r#"<span class="status-badge pending">pending</span>"#
-                }
-                VirtualFileStatus::OcrComplete => {
-                    r#"<span class="status-badge complete">OCR</span>"#
-                }
-                VirtualFileStatus::Failed => r#"<span class="status-badge failed">failed</span>"#,
-                VirtualFileStatus::Unsupported => {
-                    r#"<span class="status-badge unsupported">—</span>"#
-                }
-            };
-
-            // Synopsis preview if available
-            let synopsis_str = vf
-                .synopsis
-                .as_ref()
-                .map(|s| {
-                    let preview: String = s.chars().take(150).collect();
-                    format!(
-                        r#"<div class="vf-synopsis">{}{}</div>"#,
-                        html_escape(&preview),
-                        if s.len() > 150 { "..." } else { "" }
-                    )
-                })
-                .unwrap_or_default();
-
-            // Tags if available
-            let tags_str: String = vf
-                .tags
-                .iter()
-                .take(5)
-                .map(|t| format!(r#"<span class="tag-small">{}</span>"#, html_escape(t)))
-                .collect::<Vec<_>>()
-                .join(" ");
-
-            let tags_section = if !tags_str.is_empty() {
-                format!(r#"<div class="vf-tags">{}</div>"#, tags_str)
-            } else {
-                String::new()
-            };
-
-            file_rows.push_str(&format!(
-                r#"
-            <tr class="archive-file" data-vf-id="{}">
-                <td>
-                    <span class="vf-icon">{}</span>
-                    <span class="vf-path" title="{}">{}</span>
-                    {}
-                    {}
-                </td>
-                <td>{}</td>
-                <td>{}</td>
-                <td>{}</td>
-            </tr>
-            "#,
-                vf.id,
-                icon,
-                html_escape(&vf.archive_path),
-                html_escape(&vf.filename),
-                synopsis_str,
-                tags_section,
-                vf.mime_type,
-                size_str,
-                status_badge
-            ));
-        }
-
-        // Count by status
-        let total = virtual_files.len();
-        let ocr_complete = virtual_files
-            .iter()
-            .filter(|v| v.status == VirtualFileStatus::OcrComplete)
-            .count();
-        let pending = virtual_files
-            .iter()
-            .filter(|v| v.status == VirtualFileStatus::Pending)
-            .count();
-
-        let status_summary = if ocr_complete > 0 || pending > 0 {
-            format!(
-                r#"<span class="archive-stats">{} files ({} processed, {} pending)</span>"#,
-                total, ocr_complete, pending
-            )
-        } else {
-            format!(r#"<span class="archive-stats">{} files</span>"#, total)
-        };
-
-        format!(
-            r#"
-        <section class="archive-contents">
-            <h3>Archive Contents {}</h3>
-            <table class="file-listing archive-listing">
-                <thead>
-                    <tr>
-                        <th>File</th>
-                        <th>Type</th>
-                        <th>Size</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {}
-                </tbody>
-            </table>
-        </section>
-        "#,
-            status_summary, file_rows
+                .join(", ")
         )
     } else {
         String::new()
@@ -445,74 +305,386 @@ pub fn document_detail(
         String::new()
     };
 
-    // Synopsis section (shown after file list)
-    let synopsis_section = if let Some(syn) = synopsis {
+    // Main page viewer - this is the focus of the detail view
+    let pages_section = if let (Some(count), Some(version_id)) = (page_count, current_version_id) {
+        if count > 0 {
+            format!(
+                r#"
+            <div id="pages-container"
+                 class="page-viewer"
+                 data-doc-id="{}"
+                 data-version-id="{}"
+                 data-total-pages="{}"
+                 data-loaded="0">
+                <div id="pages-list"></div>
+                <div id="pages-loading" class="loading-indicator">Loading pages...</div>
+                <div id="pages-end" class="pages-end" style="display:none">End of document ({} pages)</div>
+            </div>
+
+            <script>
+            (function() {{
+                const container = document.getElementById('pages-container');
+                const pagesList = document.getElementById('pages-list');
+                const loadingIndicator = document.getElementById('pages-loading');
+                const endIndicator = document.getElementById('pages-end');
+
+                const docId = container.dataset.docId;
+                const versionId = container.dataset.versionId;
+                const totalPages = parseInt(container.dataset.totalPages);
+
+                let loadedPages = 0;
+                let isLoading = false;
+                let hasMore = true;
+                const PAGES_PER_LOAD = 3;
+
+                async function loadMorePages() {{
+                    if (isLoading || !hasMore) return;
+
+                    isLoading = true;
+                    loadingIndicator.style.display = 'block';
+
+                    try {{
+                        const response = await fetch(
+                            `/api/documents/${{docId}}/pages?version=${{versionId}}&offset=${{loadedPages}}&limit=${{PAGES_PER_LOAD}}`
+                        );
+
+                        if (!response.ok) throw new Error('Failed to load pages');
+
+                        const data = await response.json();
+
+                        for (const page of data.pages) {{
+                            const pageEl = createPageElement(page);
+                            pagesList.appendChild(pageEl);
+                        }}
+
+                        loadedPages += data.pages.length;
+                        hasMore = data.has_more;
+
+                        if (!hasMore) {{
+                            loadingIndicator.style.display = 'none';
+                            endIndicator.style.display = 'block';
+                        }}
+                    }} catch (err) {{
+                        console.error('Error loading pages:', err);
+                        loadingIndicator.textContent = 'Error loading pages. Click to retry.';
+                        loadingIndicator.onclick = () => {{
+                            loadingIndicator.textContent = 'Loading pages...';
+                            loadingIndicator.onclick = null;
+                            isLoading = false;
+                            loadMorePages();
+                        }};
+                    }} finally {{
+                        isLoading = false;
+                    }}
+                }}
+
+                function createPageElement(page) {{
+                    const div = document.createElement('div');
+                    div.className = 'page-item';
+                    div.id = `page-${{page.page_number}}`;
+
+                    const content = document.createElement('div');
+                    content.className = 'page-content';
+
+                    // Image column (left)
+                    const imageCol = document.createElement('div');
+                    imageCol.className = 'page-image-col';
+                    if (page.image_base64) {{
+                        const img = document.createElement('img');
+                        img.src = page.image_base64;
+                        img.alt = `Page ${{page.page_number}}`;
+                        img.className = 'page-image';
+                        img.loading = 'lazy';
+                        imageCol.appendChild(img);
+                    }} else {{
+                        imageCol.innerHTML = '<div class="no-image">No preview</div>';
+                    }}
+
+                    // Text column (right)
+                    const textCol = document.createElement('div');
+                    textCol.className = 'page-text-col';
+
+                    const header = document.createElement('div');
+                    header.className = 'page-text-header';
+
+                    const originalText = page.final_text || page.ocr_text || page.pdf_text || '';
+                    const deepseekText = page.deepseek_text || '';
+                    const hasComparison = !!deepseekText;
+
+                    if (hasComparison) {{
+                        // Show tabs for comparison
+                        header.innerHTML = `
+                            <span class="page-num">Page ${{page.page_number}}</span>
+                            <div class="ocr-tabs">
+                                <button class="ocr-tab active" data-tab="original">Original</button>
+                                <button class="ocr-tab" data-tab="deepseek">DeepSeek</button>
+                            </div>
+                        `;
+
+                        const originalPre = document.createElement('pre');
+                        originalPre.className = 'page-text ocr-panel active';
+                        originalPre.dataset.panel = 'original';
+                        originalPre.textContent = originalText || '(No text extracted)';
+
+                        const deepseekPre = document.createElement('pre');
+                        deepseekPre.className = 'page-text ocr-panel';
+                        deepseekPre.dataset.panel = 'deepseek';
+                        deepseekPre.textContent = deepseekText;
+
+                        textCol.appendChild(header);
+                        textCol.appendChild(originalPre);
+                        textCol.appendChild(deepseekPre);
+
+                        // Tab switching
+                        header.querySelectorAll('.ocr-tab').forEach(tab => {{
+                            tab.addEventListener('click', () => {{
+                                const target = tab.dataset.tab;
+                                header.querySelectorAll('.ocr-tab').forEach(t => t.classList.remove('active'));
+                                tab.classList.add('active');
+                                textCol.querySelectorAll('.ocr-panel').forEach(p => {{
+                                    p.classList.toggle('active', p.dataset.panel === target);
+                                }});
+                            }});
+                        }});
+                    }} else {{
+                        header.innerHTML = `<span class="page-num">Page ${{page.page_number}}</span>`;
+                        const pre = document.createElement('pre');
+                        pre.className = 'page-text';
+                        pre.textContent = originalText || '(No text extracted)';
+                        textCol.appendChild(header);
+                        textCol.appendChild(pre);
+                    }}
+
+                    content.appendChild(imageCol);
+                    content.appendChild(textCol);
+                    div.appendChild(content);
+
+                    return div;
+                }}
+
+                // Intersection Observer for infinite scroll
+                const observer = new IntersectionObserver((entries) => {{
+                    for (const entry of entries) {{
+                        if (entry.isIntersecting && hasMore) {{
+                            loadMorePages();
+                        }}
+                    }}
+                }}, {{
+                    rootMargin: '400px'
+                }});
+
+                observer.observe(loadingIndicator);
+
+                // Initial load
+                loadMorePages();
+            }})();
+            </script>
+            "#,
+                doc_id, version_id, count, count
+            )
+        } else {
+            // No pages, show full extracted text if available
+            if let Some(text) = extracted_text {
+                format!(
+                    r#"<div class="page-viewer fallback-text">
+                        <pre class="extracted-text-full">{}</pre>
+                    </div>"#,
+                    html_escape(text)
+                )
+            } else {
+                String::new()
+            }
+        }
+    } else {
+        // No page data, show full extracted text if available
+        if let Some(text) = extracted_text {
+            format!(
+                r#"<div class="page-viewer fallback-text">
+                    <pre class="extracted-text-full">{}</pre>
+                </div>"#,
+                html_escape(text)
+            )
+        } else {
+            String::new()
+        }
+    };
+
+    // Re-OCR section with DeepSeek button
+    let reocr_section = if page_count.is_some() && page_count.unwrap() > 0 {
         format!(
             r#"
-        <section class="synopsis">
-            <h3>Synopsis</h3>
-            <div class="synopsis-content">{}</div>
-        </section>
-        "#,
-            html_escape(syn)
+            <div class="reocr-section">
+                <button id="reocr-btn" class="btn-action" data-doc-id="{}">
+                    Run DeepSeek OCR
+                </button>
+                <span id="reocr-status"></span>
+            </div>
+            <script>
+            (function() {{
+                const btn = document.getElementById('reocr-btn');
+                const status = document.getElementById('reocr-status');
+                if (!btn) return;
+
+                let pollInterval = null;
+
+                async function pollStatus() {{
+                    try {{
+                        const resp = await fetch('/api/documents/reocr/status');
+                        const data = await resp.json();
+
+                        if (data.status === 'running') {{
+                            status.textContent = `Processing: ${{data.pages_processed}}/${{data.pages_total}} pages...`;
+                            status.className = 'reocr-progress';
+                        }} else if (data.status === 'complete') {{
+                            clearInterval(pollInterval);
+                            pollInterval = null;
+                            status.textContent = `Completed: ${{data.pages_processed}}/${{data.pages_total}} pages`;
+                            status.className = 'reocr-success';
+                            btn.disabled = false;
+                            btn.textContent = 'Re-run DeepSeek OCR';
+                            // Reload page to show new OCR results
+                            if (data.pages_processed > 0) {{
+                                setTimeout(() => location.reload(), 1500);
+                            }}
+                        }} else if (data.status === 'idle') {{
+                            clearInterval(pollInterval);
+                            pollInterval = null;
+                            btn.disabled = false;
+                            btn.textContent = 'Run DeepSeek OCR';
+                        }}
+                    }} catch (err) {{
+                        console.error('Poll error:', err);
+                    }}
+                }}
+
+                btn.addEventListener('click', async function() {{
+                    const docId = btn.dataset.docId;
+                    btn.disabled = true;
+                    btn.textContent = 'Starting...';
+                    status.textContent = 'Initializing DeepSeek OCR...';
+                    status.className = 'reocr-progress';
+
+                    try {{
+                        const response = await fetch(`/api/documents/${{docId}}/reocr`, {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json' }},
+                            body: JSON.stringify({{ backend: 'deepseek' }})
+                        }});
+
+                        const data = await response.json();
+
+                        if (data.status === 'started') {{
+                            // Start polling for progress
+                            btn.textContent = 'Running...';
+                            status.textContent = `Processing: 0/${{data.pages_total}} pages...`;
+                            pollInterval = setInterval(pollStatus, 2000);
+                        }} else if (data.status === 'busy') {{
+                            // Another job is running
+                            status.textContent = data.message || 'Another OCR job is running';
+                            status.className = 'reocr-error';
+                            btn.disabled = false;
+                            btn.textContent = 'Run DeepSeek OCR';
+                        }} else if (data.status === 'complete') {{
+                            // Already done
+                            status.textContent = 'All pages already have DeepSeek OCR results';
+                            status.className = 'reocr-success';
+                            btn.disabled = false;
+                            btn.textContent = 'Re-run DeepSeek OCR';
+                        }} else if (data.status === 'error') {{
+                            status.textContent = data.message || 'OCR failed';
+                            status.className = 'reocr-error';
+                            btn.disabled = false;
+                            btn.textContent = 'Retry DeepSeek OCR';
+                        }}
+                    }} catch (err) {{
+                        status.textContent = `Error: ${{err.message}}`;
+                        status.className = 'reocr-error';
+                        btn.disabled = false;
+                        btn.textContent = 'Retry DeepSeek OCR';
+                    }}
+                }});
+
+                // Check if a job is already running when page loads
+                pollStatus();
+            }})();
+            </script>
+            "#,
+            doc_id
         )
     } else {
         String::new()
     };
 
-    // View pages section (for PDFs with page data)
-    let pages_section = if let (Some(count), Some(version_id)) = (page_count, current_version_id) {
-        if count > 0 {
-            format!(
-                r#"
-            <section class="document-pages">
-                <h3>Document Pages</h3>
-                <p>{} pages available. <a href="/documents/{}/pages?version={}">View page-by-page with OCR text</a></p>
-            </section>
-            "#,
-                count, doc_id, version_id
-            )
-        } else {
-            String::new()
+    // Archive contents section (for ZIP/archive files)
+    let archive_section = if !virtual_files.is_empty() {
+        let mut file_rows = String::new();
+        for vf in virtual_files {
+            let icon = mime_icon(&vf.mime_type);
+            let size_str = format_size(vf.file_size);
+            let status_badge = match vf.status {
+                VirtualFileStatus::Pending => {
+                    r#"<span class="status-badge pending">pending</span>"#
+                }
+                VirtualFileStatus::OcrComplete => {
+                    r#"<span class="status-badge complete">OCR</span>"#
+                }
+                VirtualFileStatus::Failed => r#"<span class="status-badge failed">failed</span>"#,
+                VirtualFileStatus::Unsupported => {
+                    r#"<span class="status-badge unsupported">—</span>"#
+                }
+            };
+
+            file_rows.push_str(&format!(
+                r#"<tr class="archive-file" data-vf-id="{}">
+                    <td><span class="vf-icon">{}</span> {}</td>
+                    <td>{}</td>
+                    <td>{}</td>
+                    <td>{}</td>
+                </tr>"#,
+                vf.id,
+                icon,
+                html_escape(&vf.filename),
+                vf.mime_type,
+                size_str,
+                status_badge
+            ));
         }
+
+        let total = virtual_files.len();
+        format!(
+            r#"
+        <section class="archive-contents">
+            <h3>Archive Contents ({} files)</h3>
+            <table class="file-listing archive-listing">
+                <thead>
+                    <tr><th>File</th><th>Type</th><th>Size</th><th>Status</th></tr>
+                </thead>
+                <tbody>{}</tbody>
+            </table>
+        </section>
+        "#,
+            total, file_rows
+        )
     } else {
         String::new()
     };
 
     format!(
         r#"
-    <nav class="breadcrumb">
-        <a href="/sources">Sources</a> /
-        <a href="/sources/{}">{}</a> / {}
-    </nav>
-
-    {}
-
-    <div class="document-meta">
-        <p><strong>Source URL:</strong> <a href="{}" target="_blank">{}</a></p>
+    <div class="document-header">
+        <nav class="breadcrumb">
+            <a href="/">Browse</a> /
+            <a href="/?source={}">{}</a> /
+            <span class="current">{}</span>
+        </nav>
+        {}
+        <h1 class="document-title">{}</h1>
+        <div class="document-meta-compact">
+            <a href="{}" target="_blank" class="source-link">{}</a>
+            {}
+        </div>
+        {}
     </div>
-
-    {}
-
-    <section class="versions">
-        <h3>Version History</h3>
-        <table class="file-listing">
-            <thead>
-                <tr>
-                    <th>Version</th>
-                    <th>Original Filename</th>
-                    <th>Size</th>
-                    <th>Server Date</th>
-                    <th>Acquired</th>
-                </tr>
-            </thead>
-            <tbody>
-                {}
-            </tbody>
-        </table>
-    </section>
-
-    {}
 
     {}
 
@@ -524,176 +696,17 @@ pub fn document_detail(
     "#,
         source_id,
         source_id,
-        title,
+        html_escape(title),
         doc_nav,
+        html_escape(title),
         source_url,
         source_url,
         other_sources_section,
-        version_rows,
-        synopsis_section,
+        version_timeline,
         pages_section,
+        reocr_section,
         archive_section,
-        text_section,
         doc_nav
-    )
-}
-
-/// Render document pages view with infinite scroll.
-pub fn document_pages_view(
-    doc_id: &str,
-    title: &str,
-    source_id: &str,
-    version_id: i64,
-    page_count: u32,
-) -> String {
-    format!(
-        r#"
-    <nav class="breadcrumb">
-        <a href="/sources">Sources</a> /
-        <a href="/sources/{source_id}">{source_id}</a> /
-        <a href="/documents/{doc_id}">{title}</a> /
-        Pages
-    </nav>
-
-    <div class="pages-header">
-        <p><strong>{page_count}</strong> pages in this document</p>
-        <a href="/documents/{doc_id}" class="btn-small">← Back to document</a>
-    </div>
-
-    <div id="pages-container"
-         data-doc-id="{doc_id}"
-         data-version-id="{version_id}"
-         data-total-pages="{page_count}"
-         data-loaded="0">
-        <div id="pages-list"></div>
-        <div id="pages-loading" class="loading-indicator">Loading pages...</div>
-        <div id="pages-end" class="pages-end" style="display:none">End of document</div>
-    </div>
-
-    <script>
-    (function() {{
-        const container = document.getElementById('pages-container');
-        const pagesList = document.getElementById('pages-list');
-        const loadingIndicator = document.getElementById('pages-loading');
-        const endIndicator = document.getElementById('pages-end');
-
-        const docId = container.dataset.docId;
-        const versionId = container.dataset.versionId;
-        const totalPages = parseInt(container.dataset.totalPages);
-
-        let loadedPages = 0;
-        let isLoading = false;
-        let hasMore = true;
-        const PAGES_PER_LOAD = 5;
-
-        async function loadMorePages() {{
-            if (isLoading || !hasMore) return;
-
-            isLoading = true;
-            loadingIndicator.style.display = 'block';
-
-            try {{
-                const response = await fetch(
-                    `/api/documents/${{docId}}/pages?version=${{versionId}}&offset=${{loadedPages}}&limit=${{PAGES_PER_LOAD}}`
-                );
-
-                if (!response.ok) throw new Error('Failed to load pages');
-
-                const data = await response.json();
-
-                for (const page of data.pages) {{
-                    const pageEl = createPageElement(page);
-                    pagesList.appendChild(pageEl);
-                }}
-
-                loadedPages += data.pages.length;
-                hasMore = data.has_more;
-
-                if (!hasMore) {{
-                    loadingIndicator.style.display = 'none';
-                    endIndicator.style.display = 'block';
-                }}
-            }} catch (err) {{
-                console.error('Error loading pages:', err);
-                loadingIndicator.textContent = 'Error loading pages. Click to retry.';
-                loadingIndicator.onclick = () => {{
-                    loadingIndicator.textContent = 'Loading pages...';
-                    loadingIndicator.onclick = null;
-                    isLoading = false;
-                    loadMorePages();
-                }};
-            }} finally {{
-                isLoading = false;
-            }}
-        }}
-
-        function createPageElement(page) {{
-            const div = document.createElement('div');
-            div.className = 'page-item';
-            div.id = `page-${{page.page_number}}`;
-
-            const header = document.createElement('div');
-            header.className = 'page-header';
-            header.innerHTML = `<h3>Page ${{page.page_number}}</h3><span class="ocr-status status-${{page.ocr_status}}">${{page.ocr_status}}</span>`;
-
-            const content = document.createElement('div');
-            content.className = 'page-content';
-
-            // Image column
-            const imageCol = document.createElement('div');
-            imageCol.className = 'page-image-col';
-            if (page.image_base64) {{
-                const img = document.createElement('img');
-                img.src = page.image_base64;
-                img.alt = `Page ${{page.page_number}}`;
-                img.className = 'page-image';
-                imageCol.appendChild(img);
-            }} else {{
-                imageCol.innerHTML = '<div class="no-image">No image available</div>';
-            }}
-
-            // Text column
-            const textCol = document.createElement('div');
-            textCol.className = 'page-text-col';
-
-            const textToShow = page.final_text || page.ocr_text || page.pdf_text || '';
-            const pre = document.createElement('pre');
-            pre.className = 'page-text';
-            pre.textContent = textToShow || '(No text extracted)';
-            textCol.appendChild(pre);
-
-            content.appendChild(imageCol);
-            content.appendChild(textCol);
-
-            div.appendChild(header);
-            div.appendChild(content);
-
-            return div;
-        }}
-
-        // Intersection Observer for infinite scroll
-        const observer = new IntersectionObserver((entries) => {{
-            for (const entry of entries) {{
-                if (entry.isIntersecting && hasMore) {{
-                    loadMorePages();
-                }}
-            }}
-        }}, {{
-            rootMargin: '200px'
-        }});
-
-        observer.observe(loadingIndicator);
-
-        // Initial load
-        loadMorePages();
-    }})();
-    </script>
-    "#,
-        source_id = html_escape(source_id),
-        doc_id = html_escape(doc_id),
-        title = html_escape(title),
-        version_id = version_id,
-        page_count = page_count,
     )
 }
 
@@ -879,11 +892,13 @@ pub fn tag_documents(
 /// Documents includes PDFs, Word docs, emails, and text files.
 /// Data includes spreadsheets, CSV, JSON, XML.
 /// Images is separate.
+/// Archives includes ZIP, TAR, etc.
 /// Other catches everything else.
 pub const TYPE_CATEGORIES: &[(&str, &str)] = &[
     ("documents", "Documents"),
-    ("data", "Data"),
     ("images", "Images"),
+    ("data", "Data"),
+    ("archives", "Archives"),
     ("other", "Other"),
 ];
 
@@ -1189,30 +1204,45 @@ pub fn browse_page(
         ));
     }
 
-    // Build type toggle switches
-    let mut type_toggles = String::new();
-    for (cat_id, cat_name) in TYPE_CATEGORIES {
-        let count = type_stats
-            .iter()
-            .find(|(c, _)| c == *cat_id)
-            .map(|(_, n)| *n)
-            .unwrap_or(0);
-        if count > 0 {
-            let checked = if active_types.is_empty() || active_types.iter().any(|t| t == *cat_id) {
-                "checked"
-            } else {
-                ""
-            };
-            type_toggles.push_str(&format!(
-                r#"<label class="type-toggle">
-                    <input type="checkbox" name="type" value="{}" {} data-count="{}">
-                    <span class="toggle-label">{}</span>
-                    <span class="toggle-count">{}</span>
-                </label>"#,
-                cat_id, checked, count, cat_name, count
-            ));
+    // Build type toggle switches - show loading placeholder if empty
+    let type_toggles = if type_stats.is_empty() {
+        r#"<span class="loading-placeholder" id="types-loading">Loading types...</span>"#.to_string()
+    } else {
+        let mut toggles = String::new();
+        for (cat_id, cat_name) in TYPE_CATEGORIES {
+            let count = type_stats
+                .iter()
+                .find(|(c, _)| c == *cat_id)
+                .map(|(_, n)| *n)
+                .unwrap_or(0);
+            if count > 0 {
+                let checked = if active_types.is_empty() || active_types.iter().any(|t| t == *cat_id) {
+                    "checked"
+                } else {
+                    ""
+                };
+                toggles.push_str(&format!(
+                    r#"<label class="type-toggle">
+                        <input type="checkbox" name="type" value="{}" {} data-count="{}">
+                        <span class="toggle-label">{}</span>
+                        <span class="toggle-count">{}</span>
+                    </label>"#,
+                    cat_id, checked, count, cat_name, count
+                ));
+            }
         }
-    }
+        toggles
+    };
+
+    // Active types as JSON for JS async loading
+    let active_types_json: String = format!(
+        "[{}]",
+        active_types
+            .iter()
+            .map(|t| format!("\"{}\"", html_escape(t)))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
 
     // Build tag datalist for autocomplete (all tags, sorted by count)
     let mut tag_options = String::new();
@@ -1232,22 +1262,35 @@ pub fn browse_page(
         )
     }).collect::<Vec<_>>().join(" ");
 
-    // Build source dropdown options
-    let mut source_options = String::from(r#"<option value="">All Sources</option>"#);
-    for (source_id, source_name, count) in sources {
-        let selected = if active_source == Some(source_id.as_str()) {
-            " selected"
-        } else {
-            ""
-        };
-        source_options.push_str(&format!(
-            r#"<option value="{}"{}>{}  ({})</option>"#,
-            html_escape(source_id),
-            selected,
-            html_escape(source_name),
-            count
-        ));
-    }
+    // Build source dropdown options - show loading if empty
+    let source_options = if sources.is_empty() {
+        let active_opt = active_source
+            .map(|s| format!(r#"<option value="{}" selected>{}</option>"#, html_escape(s), html_escape(s)))
+            .unwrap_or_default();
+        format!(r#"<option value="">Loading sources...</option>{}"#, active_opt)
+    } else {
+        let mut opts = String::from(r#"<option value="">All Sources</option>"#);
+        for (source_id, source_name, count) in sources {
+            let selected = if active_source == Some(source_id.as_str()) {
+                " selected"
+            } else {
+                ""
+            };
+            opts.push_str(&format!(
+                r#"<option value="{}"{}>{}  ({})</option>"#,
+                html_escape(source_id),
+                selected,
+                html_escape(source_name),
+                count
+            ));
+        }
+        opts
+    };
+
+    // Active source as JS string for async loading
+    let active_source_js = active_source
+        .map(|s| format!("\"{}\"", html_escape(s)))
+        .unwrap_or_else(|| "null".to_string());
 
     // Active tags as JSON for JavaScript
     let active_tags_json: String = format!(
@@ -1438,6 +1481,109 @@ pub fn browse_page(
             activeTags.splice(index, 1);
             updateFilters();
         }};
+
+        // Async loading of filter options
+        const activeTypes = {};
+        const activeSource = {};
+
+        // Type categories mapping
+        const TYPE_CATEGORIES = {{
+            'pdf': 'Documents',
+            'image': 'Images',
+            'word': 'Word Documents',
+            'excel': 'Spreadsheets',
+            'email': 'Email',
+            'html': 'Web Pages',
+            'text': 'Text Files',
+            'archive': 'Archives',
+            'other': 'Other'
+        }};
+
+        // Load type stats
+        async function loadTypes() {{
+            const container = document.querySelector('.type-toggles');
+            const loading = document.getElementById('types-loading');
+            if (!loading) return; // Already loaded from server
+
+            try {{
+                const res = await fetch('/api/types');
+                const data = await res.json();
+
+                // Aggregate counts by category
+                const catCounts = {{}};
+                data.forEach(item => {{
+                    const cat = item.category;
+                    catCounts[cat] = (catCounts[cat] || 0) + item.count;
+                }});
+
+                // Build toggles HTML
+                let html = '';
+                for (const [catId, catName] of Object.entries(TYPE_CATEGORIES)) {{
+                    const count = catCounts[catId] || 0;
+                    if (count > 0) {{
+                        const checked = activeTypes.length === 0 || activeTypes.includes(catId) ? 'checked' : '';
+                        html += `<label class="type-toggle">
+                            <input type="checkbox" name="type" value="${{catId}}" ${{checked}} data-count="${{count}}">
+                            <span class="toggle-label">${{catName}}</span>
+                            <span class="toggle-count">${{count}}</span>
+                        </label>`;
+                    }}
+                }}
+                container.innerHTML = html;
+
+                // Re-attach event listeners
+                document.querySelectorAll('.type-toggle input').forEach(t => {{
+                    t.addEventListener('change', updateFilters);
+                }});
+            }} catch (e) {{
+                console.error('Failed to load types:', e);
+                container.innerHTML = '<span class="error">Failed to load types</span>';
+            }}
+        }}
+
+        // Load sources
+        async function loadSources() {{
+            const select = document.getElementById('source-select');
+            if (select.options.length > 2) return; // Already loaded from server
+
+            try {{
+                const res = await fetch('/api/sources');
+                const data = await res.json();
+
+                let html = '<option value="">All Sources</option>';
+                data.forEach(s => {{
+                    const selected = activeSource === s.id ? ' selected' : '';
+                    html += `<option value="${{s.id}}"${{selected}}>${{s.name}}  (${{s.count}})</option>`;
+                }});
+                select.innerHTML = html;
+            }} catch (e) {{
+                console.error('Failed to load sources:', e);
+            }}
+        }}
+
+        // Load tags for autocomplete
+        async function loadTags() {{
+            const datalist = document.getElementById('tag-list');
+            if (datalist.options.length > 0) return; // Already loaded
+
+            try {{
+                const res = await fetch('/api/tags');
+                const data = await res.json();
+
+                let html = '';
+                data.forEach(t => {{
+                    html += `<option value="${{t.tag}}" data-count="${{t.count}}">`;
+                }});
+                datalist.innerHTML = html;
+            }} catch (e) {{
+                console.error('Failed to load tags:', e);
+            }}
+        }}
+
+        // Load all filter data async
+        loadTypes();
+        loadSources();
+        loadTags();
     }})();
     </script>
     "#,
@@ -1452,7 +1598,9 @@ pub fn browse_page(
         active_tags_json,
         per_page,
         prev_cursor_js,
-        next_cursor_js
+        next_cursor_js,
+        active_types_json,
+        active_source_js
     )
 }
 
@@ -2330,6 +2478,249 @@ code {
     margin-top: 0;
 }
 
+/* Document detail view - header and version timeline */
+.document-header {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.document-title {
+    margin: 0.5rem 0;
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.document-meta-compact {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+}
+
+.document-meta-compact .source-link {
+    color: var(--link);
+    word-break: break-all;
+}
+
+.also-in-compact {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+}
+
+.also-in-compact a {
+    color: var(--link);
+    margin: 0 0.25rem;
+}
+
+/* Version timeline - horizontal compact display */
+.version-timeline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    padding: 0.5rem;
+    background: var(--ruler-bg);
+    border-radius: 3px;
+}
+
+.timeline-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-right: 0.25rem;
+}
+
+.version-item {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0.35rem 0.6rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    text-decoration: none;
+    font-size: 11px;
+    transition: background-color 0.15s, border-color 0.15s;
+}
+
+.version-item:hover {
+    background: var(--highlight);
+    border-color: var(--link);
+}
+
+.version-item.current {
+    background: var(--link);
+    border-color: var(--link);
+    color: white;
+}
+
+.version-item.current .version-date,
+.version-item.current .version-size {
+    color: white;
+}
+
+.version-date {
+    font-weight: 500;
+    color: var(--text);
+}
+
+.version-size {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+/* Page text header */
+.page-text-header {
+    background: var(--ruler-bg);
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.page-num {
+    color: var(--text-muted);
+}
+
+/* Fallback text (when no page images available) */
+.page-viewer.fallback-text {
+    padding: 0;
+}
+
+.extracted-text-full {
+    margin: 0;
+    padding: 1rem;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+/* Page item styling for individual pages */
+.page-item {
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 1rem;
+}
+
+.page-item:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+/* Re-OCR section */
+.reocr-section {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 1rem 0;
+    padding: 0.75rem;
+    background: var(--ruler-bg);
+    border: 1px solid var(--border);
+}
+
+.btn-action {
+    padding: 0.5rem 1rem;
+    font-family: inherit;
+    font-size: 13px;
+    background: var(--link);
+    color: white;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.15s;
+}
+
+.btn-action:hover:not(:disabled) {
+    background: var(--link-hover);
+}
+
+.btn-action:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+#reocr-status {
+    font-size: 13px;
+}
+
+.reocr-progress {
+    color: var(--text-muted);
+}
+
+.reocr-success {
+    color: #2a7f2a;
+}
+
+.reocr-error {
+    color: #cc3333;
+}
+
+/* OCR comparison tabs */
+.ocr-tabs {
+    display: inline-flex;
+    gap: 0.25rem;
+    margin-left: 1rem;
+}
+
+.ocr-tab {
+    padding: 0.25rem 0.5rem;
+    font-family: inherit;
+    font-size: 11px;
+    background: transparent;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    color: var(--text-muted);
+}
+
+.ocr-tab:hover {
+    background: var(--highlight);
+}
+
+.ocr-tab.active {
+    background: var(--link);
+    color: white;
+    border-color: var(--link);
+}
+
+.ocr-panel {
+    display: none;
+}
+
+.ocr-panel.active {
+    display: block;
+}
+
+.page-text-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+@media (prefers-color-scheme: dark) {
+    .reocr-success {
+        color: #4caf50;
+    }
+
+    .reocr-error {
+        color: #ff6b6b;
+    }
+}
+
+/* Loading placeholder for async filters */
+.loading-placeholder {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
 @media (max-width: 768px) {
     .page-content {
         flex-direction: column;
@@ -2337,6 +2728,20 @@ code {
 
     .page-text-col {
         max-height: 400px;
+    }
+
+    .version-timeline {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .version-item {
+        flex-direction: row;
+        gap: 0.5rem;
+    }
+
+    .document-title {
+        font-size: 1.25rem;
     }
 }
 

@@ -1,6 +1,6 @@
 //! Router configuration for the web server.
 
-use axum::{routing::get, Router};
+use axum::{routing::{get, post}, Router};
 use tower_http::cors::CorsLayer;
 
 use super::handlers;
@@ -9,8 +9,9 @@ use super::AppState;
 /// Create the main router with all routes.
 pub fn create_router(state: AppState) -> Router {
     Router::new()
-        // Root is the unified browse page
+        // Root and /browse are the unified browse page
         .route("/", get(handlers::browse_documents))
+        .route("/browse", get(handlers::browse_documents))
         // Document details and file serving
         .route("/documents/:doc_id", get(handlers::document_detail))
         .route(
@@ -18,12 +19,16 @@ pub fn create_router(state: AppState) -> Router {
             get(handlers::document_versions),
         )
         .route(
-            "/documents/:doc_id/pages",
-            get(handlers::document_pages_view),
-        )
-        .route(
             "/api/documents/:doc_id/pages",
             get(handlers::api_document_pages),
+        )
+        .route(
+            "/api/documents/:doc_id/reocr",
+            post(handlers::api_reocr_document),
+        )
+        .route(
+            "/api/documents/reocr/status",
+            get(handlers::api_reocr_status),
         )
         .route("/files/*path", get(handlers::serve_file))
         // Tags
@@ -39,6 +44,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/status/:source_id", get(handlers::api_source_status))
         .route("/api/recent", get(handlers::api_recent_docs))
         .route("/api/types", get(handlers::api_type_stats))
+        .route("/api/sources", get(handlers::api_sources))
         // Type filtering endpoints
         .route("/types", get(handlers::list_types))
         .route("/types/:type_name", get(handlers::list_by_type))

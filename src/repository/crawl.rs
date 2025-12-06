@@ -631,6 +631,17 @@ impl CrawlRepository {
         })
     }
 
+    /// Count crawl URLs for a source.
+    pub fn count_by_source(&self, source_id: &str) -> Result<u64> {
+        let conn = self.connect()?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM crawl_urls WHERE source_id = ?",
+            params![source_id],
+            |row| row.get(0),
+        )?;
+        Ok(count as u64)
+    }
+
     /// Get request statistics for a source.
     pub fn get_request_stats(&self, source_id: &str) -> Result<RequestStats> {
         let conn = self.connect()?;
