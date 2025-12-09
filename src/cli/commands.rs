@@ -260,6 +260,12 @@ enum Commands {
         /// Dry run - show what would be imported without saving
         #[arg(long)]
         dry_run: bool,
+        /// Disable resume support - ignore progress files and start from beginning
+        #[arg(long)]
+        no_resume: bool,
+        /// How often to save progress (in records). Set to 0 to disable checkpointing.
+        #[arg(long, default_value = "10000")]
+        checkpoint_interval: usize,
     },
 
     /// Discover new document URLs by analyzing patterns in existing URLs
@@ -450,7 +456,9 @@ pub async fn run() -> anyhow::Result<()> {
             limit,
             scan_limit,
             dry_run,
-        } => cmd_import(&settings, &files, source.as_deref(), filter.as_deref(), limit, scan_limit, dry_run).await,
+            no_resume,
+            checkpoint_interval,
+        } => cmd_import(&settings, &files, source.as_deref(), filter.as_deref(), limit, scan_limit, dry_run, !no_resume, checkpoint_interval).await,
         Commands::Discover {
             source_id,
             limit,
@@ -3784,6 +3792,8 @@ async fn cmd_import(
     limit: usize,
     scan_limit: usize,
     dry_run: bool,
+    resume: bool,
+    checkpoint_interval: usize,
 ) -> anyhow::Result<()> {
     use std::collections::{HashMap, HashSet};
     use warc::{WarcHeader, WarcReader};
@@ -3866,6 +3876,45 @@ async fn cmd_import(
             continue;
         }
 
+        // Check for progress sidecar file when --resume is enabled
+        let progress_path = warc_path.with_extension(
+            warc_path
+                .extension()
+                .map(|e| format!("{}.progress", e.to_string_lossy()))
+                .unwrap_or_else(|| "progress".to_string()),
+        );
+
+        // Read previous progress (record count) if resuming
+        let mut records_to_skip: usize = 0;
+        let mut file_fully_processed = false;
+
+        if resume && progress_path.exists() {
+            if let Ok(progress_str) = std::fs::read_to_string(&progress_path) {
+                // Format: "records_processed:total_records" or just "done" if complete
+                let progress_str = progress_str.trim();
+                if progress_str == "done" {
+                    println!(
+                        "  {} Already fully processed, skipping",
+                        style("✓").green()
+                    );
+                    file_fully_processed = true;
+                } else if let Some((processed, _total)) = progress_str.split_once(':') {
+                    if let Ok(n) = processed.parse::<usize>() {
+                        records_to_skip = n;
+                        println!(
+                            "  {} Resuming from record {}",
+                            style("→").cyan(),
+                            records_to_skip
+                        );
+                    }
+                }
+            }
+        }
+
+        if file_fully_processed {
+            continue;
+        }
+
         // Detect if gzipped
         let is_gzip = warc_path
             .extension()
@@ -3887,24 +3936,43 @@ async fn cmd_import(
         let mut file_skipped = 0;
         let mut file_filtered = 0;
         let mut file_no_source = 0;
+        let mut file_completed = true; // Track if we processed entire file
+        let mut file_records_processed: usize = 0; // For resume support
 
         // Process based on compression - use macro to avoid code duplication
         macro_rules! process_warc {
             ($reader:expr) => {
                 for record_result in $reader.iter_records() {
+                    file_records_processed += 1;
+
+                    // Skip records we've already processed (resume support)
+                    if file_records_processed <= records_to_skip {
+                        if file_records_processed % 10000 == 0 {
+                            pb.set_message(format!("Skipping record {} / {}", file_records_processed, records_to_skip));
+                        }
+                        continue;
+                    }
+
                     // Check import limit
                     if limit > 0 && total_imported >= limit {
                         pb.finish_with_message(format!("Import limit reached ({} documents)", limit));
+                        file_completed = false;
                         break;
                     }
 
                     // Check scan limit
                     if scan_limit > 0 && total_scanned >= scan_limit {
                         pb.finish_with_message(format!("Scan limit reached ({} records)", scan_limit));
+                        file_completed = false;
                         break;
                     }
 
                     total_scanned += 1;
+
+                    // Write checkpoint at intervals when --resume is enabled
+                    if resume && checkpoint_interval > 0 && file_records_processed % checkpoint_interval == 0 {
+                        let _ = std::fs::write(&progress_path, format!("{}:0", file_records_processed));
+                    }
 
                     let record = match record_result {
                         Ok(r) => r,
@@ -4041,6 +4109,7 @@ async fn cmd_import(
                 Err(e) => {
                     println!("{} Failed to open WARC file: {}", style("✗").red(), e);
                     total_errors += 1;
+                    file_completed = false;
                     continue;
                 }
             }
@@ -4050,6 +4119,7 @@ async fn cmd_import(
                 Err(e) => {
                     println!("{} Failed to open WARC file: {}", style("✗").red(), e);
                     total_errors += 1;
+                    file_completed = false;
                     continue;
                 }
             }
@@ -4064,6 +4134,18 @@ async fn cmd_import(
             style(file_filtered).dim(),
             style(file_no_source).dim()
         );
+
+        // Write progress file when --resume is enabled
+        if resume && !dry_run {
+            let progress_content = if file_completed {
+                "done".to_string()
+            } else {
+                format!("{}:0", file_records_processed)
+            };
+            if let Err(e) = std::fs::write(&progress_path, progress_content) {
+                tracing::warn!("Failed to write progress file: {}", e);
+            }
+        }
 
         total_skipped += file_skipped;
         total_filtered += file_filtered;
