@@ -12,11 +12,37 @@ pub use document::{
 };
 pub use source::SourceRepository;
 
+use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
 use thiserror::Error;
+
+/// Parse a datetime string from the database, defaulting to Unix epoch on error.
+pub fn parse_datetime(s: &str) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(s)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or(DateTime::UNIX_EPOCH)
+}
+
+/// Parse an optional datetime string from the database.
+pub fn parse_datetime_opt(s: Option<String>) -> Option<DateTime<Utc>> {
+    s.and_then(|s| {
+        DateTime::parse_from_rfc3339(&s)
+            .map(|dt| dt.with_timezone(&Utc))
+            .ok()
+    })
+}
+
+/// Convert a rusqlite Result<T> to Result<Option<T>>, treating QueryReturnedNoRows as None.
+pub fn to_option<T>(result: rusqlite::Result<T>) -> Result<Option<T>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
 
 #[derive(Error, Debug)]
 pub enum RepositoryError {

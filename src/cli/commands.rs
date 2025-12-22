@@ -122,6 +122,9 @@ enum Commands {
     Ocr {
         /// Source ID (optional, processes all sources if not specified)
         source_id: Option<String>,
+        /// Specific document ID to process
+        #[arg(long)]
+        doc_id: Option<String>,
         /// Number of workers (default: 2)
         #[arg(short, long, default_value = "2")]
         workers: usize,
@@ -177,6 +180,9 @@ enum Commands {
     Annotate {
         /// Source ID (optional, processes all sources if not specified)
         source_id: Option<String>,
+        /// Specific document ID to process
+        #[arg(long)]
+        doc_id: Option<String>,
         /// Limit number of documents to process (0 = unlimited)
         #[arg(short, long, default_value = "0")]
         limit: usize,
@@ -426,10 +432,11 @@ pub async fn run() -> anyhow::Result<()> {
         Commands::Status => cmd_status(&settings).await,
         Commands::Ocr {
             source_id,
+            doc_id,
             workers,
             limit,
             ..
-        } => cmd_ocr(&settings, source_id.as_deref(), workers, limit).await,
+        } => cmd_ocr(&settings, source_id.as_deref(), doc_id.as_deref(), workers, limit).await,
         Commands::OcrCheck => cmd_ocr_check().await,
         Commands::OcrCompare {
             file,
@@ -444,8 +451,8 @@ pub async fn run() -> anyhow::Result<()> {
             limit,
             force,
         } => cmd_refresh(&settings, source_id.as_deref(), workers, limit, force).await,
-        Commands::Annotate { source_id, limit } => {
-            cmd_annotate(&settings, source_id.as_deref(), limit).await
+        Commands::Annotate { source_id, doc_id, limit } => {
+            cmd_annotate(&settings, source_id.as_deref(), doc_id.as_deref(), limit).await
         }
         Commands::DetectDates {
             source_id,
@@ -1614,6 +1621,15 @@ async fn cmd_ocr_check() -> anyhow::Result<()> {
         );
     }
 
+    // Show default backend
+    println!("\n{}", style("Default Backend:").cyan());
+    if tesseract.is_available() {
+        println!("  {} Tesseract (used for all sources)", style("→").green());
+    } else {
+        println!("  {} None available - install tesseract-ocr", style("!").yellow());
+    }
+    println!("  {}", style("Note: Per-source OCR backend config not yet available").dim());
+
     println!();
 
     if all_found {
@@ -2090,16 +2106,38 @@ async fn cmd_ocr_compare(
 async fn cmd_ocr(
     settings: &Settings,
     source_id: Option<&str>,
+    doc_id: Option<&str>,
     workers: usize,
     limit: usize,
 ) -> anyhow::Result<()> {
     use crate::services::{OcrEvent, OcrService};
     use tokio::sync::mpsc;
 
+    // Check for required tools upfront
+    let tools = TextExtractor::check_tools();
+    let missing: Vec<_> = tools.iter().filter(|(_, avail)| !avail).collect();
+
+    if !missing.is_empty() {
+        println!("{} Required OCR tools are missing:", style("✗").red());
+        for (tool, _) in &missing {
+            println!("  - {}", tool);
+        }
+        println!();
+        println!("Install the missing tools, then run: foiacquire ocr-check");
+        return Err(anyhow::anyhow!("Missing required tools. Run 'foiacquire ocr-check' for install instructions."));
+    }
+
     let db_path = settings.database_path();
     let doc_repo = Arc::new(DocumentRepository::new(&db_path, &settings.documents_dir)?);
 
     let service = OcrService::new(doc_repo);
+
+    // If specific doc_id provided, process just that document
+    if let Some(id) = doc_id {
+        println!("{} Processing single document: {}", style("→").cyan(), id);
+        let (event_tx, _event_rx) = mpsc::channel::<OcrEvent>(100);
+        return service.process_single(id, event_tx).await;
+    }
 
     // Check if there's work to do
     let (docs_count, pages_count) = service.count_needing_processing(source_id)?;
@@ -2699,6 +2737,7 @@ fn mime_to_extension(mime: &str) -> &str {
 async fn cmd_annotate(
     settings: &Settings,
     source_id: Option<&str>,
+    doc_id: Option<&str>,
     limit: usize,
 ) -> anyhow::Result<()> {
     use crate::services::{AnnotationEvent, AnnotationService};
@@ -2739,6 +2778,13 @@ async fn cmd_annotate(
         config.llm.endpoint,
         config.llm.model
     );
+
+    // If specific doc_id provided, process just that document
+    if let Some(id) = doc_id {
+        println!("{} Processing single document: {}", style("→").cyan(), id);
+        let (event_tx, _event_rx) = mpsc::channel::<AnnotationEvent>(100);
+        return service.process_single(id, event_tx).await;
+    }
 
     // Check if there's work to do
     let total_count = service.count_needing_annotation(source_id)?;

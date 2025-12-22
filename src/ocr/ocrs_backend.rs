@@ -13,16 +13,30 @@ use std::time::Instant;
 use tempfile::TempDir;
 
 use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError, OcrResult};
+use super::model_utils::{ensure_model_file, ModelDirConfig, ModelSpec};
 
 /// Global cached OcrEngine instance (initialized once, reused for all OCR calls).
 /// OcrEngine is Send+Sync and its methods take &self, so no Mutex needed.
 static OCR_ENGINE: OnceLock<ocrs::OcrEngine> = OnceLock::new();
 
-/// Model download URLs
-const DETECTION_MODEL_URL: &str =
-    "https://ocrs-models.s3-accelerate.amazonaws.com/text-detection.rten";
-const RECOGNITION_MODEL_URL: &str =
-    "https://ocrs-models.s3-accelerate.amazonaws.com/text-recognition.rten";
+/// Model directory configuration for OCRS.
+const MODEL_CONFIG: ModelDirConfig = ModelDirConfig {
+    subdir: "ocrs",
+    required_files: &["text-detection.rten", "text-recognition.rten"],
+};
+
+/// Model specifications for downloading.
+const DETECTION_MODEL: ModelSpec = ModelSpec {
+    url: "https://ocrs-models.s3-accelerate.amazonaws.com/text-detection.rten",
+    filename: "text-detection.rten",
+    size_hint: "2.5 MB",
+};
+
+const RECOGNITION_MODEL: ModelSpec = ModelSpec {
+    url: "https://ocrs-models.s3-accelerate.amazonaws.com/text-recognition.rten",
+    filename: "text-recognition.rten",
+    size_hint: "10 MB",
+};
 
 /// OCRS OCR backend (pure Rust).
 pub struct OcrsBackend {
@@ -43,105 +57,35 @@ impl OcrsBackend {
         Self { config }
     }
 
-    /// Get the default model directory.
-    fn default_model_dir() -> PathBuf {
-        dirs::data_dir()
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")))
-            .join("ocrs")
-            .join("models")
-    }
-
-    /// Find the model directory, checking standard locations.
+    /// Find the model directory, checking config path and standard locations.
     fn find_model_dir(&self) -> Option<PathBuf> {
         // Check config path first
         if let Some(ref path) = self.config.model_path {
-            if path.join("text-detection.rten").exists() {
+            if MODEL_CONFIG.has_required_files(path) {
                 return Some(path.clone());
             }
         }
 
         // Check standard locations
-        let candidates = [
-            dirs::data_dir().map(|d| d.join("ocrs").join("models")),
-            dirs::home_dir().map(|d| d.join(".ocrs").join("models")),
-            Some(PathBuf::from("/usr/share/ocrs/models")),
-            Some(PathBuf::from("./models/ocrs")),
-        ];
-
-        candidates.into_iter().flatten().find(|candidate| {
-            candidate.join("text-detection.rten").exists()
-                && candidate.join("text-recognition.rten").exists()
-        })
+        MODEL_CONFIG
+            .candidate_dirs()
+            .into_iter()
+            .find(|dir| MODEL_CONFIG.has_required_files(dir))
     }
 
     /// Ensure models are downloaded, downloading them if necessary.
     fn ensure_models(&self) -> Result<PathBuf, OcrError> {
-        // Check if models already exist
         if let Some(dir) = self.find_model_dir() {
             return Ok(dir);
         }
 
-        // Download models to default location
-        let model_dir = Self::default_model_dir();
+        let model_dir = MODEL_CONFIG.default_dir();
         std::fs::create_dir_all(&model_dir).map_err(OcrError::Io)?;
 
-        let detection_path = model_dir.join("text-detection.rten");
-        let recognition_path = model_dir.join("text-recognition.rten");
-
-        // Download detection model if missing
-        if !detection_path.exists() {
-            eprintln!("Downloading OCRS text detection model (~2.5 MB)...");
-            Self::download_file(DETECTION_MODEL_URL, &detection_path)?;
-            eprintln!("  ✓ Downloaded text-detection.rten");
-        }
-
-        // Download recognition model if missing
-        if !recognition_path.exists() {
-            eprintln!("Downloading OCRS text recognition model (~10 MB)...");
-            Self::download_file(RECOGNITION_MODEL_URL, &recognition_path)?;
-            eprintln!("  ✓ Downloaded text-recognition.rten");
-        }
+        ensure_model_file(&DETECTION_MODEL, &model_dir)?;
+        ensure_model_file(&RECOGNITION_MODEL, &model_dir)?;
 
         Ok(model_dir)
-    }
-
-    /// Download a file from a URL to a local path.
-    fn download_file(url: &str, dest: &Path) -> Result<(), OcrError> {
-        // Use curl for downloading (widely available)
-        let output = Command::new("curl")
-            .args(["-fSL", "--progress-bar", "-o"])
-            .arg(dest)
-            .arg(url)
-            .status();
-
-        match output {
-            Ok(status) if status.success() => Ok(()),
-            Ok(_) => {
-                // Clean up partial download
-                let _ = std::fs::remove_file(dest);
-                Err(OcrError::OcrFailed(format!("Failed to download {}", url)))
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                // Try wget as fallback
-                let output = Command::new("wget")
-                    .args(["-q", "--show-progress", "-O"])
-                    .arg(dest)
-                    .arg(url)
-                    .status();
-
-                match output {
-                    Ok(status) if status.success() => Ok(()),
-                    Ok(_) => {
-                        let _ = std::fs::remove_file(dest);
-                        Err(OcrError::OcrFailed(format!("Failed to download {}", url)))
-                    }
-                    Err(_) => Err(OcrError::BackendNotAvailable(
-                        "Neither curl nor wget found. Install one to download models.".to_string(),
-                    )),
-                }
-            }
-            Err(e) => Err(OcrError::Io(e)),
-        }
     }
 
     /// Get or initialize the cached OCR engine.
@@ -275,7 +219,7 @@ impl OcrBackend for OcrsBackend {
             None => {
                 format!(
                     "OCRS models will be auto-downloaded on first use (~12 MB total) to {:?}",
-                    Self::default_model_dir()
+                    MODEL_CONFIG.default_dir()
                 )
             }
         }

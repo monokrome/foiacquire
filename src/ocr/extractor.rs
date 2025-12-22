@@ -7,6 +7,8 @@ use std::process::Command;
 use tempfile::TempDir;
 use thiserror::Error;
 
+use super::model_utils::check_binary;
+
 /// Errors that can occur during text extraction.
 #[derive(Debug, Error)]
 pub enum ExtractionError {
@@ -468,17 +470,9 @@ impl TextExtractor {
 
     /// Check if required tools are available.
     pub fn check_tools() -> Vec<(String, bool)> {
-        let tools = ["pdftotext", "pdftoppm", "pdfinfo", "tesseract"];
-        tools
+        ["pdftotext", "pdftoppm", "pdfinfo", "tesseract"]
             .iter()
-            .map(|tool| {
-                let available = Command::new("which")
-                    .arg(tool)
-                    .output()
-                    .map(|o| o.status.success())
-                    .unwrap_or(false);
-                (tool.to_string(), available)
-            })
+            .map(|tool| (tool.to_string(), check_binary(tool)))
             .collect()
     }
 }

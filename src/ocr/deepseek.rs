@@ -21,6 +21,7 @@ use std::time::Instant;
 use tempfile::TempDir;
 
 use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError, OcrResult};
+use super::model_utils::check_binary;
 
 /// DeepSeek OCR backend using subprocess.
 pub struct DeepSeekBackend {
@@ -86,14 +87,9 @@ impl DeepSeekBackend {
     }
 
     /// Check if the deepseek-ocr binary is available.
-    fn check_binary(&self) -> bool {
+    fn is_binary_available(&self) -> bool {
         // First check if it's in PATH
-        if Command::new("which")
-            .arg(&self.binary_path)
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-        {
+        if check_binary(self.binary_path.to_str().unwrap_or("deepseek-ocr")) {
             return true;
         }
 
@@ -134,14 +130,6 @@ impl DeepSeekBackend {
         }
     }
 
-    /// Check if pdftoppm is installed (for PDF conversion).
-    fn check_pdftoppm() -> bool {
-        Command::new("which")
-            .arg("pdftoppm")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
 
     /// Convert a PDF page to an image.
     fn pdf_page_to_image(
@@ -200,18 +188,18 @@ impl OcrBackend for DeepSeekBackend {
     }
 
     fn is_available(&self) -> bool {
-        self.check_binary()
+        self.is_binary_available()
     }
 
     fn availability_hint(&self) -> String {
-        if !self.check_binary() {
+        if !self.is_binary_available() {
             format!(
                 "DeepSeek-OCR not found at '{}'. Install from: https://github.com/TimmyOVO/deepseek-ocr.rs\n\
                  git clone https://github.com/TimmyOVO/deepseek-ocr.rs && cd deepseek-ocr.rs\n\
                  cargo install --path crates/cli --features cuda  # or --features metal for Mac",
                 self.binary_path.display()
             )
-        } else if !Self::check_pdftoppm() {
+        } else if !check_binary("pdftoppm") {
             "pdftoppm not installed. Install with: apt install poppler-utils".to_string()
         } else {
             format!(

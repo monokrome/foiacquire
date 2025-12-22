@@ -7,18 +7,11 @@ use rusqlite::{params, Connection, Row};
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
-use super::Result;
+use super::{parse_datetime, Result};
 use crate::models::{
     Document, DocumentPage, DocumentStatus, DocumentVersion, PageOcrStatus, VirtualFile,
     VirtualFileStatus,
 };
-
-/// Parse datetime string from database, defaulting to Unix epoch on error.
-fn parse_datetime(s: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(s)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| DateTime::UNIX_EPOCH)
-}
 
 /// Get SQL condition for a document type category.
 ///

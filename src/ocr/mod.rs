@@ -31,6 +31,7 @@ mod backend;
 mod deepseek;
 mod email;
 mod extractor;
+mod model_utils;
 mod tesseract;
 mod url_finder;
 

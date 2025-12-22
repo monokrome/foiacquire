@@ -368,6 +368,36 @@ impl OcrService {
 
         Ok(result)
     }
+
+    /// Process a single document by ID.
+    pub async fn process_single(
+        &self,
+        doc_id: &str,
+        _event_tx: mpsc::Sender<OcrEvent>,
+    ) -> anyhow::Result<()> {
+        // Get the document
+        let doc = self.doc_repo.get(doc_id)?
+            .ok_or_else(|| anyhow::anyhow!("Document not found: {}", doc_id))?;
+
+        println!("  {} Processing: {}", console::style("→").cyan(), doc.title);
+
+        // Extract text per-page
+        match extract_document_text_per_page(&doc, &self.doc_repo) {
+            Ok(pages) => {
+                println!("  {} Extracted {} pages", console::style("✓").green(), pages);
+            }
+            Err(e) => {
+                println!("  {} Failed: {}", console::style("✗").red(), e);
+                return Err(e);
+            }
+        }
+
+        // Finalize the document
+        self.doc_repo.finalize_document(doc_id)?;
+        println!("  {} Document finalized", console::style("✓").green());
+
+        Ok(())
+    }
 }
 
 /// Extract text from a document per-page using pdftotext.

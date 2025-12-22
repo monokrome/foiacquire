@@ -535,6 +535,9 @@ impl BrowserFetcher {
             );
         }
 
+        // Close the page to prevent tab accumulation
+        let _ = page.close().await;
+
         Ok(BrowserFetchResponse {
             url: url.to_string(),
             final_url,
@@ -838,6 +841,9 @@ impl BrowserFetcher {
             data.len(),
             content_type
         );
+
+        // Close the page to prevent tab accumulation
+        let _ = page.close().await;
 
         Ok(BinaryFetchResponse {
             url: url.to_string(),

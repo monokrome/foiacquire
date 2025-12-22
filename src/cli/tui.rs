@@ -68,8 +68,10 @@ pub fn init(num_status_lines: u16) -> io::Result<bool> {
 
     let mut stdout = io::stdout();
 
-    // Move to top and clear the status area
-    execute!(stdout, MoveTo(0, 0))?;
+    // Clear the entire screen first to remove any previous output (e.g., cargo warnings)
+    execute!(stdout, terminal::Clear(ClearType::All), MoveTo(0, 0))?;
+
+    // Clear the status area lines
     for _ in 0..num_status_lines {
         execute!(stdout, terminal::Clear(ClearType::CurrentLine))?;
         println!();

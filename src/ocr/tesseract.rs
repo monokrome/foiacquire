@@ -11,6 +11,7 @@ use std::time::Instant;
 use tempfile::TempDir;
 
 use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError, OcrResult};
+use super::model_utils::check_binary;
 
 /// Tesseract OCR backend.
 pub struct TesseractBackend {
@@ -30,23 +31,6 @@ impl TesseractBackend {
         Self { config }
     }
 
-    /// Check if Tesseract is installed.
-    fn check_tesseract() -> bool {
-        Command::new("which")
-            .arg("tesseract")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-
-    /// Check if pdftoppm is installed (for PDF conversion).
-    fn check_pdftoppm() -> bool {
-        Command::new("which")
-            .arg("pdftoppm")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
 
     /// Run Tesseract on an image file.
     fn run_tesseract(&self, image_path: &Path) -> Result<String, OcrError> {
@@ -135,13 +119,13 @@ impl OcrBackend for TesseractBackend {
     }
 
     fn is_available(&self) -> bool {
-        Self::check_tesseract()
+        check_binary("tesseract")
     }
 
     fn availability_hint(&self) -> String {
-        if !Self::check_tesseract() {
+        if !check_binary("tesseract") {
             "Tesseract not installed. Install with: apt install tesseract-ocr".to_string()
-        } else if !Self::check_pdftoppm() {
+        } else if !check_binary("pdftoppm") {
             "pdftoppm not installed. Install with: apt install poppler-utils".to_string()
         } else {
             "Tesseract is available".to_string()

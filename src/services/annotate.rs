@@ -223,4 +223,102 @@ impl AnnotationService {
             remaining,
         })
     }
+
+    /// Process a single document by ID.
+    pub async fn process_single(
+        &self,
+        doc_id: &str,
+        event_tx: mpsc::Sender<AnnotationEvent>,
+    ) -> anyhow::Result<()> {
+        // Get the document
+        let doc = self.doc_repo.get(doc_id)?
+            .ok_or_else(|| anyhow::anyhow!("Document not found: {}", doc_id))?;
+
+        let _ = event_tx
+            .send(AnnotationEvent::Started { total_documents: 1 })
+            .await;
+
+        let _ = event_tx
+            .send(AnnotationEvent::DocumentStarted {
+                document_id: doc.id.clone(),
+                title: doc.title.clone(),
+            })
+            .await;
+
+        // Get version ID
+        let version_id = match doc.current_version() {
+            Some(v) => v.id,
+            None => {
+                println!("  {} No version found", console::style("!").yellow());
+                let _ = event_tx
+                    .send(AnnotationEvent::DocumentSkipped {
+                        document_id: doc.id.clone(),
+                    })
+                    .await;
+                return Ok(());
+            }
+        };
+
+        // Get combined text from pages
+        let text = match self.doc_repo.get_combined_page_text(doc_id, version_id) {
+            Ok(Some(t)) if !t.is_empty() => t,
+            _ => {
+                println!("  {} No text available for annotation", console::style("!").yellow());
+                let _ = event_tx
+                    .send(AnnotationEvent::DocumentSkipped {
+                        document_id: doc.id.clone(),
+                    })
+                    .await;
+                return Ok(());
+            }
+        };
+
+        println!("  {} Generating annotation for: {}", console::style("→").cyan(), doc.title);
+
+        // Generate annotation
+        match self.llm_client.summarize(&text, &doc.title).await {
+            Ok(result) => {
+                // Update document with synopsis and tags
+                let mut updated_doc = doc.clone();
+                updated_doc.synopsis = Some(result.synopsis.clone());
+                updated_doc.tags = result.tags.clone();
+                updated_doc.status = DocumentStatus::Indexed;
+                updated_doc.updated_at = chrono::Utc::now();
+
+                self.doc_repo.save(&updated_doc)?;
+
+                println!("  {} Synopsis: {}", console::style("✓").green(),
+                    result.synopsis.chars().take(100).collect::<String>());
+                if !result.tags.is_empty() {
+                    println!("  {} Tags: {}", console::style("✓").green(), result.tags.join(", "));
+                }
+
+                let _ = event_tx
+                    .send(AnnotationEvent::DocumentCompleted {
+                        document_id: doc.id.clone(),
+                    })
+                    .await;
+            }
+            Err(e) => {
+                println!("  {} Failed: {}", console::style("✗").red(), e);
+                let _ = event_tx
+                    .send(AnnotationEvent::DocumentFailed {
+                        document_id: doc.id.clone(),
+                        error: e.to_string(),
+                    })
+                    .await;
+                return Err(anyhow::anyhow!("{}", e));
+            }
+        }
+
+        let _ = event_tx
+            .send(AnnotationEvent::Complete {
+                succeeded: 1,
+                failed: 0,
+                remaining: 0,
+            })
+            .await;
+
+        Ok(())
+    }
 }

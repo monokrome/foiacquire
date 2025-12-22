@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use super::Result;
+use super::{to_option, Result};
 use crate::models::{CrawlRequest, CrawlState, CrawlUrl, DiscoveryMethod, RequestStats, UrlStatus};
 
 /// SQLite-backed repository for crawl state.
@@ -208,14 +208,7 @@ impl CrawlRepository {
     pub fn get_url(&self, source_id: &str, url: &str) -> Result<Option<CrawlUrl>> {
         let conn = self.connect()?;
         let mut stmt = conn.prepare("SELECT * FROM crawl_urls WHERE source_id = ? AND url = ?")?;
-
-        let crawl_url = stmt.query_row(params![source_id, url], |row| self.row_to_crawl_url(row));
-
-        match crawl_url {
-            Ok(u) => Ok(Some(u)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        to_option(stmt.query_row(params![source_id, url], |row| self.row_to_crawl_url(row)))
     }
 
     /// Check if a URL has already been discovered.
@@ -369,33 +362,17 @@ impl CrawlRepository {
 
         let result: std::result::Result<Vec<CrawlUrl>, super::RepositoryError> = (|| {
             // Find pending URLs
-            let urls: Vec<CrawlUrl> = if let Some(sid) = source_id {
-                let mut stmt = conn.prepare(
-                    r#"
-                    SELECT * FROM crawl_urls
-                    WHERE source_id = ? AND status = 'discovered'
-                    ORDER BY depth ASC, discovered_at ASC
-                    LIMIT ?
-                "#,
-                )?;
-                let collected: Vec<CrawlUrl> = stmt
-                    .query_map(params![sid, limit], |row| self.row_to_crawl_url(row))?
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
-                collected
-            } else {
-                let mut stmt = conn.prepare(
-                    r#"
-                    SELECT * FROM crawl_urls
-                    WHERE status = 'discovered'
-                    ORDER BY depth ASC, discovered_at ASC
-                    LIMIT ?
-                "#,
-                )?;
-                let collected: Vec<CrawlUrl> = stmt
-                    .query_map(params![limit], |row| self.row_to_crawl_url(row))?
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
-                collected
-            };
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT * FROM crawl_urls
+                WHERE (?1 IS NULL OR source_id = ?1) AND status = 'discovered'
+                ORDER BY depth ASC, discovered_at ASC
+                LIMIT ?2
+            "#,
+            )?;
+            let urls: Vec<CrawlUrl> = stmt
+                .query_map(params![source_id, limit], |row| self.row_to_crawl_url(row))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
 
             // Mark all as fetching
             for url in &urls {
@@ -525,15 +502,9 @@ impl CrawlRepository {
         "#,
         )?;
 
-        let request = stmt.query_row(params![source_id, url], |row| {
+        to_option(stmt.query_row(params![source_id, url], |row| {
             self.row_to_crawl_request(row)
-        });
-
-        match request {
-            Ok(r) => Ok(Some(r)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        }))
     }
 
     // -------------------------------------------------------------------------
@@ -761,67 +732,35 @@ impl CrawlRepository {
         limit: u32,
     ) -> Result<Vec<CrawlUrl>> {
         let conn = self.connect()?;
-
-        if let Some(sid) = source_id {
-            let mut stmt = conn.prepare(
-                r#"
-                SELECT * FROM crawl_urls
-                WHERE source_id = ? AND status = 'fetched'
-                ORDER BY fetched_at DESC
-                LIMIT ?
-            "#,
-            )?;
-            let urls = stmt
-                .query_map(params![sid, limit], |row| self.row_to_crawl_url(row))?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            Ok(urls)
-        } else {
-            let mut stmt = conn.prepare(
-                r#"
-                SELECT * FROM crawl_urls
-                WHERE status = 'fetched'
-                ORDER BY fetched_at DESC
-                LIMIT ?
-            "#,
-            )?;
-            let urls = stmt
-                .query_map(params![limit], |row| self.row_to_crawl_url(row))?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            Ok(urls)
-        }
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT * FROM crawl_urls
+            WHERE (?1 IS NULL OR source_id = ?1) AND status = 'fetched'
+            ORDER BY fetched_at DESC
+            LIMIT ?2
+        "#,
+        )?;
+        let urls = stmt
+            .query_map(params![source_id, limit], |row| self.row_to_crawl_url(row))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(urls)
     }
 
     /// Get failed URLs with their error messages.
     pub fn get_failed_urls(&self, source_id: Option<&str>, limit: u32) -> Result<Vec<CrawlUrl>> {
         let conn = self.connect()?;
-
-        if let Some(sid) = source_id {
-            let mut stmt = conn.prepare(
-                r#"
-                SELECT * FROM crawl_urls
-                WHERE source_id = ? AND status IN ('failed', 'exhausted')
-                ORDER BY fetched_at DESC NULLS LAST
-                LIMIT ?
-            "#,
-            )?;
-            let urls = stmt
-                .query_map(params![sid, limit], |row| self.row_to_crawl_url(row))?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            Ok(urls)
-        } else {
-            let mut stmt = conn.prepare(
-                r#"
-                SELECT * FROM crawl_urls
-                WHERE status IN ('failed', 'exhausted')
-                ORDER BY fetched_at DESC NULLS LAST
-                LIMIT ?
-            "#,
-            )?;
-            let urls = stmt
-                .query_map(params![limit], |row| self.row_to_crawl_url(row))?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            Ok(urls)
-        }
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT * FROM crawl_urls
+            WHERE (?1 IS NULL OR source_id = ?1) AND status IN ('failed', 'exhausted')
+            ORDER BY fetched_at DESC NULLS LAST
+            LIMIT ?2
+        "#,
+        )?;
+        let urls = stmt
+            .query_map(params![source_id, limit], |row| self.row_to_crawl_url(row))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(urls)
     }
 
     /// Get aggregate stats across all sources (bulk query - no N+1).

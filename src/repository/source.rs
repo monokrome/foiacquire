@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection};
 use std::path::{Path, PathBuf};
 
-use super::Result;
+use super::{parse_datetime, parse_datetime_opt, to_option, Result};
 use crate::models::{Source, SourceType};
 
 /// SQLite-backed source repository.
@@ -51,7 +51,7 @@ impl SourceRepository {
         let conn = self.connect()?;
         let mut stmt = conn.prepare("SELECT * FROM sources WHERE id = ?")?;
 
-        let source = stmt.query_row(params![id], |row| {
+        to_option(stmt.query_row(params![id], |row| {
             Ok(Source {
                 id: row.get("id")?,
                 source_type: SourceType::from_str(&row.get::<_, String>("source_type")?)
@@ -60,21 +60,10 @@ impl SourceRepository {
                 base_url: row.get("base_url")?,
                 metadata: serde_json::from_str(&row.get::<_, String>("metadata")?)
                     .unwrap_or_default(),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>("created_at")?)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .unwrap_or_else(|_| Utc::now()),
-                last_scraped: row
-                    .get::<_, Option<String>>("last_scraped")?
-                    .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
-                    .map(|dt| dt.with_timezone(&Utc)),
+                created_at: parse_datetime(&row.get::<_, String>("created_at")?),
+                last_scraped: parse_datetime_opt(row.get::<_, Option<String>>("last_scraped")?),
             })
-        });
-
-        match source {
-            Ok(s) => Ok(Some(s)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        }))
     }
 
     /// Get all sources.
@@ -92,13 +81,8 @@ impl SourceRepository {
                     base_url: row.get("base_url")?,
                     metadata: serde_json::from_str(&row.get::<_, String>("metadata")?)
                         .unwrap_or_default(),
-                    created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>("created_at")?)
-                        .map(|dt| dt.with_timezone(&Utc))
-                        .unwrap_or_else(|_| Utc::now()),
-                    last_scraped: row
-                        .get::<_, Option<String>>("last_scraped")?
-                        .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
-                        .map(|dt| dt.with_timezone(&Utc)),
+                    created_at: parse_datetime(&row.get::<_, String>("created_at")?),
+                    last_scraped: parse_datetime_opt(row.get::<_, Option<String>>("last_scraped")?),
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;

@@ -15,23 +15,41 @@ use tempfile::TempDir;
 use paddle_ocr_rs::ocr_lite::OcrLite;
 
 use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError, OcrResult};
+use super::model_utils::{ensure_model_file, ModelDirConfig, ModelSpec};
 
 /// Global cached OcrLite instance (initialized once, reused for all OCR calls).
 /// OcrLite is Send+Sync, wrapped in Mutex since detect_from_path needs &mut self.
 static OCR_ENGINE: OnceLock<Mutex<OcrLite>> = OnceLock::new();
 
-/// Model download URLs (PP-OCRv4 ONNX models)
-/// Detection and recognition from HuggingFace, classification from ModelScope
-const DET_MODEL_URL: &str =
-    "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx";
-const REC_MODEL_URL: &str =
-    "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx";
-const CLS_MODEL_URL: &str = "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.4.0/onnx/PP-OCRv4/cls/ch_ppocr_mobile_v2.0_cls_infer.onnx";
+/// Model directory configuration for PaddleOCR.
+const MODEL_CONFIG: ModelDirConfig = ModelDirConfig {
+    subdir: "paddle-ocr",
+    required_files: &[DET_MODEL_NAME, REC_MODEL_NAME],
+};
 
 /// Expected model filenames (standardized)
 const DET_MODEL_NAME: &str = "ch_PP-OCRv4_det_infer.onnx";
 const REC_MODEL_NAME: &str = "ch_PP-OCRv4_rec_infer.onnx";
 const CLS_MODEL_NAME: &str = "ch_ppocr_mobile_v2.0_cls_infer.onnx";
+
+/// Model specifications for downloading.
+const DET_MODEL: ModelSpec = ModelSpec {
+    url: "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx",
+    filename: DET_MODEL_NAME,
+    size_hint: "4 MB",
+};
+
+const REC_MODEL: ModelSpec = ModelSpec {
+    url: "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx",
+    filename: REC_MODEL_NAME,
+    size_hint: "10 MB",
+};
+
+const CLS_MODEL: ModelSpec = ModelSpec {
+    url: "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.4.0/onnx/PP-OCRv4/cls/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+    filename: CLS_MODEL_NAME,
+    size_hint: "1 MB",
+};
 
 /// PaddleOCR backend via ONNX Runtime.
 pub struct PaddleBackend {
@@ -52,34 +70,19 @@ impl PaddleBackend {
         Self { config }
     }
 
-    /// Get the default model directory.
-    fn default_model_dir() -> PathBuf {
-        dirs::data_dir()
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")))
-            .join("paddle-ocr")
-            .join("models")
-    }
-
-    /// Find the model directory, checking standard locations.
+    /// Find the model directory, checking config path and standard locations.
     fn find_model_dir(&self) -> Option<PathBuf> {
         // Check config path first
         if let Some(ref path) = self.config.model_path {
-            if path.join(DET_MODEL_NAME).exists() {
+            if MODEL_CONFIG.has_required_files(path) {
                 return Some(path.clone());
             }
         }
 
         // Check standard locations
-        let candidates = [
-            dirs::data_dir().map(|d| d.join("paddle-ocr").join("models")),
-            dirs::home_dir().map(|d| d.join(".paddle-ocr").join("models")),
-            Some(PathBuf::from("/usr/share/paddle-ocr/models")),
-            Some(PathBuf::from("./models/paddle")),
-        ];
-
-        for candidate in candidates.into_iter().flatten() {
+        for candidate in MODEL_CONFIG.candidate_dirs() {
             // Check for our standardized v4 model names first
-            if candidate.join(DET_MODEL_NAME).exists() && candidate.join(REC_MODEL_NAME).exists() {
+            if MODEL_CONFIG.has_required_files(&candidate) {
                 return Some(candidate);
             }
             // Also check legacy naming patterns
@@ -96,80 +99,18 @@ impl PaddleBackend {
 
     /// Ensure models are downloaded, downloading them if necessary.
     fn ensure_models(&self) -> Result<PathBuf, OcrError> {
-        // Check if models already exist
         if let Some(dir) = self.find_model_dir() {
             return Ok(dir);
         }
 
-        // Download models to default location
-        let model_dir = Self::default_model_dir();
+        let model_dir = MODEL_CONFIG.default_dir();
         std::fs::create_dir_all(&model_dir).map_err(OcrError::Io)?;
 
-        let det_path = model_dir.join(DET_MODEL_NAME);
-        let rec_path = model_dir.join(REC_MODEL_NAME);
-        let cls_path = model_dir.join(CLS_MODEL_NAME);
-
-        // Download detection model if missing
-        if !det_path.exists() {
-            eprintln!("Downloading PaddleOCR detection model (~4 MB)...");
-            Self::download_file(DET_MODEL_URL, &det_path)?;
-            eprintln!("  ✓ Downloaded {}", DET_MODEL_NAME);
-        }
-
-        // Download recognition model if missing
-        if !rec_path.exists() {
-            eprintln!("Downloading PaddleOCR recognition model (~10 MB)...");
-            Self::download_file(REC_MODEL_URL, &rec_path)?;
-            eprintln!("  ✓ Downloaded {}", REC_MODEL_NAME);
-        }
-
-        // Download classification model if missing
-        if !cls_path.exists() {
-            eprintln!("Downloading PaddleOCR classification model (~1 MB)...");
-            Self::download_file(CLS_MODEL_URL, &cls_path)?;
-            eprintln!("  ✓ Downloaded {}", CLS_MODEL_NAME);
-        }
+        ensure_model_file(&DET_MODEL, &model_dir)?;
+        ensure_model_file(&REC_MODEL, &model_dir)?;
+        ensure_model_file(&CLS_MODEL, &model_dir)?;
 
         Ok(model_dir)
-    }
-
-    /// Download a file from a URL to a local path.
-    fn download_file(url: &str, dest: &Path) -> Result<(), OcrError> {
-        // Use curl for downloading (widely available, follows redirects)
-        let output = Command::new("curl")
-            .args(["-fSL", "--progress-bar", "-o"])
-            .arg(dest)
-            .arg(url)
-            .status();
-
-        match output {
-            Ok(status) if status.success() => Ok(()),
-            Ok(_) => {
-                // Clean up partial download
-                let _ = std::fs::remove_file(dest);
-                Err(OcrError::OcrFailed(format!("Failed to download {}", url)))
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                // Try wget as fallback
-                let output = Command::new("wget")
-                    .args(["-q", "--show-progress", "-O"])
-                    .arg(dest)
-                    .arg(url)
-                    .status();
-
-                match output {
-                    Ok(status) if status.success() => Ok(()),
-                    Ok(_) => {
-                        let _ = std::fs::remove_file(dest);
-                        Err(OcrError::OcrFailed(format!("Failed to download {}", url)))
-                    }
-                    Err(_) => Err(OcrError::BackendNotAvailable(
-                        "Neither curl nor wget found. Install one to download models.".to_string(),
-                    )),
-                }
-            }
-            Err(e) => Err(OcrError::Io(e)),
-        }
     }
 
     /// Find model files in the model directory.
@@ -331,7 +272,7 @@ impl OcrBackend for PaddleBackend {
             None => {
                 format!(
                     "PaddleOCR models will be auto-downloaded on first use (~15 MB total) to {:?}",
-                    Self::default_model_dir()
+                    MODEL_CONFIG.default_dir()
                 )
             }
         }

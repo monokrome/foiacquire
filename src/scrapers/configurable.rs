@@ -41,6 +41,15 @@ pub struct ConfigurableScraper {
 /// Default number of concurrent downloads.
 const DEFAULT_CONCURRENCY: usize = 4;
 
+/// Resolve a path to a full URL, handling both absolute and relative paths.
+fn resolve_url(base_url: &str, path: &str) -> String {
+    if path.starts_with("http://") || path.starts_with("https://") {
+        path.to_string()
+    } else {
+        format!("{}{}", base_url, path)
+    }
+}
+
 impl ConfigurableScraper {
     /// Create a new configurable scraper.
     pub fn new(
@@ -773,12 +782,7 @@ impl ConfigurableScraper {
         };
 
         for start_path in start_paths {
-            let start_url =
-                if start_path.starts_with("http://") || start_path.starts_with("https://") {
-                    start_path.clone()
-                } else {
-                    format!("{}{}", base_url, start_path)
-                };
+            let start_url = resolve_url(base_url, &start_path);
             if visited.insert(start_url.clone()) {
                 frontier.push_back((start_url, 0));
             }
@@ -789,12 +793,7 @@ impl ConfigurableScraper {
             for query in &config.discovery.search_queries {
                 let encoded_query = urlencoding::encode(query);
                 let search_path = template.replace("{query}", &encoded_query);
-                let search_url =
-                    if search_path.starts_with("http://") || search_path.starts_with("https://") {
-                        search_path
-                    } else {
-                        format!("{}{}", base_url, search_path)
-                    };
+                let search_url = resolve_url(base_url, &search_path);
                 if visited.insert(search_url.clone()) {
                     frontier.push_back((search_url, 0));
                 }
@@ -1088,7 +1087,7 @@ impl ConfigurableScraper {
             .unwrap_or(&default_base);
 
         for start_path in &config.discovery.start_paths {
-            let start_url = format!("{}{}", base_url, start_path);
+            let start_url = resolve_url(base_url, start_path);
             let html = match client.get_text(&start_url).await {
                 Ok(html) => html,
                 Err(_) => continue,
@@ -1487,7 +1486,7 @@ impl ConfigurableScraper {
         };
 
         for start_path in start_paths {
-            let start_url = format!("{}{}", base_url, start_path);
+            let start_url = resolve_url(base_url, &start_path);
 
             // Track seed URL
             let crawl_url = CrawlUrl::new(
