@@ -5,6 +5,7 @@
 pub mod browser;
 pub mod config;
 pub mod configurable;
+pub mod google_drive;
 mod http_client;
 pub mod rate_limit_backend;
 #[cfg(feature = "redis-backend")]

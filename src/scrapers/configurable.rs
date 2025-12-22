@@ -20,6 +20,10 @@ use super::browser::BrowserEngineConfig;
 #[cfg(feature = "browser")]
 use super::browser::BrowserFetcher;
 use super::config::{PaginationConfig, ScraperConfig, UrlExtractionConfig};
+use super::google_drive::{
+    extract_file_id, file_download_url, is_google_drive_file_url, is_google_drive_folder_url,
+    DriveFolder,
+};
 use super::rate_limiter::RateLimiter;
 use super::{extract_title_from_url, HttpClient, ScrapeStream, ScraperResult};
 use crate::models::{CrawlUrl, DiscoveryMethod, Source};
@@ -994,7 +998,58 @@ impl ConfigurableScraper {
                 (doc_urls, page_urls)
             }; // document is dropped here
 
-            // Send document URLs to download queue
+            // Check for Google Drive folder URLs in page_urls and enumerate them
+            let mut gdrive_doc_urls: Vec<String> = Vec::new();
+            let page_urls: Vec<String> = {
+                let mut filtered = Vec::new();
+                for url in page_urls {
+                    if is_google_drive_folder_url(&url) {
+                        // Enumerate the Google Drive folder
+                        info!("Detected Google Drive folder: {}", url);
+                        match DriveFolder::from_url(&url, client.clone()) {
+                            Ok(folder) => {
+                                match folder.list_files_recursive().await {
+                                    Ok(files) => {
+                                        info!(
+                                            "Enumerated {} files from Google Drive folder",
+                                            files.len()
+                                        );
+                                        for file in files {
+                                            if file.is_downloadable() {
+                                                gdrive_doc_urls.push(file.download_url);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!("Failed to enumerate Google Drive folder: {}", e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Invalid Google Drive folder URL {}: {}", url, e);
+                            }
+                        }
+                    } else {
+                        filtered.push(url);
+                    }
+                }
+                filtered
+            };
+
+            // Convert any Google Drive file URLs to proper download URLs
+            let doc_urls: Vec<String> = doc_urls
+                .into_iter()
+                .map(|url| {
+                    if is_google_drive_file_url(&url) {
+                        if let Some(file_id) = extract_file_id(&url) {
+                            return file_download_url(&file_id);
+                        }
+                    }
+                    url
+                })
+                .collect();
+
+            // Send document URLs to download queue (HTML link documents)
             for full_url in doc_urls {
                 if visited.insert(full_url.clone()) {
                     debug!("Found document: {}", full_url);
@@ -1006,6 +1061,36 @@ impl ConfigurableScraper {
                             full_url.clone(),
                             source_id.to_string(),
                             DiscoveryMethod::HtmlLink,
+                            Some(current_url.clone()),
+                            depth + 1,
+                        );
+                        let repo = repo.lock().await;
+                        let _ = repo.add_url(&crawl_url);
+                    }
+
+                    // Send to download queue
+                    if url_tx.send(full_url).await.is_err() {
+                        info!("Discovery complete: receiver dropped");
+                        if let Some(ref mut browser) = browser_fetcher {
+                            browser.close().await;
+                        }
+                        return;
+                    }
+                }
+            }
+
+            // Send Google Drive files to download queue
+            for full_url in gdrive_doc_urls {
+                if visited.insert(full_url.clone()) {
+                    debug!("Found Google Drive document: {}", full_url);
+                    docs_found += 1;
+
+                    // Track in crawl repo with GoogleDriveFolder discovery method
+                    if let Some(repo) = crawl_repo {
+                        let crawl_url = CrawlUrl::new(
+                            full_url.clone(),
+                            source_id.to_string(),
+                            DiscoveryMethod::GoogleDriveFolder,
                             Some(current_url.clone()),
                             depth + 1,
                         );

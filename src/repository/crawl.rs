@@ -401,23 +401,28 @@ impl CrawlRepository {
     }
 
     /// Get failed URLs that are ready for retry.
+    /// Also includes exhausted URLs that have been waiting for 70+ days.
     pub fn get_retryable_urls(&self, source_id: &str, limit: u32) -> Result<Vec<CrawlUrl>> {
         let conn = self.connect()?;
-        let now = Utc::now().to_rfc3339();
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+        let exhausted_cutoff = (now - chrono::Duration::days(70)).to_rfc3339();
 
         let mut stmt = conn.prepare(
             r#"
             SELECT * FROM crawl_urls
             WHERE source_id = ?
-            AND status = 'failed'
-            AND (next_retry_at IS NULL OR next_retry_at <= ?)
+            AND (
+                (status = 'failed' AND (next_retry_at IS NULL OR next_retry_at <= ?))
+                OR (status = 'exhausted' AND (next_retry_at IS NULL OR next_retry_at < ?))
+            )
             ORDER BY retry_count ASC, discovered_at ASC
             LIMIT ?
         "#,
         )?;
 
         let urls = stmt
-            .query_map(params![source_id, now, limit], |row| {
+            .query_map(params![source_id, now_str, exhausted_cutoff, limit], |row| {
                 self.row_to_crawl_url(row)
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
