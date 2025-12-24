@@ -25,9 +25,10 @@ use super::progress::DownloadProgress;
 #[command(about = "FOIA document acquisition and research system")]
 #[command(version)]
 pub struct Cli {
-    /// Data directory (overrides config file)
-    #[arg(long, global = true)]
-    data_dir: Option<PathBuf>,
+    /// Target directory or database file (overrides config file).
+    /// Can be a directory containing foiacquire.db or a .db file directly.
+    #[arg(long, short = 't', global = true)]
+    target: Option<PathBuf>,
 
     /// Config file path (overrides auto-discovery)
     #[arg(short, long, global = true)]
@@ -356,13 +357,25 @@ enum SourceCommands {
 
 #[derive(Subcommand)]
 enum ConfigCommands {
-    /// Recover a skeleton config from an existing database
+    /// Recover a skeleton config from an existing database (generates from sources)
     Recover {
         /// Path to the database file
         database: PathBuf,
         /// Output file (default: stdout)
         #[arg(short, long)]
         output: Option<PathBuf>,
+    },
+    /// Restore the most recent config from database history
+    Restore {
+        /// Output file (default: foiacquire.json next to the database)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// List configuration history entries
+    History {
+        /// Show full config data (default: show summary only)
+        #[arg(long)]
+        full: bool,
     },
 }
 
@@ -390,9 +403,9 @@ pub async fn run() -> anyhow::Result<()> {
     let options = LoadOptions {
         config_path: cli.config,
         use_cwd: cli.cwd,
-        data_dir: cli.data_dir,
+        target: cli.target,
     };
-    let settings = load_settings_with_options(options).await;
+    let (settings, _config) = load_settings_with_options(options).await;
 
     match cli.command {
         Commands::Init => cmd_init(&settings).await,
@@ -421,6 +434,10 @@ pub async fn run() -> anyhow::Result<()> {
             ConfigCommands::Recover { database, output } => {
                 cmd_config_recover(&database, output.as_deref()).await
             }
+            ConfigCommands::Restore { output } => {
+                cmd_config_restore(&settings, output.as_deref()).await
+            }
+            ConfigCommands::History { full } => cmd_config_history(&settings, full).await,
         },
         Commands::Scrape {
             source_ids,
@@ -4900,6 +4917,92 @@ async fn cmd_config_recover(database: &Path, output: Option<&Path>) -> anyhow::R
         eprintln!(
             "  See {} for examples.",
             style("etc/example.json").cyan()
+        );
+    }
+
+    Ok(())
+}
+
+/// Restore the most recent config from database history.
+async fn cmd_config_restore(settings: &Settings, output: Option<&Path>) -> anyhow::Result<()> {
+    use crate::repository::ConfigHistoryRepository;
+    use std::io::Write;
+
+    let db_path = settings.database_path();
+    if !db_path.exists() {
+        anyhow::bail!("Database not found: {}", db_path.display());
+    }
+
+    let repo = ConfigHistoryRepository::new(&db_path)?;
+    let entry = repo
+        .get_latest()?
+        .ok_or_else(|| anyhow::anyhow!("No configuration history found in database"))?;
+
+    // Determine output path
+    let output_path = output.map(|p| p.to_path_buf()).unwrap_or_else(|| {
+        settings.data_dir.join("foiacquire.json")
+    });
+
+    // Write the config
+    let mut file = std::fs::File::create(&output_path)?;
+    file.write_all(entry.data.as_bytes())?;
+    file.write_all(b"\n")?;
+
+    eprintln!(
+        "{} Config restored to {}",
+        style("✓").green(),
+        output_path.display()
+    );
+    eprintln!(
+        "  Format: {}, Created: {}",
+        entry.format,
+        entry.created_at.format("%Y-%m-%d %H:%M:%S UTC")
+    );
+
+    Ok(())
+}
+
+/// List configuration history entries.
+async fn cmd_config_history(settings: &Settings, full: bool) -> anyhow::Result<()> {
+    use crate::repository::ConfigHistoryRepository;
+
+    let db_path = settings.database_path();
+    if !db_path.exists() {
+        anyhow::bail!("Database not found: {}", db_path.display());
+    }
+
+    let repo = ConfigHistoryRepository::new(&db_path)?;
+    let entries = repo.get_all()?;
+
+    if entries.is_empty() {
+        println!("No configuration history found.");
+        return Ok(());
+    }
+
+    println!(
+        "{} configuration history entries:\n",
+        style(entries.len()).cyan()
+    );
+
+    for (i, entry) in entries.iter().enumerate() {
+        let marker = if i == 0 { "(latest)" } else { "" };
+        println!(
+            "{} {} {} {}",
+            style(&entry.uuid[..8]).dim(),
+            style(entry.created_at.format("%Y-%m-%d %H:%M:%S")).cyan(),
+            style(&entry.format).yellow(),
+            style(marker).green()
+        );
+
+        if full {
+            println!("{}\n", entry.data);
+        }
+    }
+
+    if !full {
+        eprintln!(
+            "\n{} Use --full to see complete config data",
+            style("Tip:").dim()
         );
     }
 

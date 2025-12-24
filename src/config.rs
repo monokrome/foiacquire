@@ -5,8 +5,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::llm::LlmConfig;
+use crate::repository::ConfigHistoryRepository;
 use crate::scrapers::ScraperConfig;
 
 /// Default refresh TTL in days (14 days).
@@ -243,6 +245,99 @@ impl Config {
         self.default_refresh_ttl_days
             .unwrap_or(DEFAULT_REFRESH_TTL_DAYS)
     }
+
+    /// Compute SHA-256 hash of the serialized config.
+    pub fn hash(&self) -> String {
+        let json = serde_json::to_string(self).unwrap_or_default();
+        let mut hasher = Sha256::new();
+        hasher.update(json.as_bytes());
+        hex::encode(hasher.finalize())
+    }
+
+    /// Serialize config to JSON with paths converted to relative.
+    /// Any paths pointing to `target_dir` are converted to relative paths.
+    pub fn to_json_relative(&self, target_dir: &Path) -> String {
+        let mut config = self.clone();
+        config.source_path = None; // Don't serialize the source path
+
+        // Convert target path to relative if it points to target_dir
+        if let Some(ref target) = config.target {
+            let target_path = Path::new(target);
+            if let Ok(canonical_target) = fs::canonicalize(target_path) {
+                if let Ok(canonical_dir) = fs::canonicalize(target_dir) {
+                    if canonical_target == canonical_dir {
+                        config.target = Some(".".to_string());
+                    } else if let Ok(rel) = canonical_target.strip_prefix(&canonical_dir) {
+                        config.target = Some(format!("./{}", rel.display()));
+                    }
+                }
+            }
+        }
+
+        // Convert database path to relative
+        if let Some(ref database) = config.database {
+            let db_path = Path::new(database);
+            if db_path.is_absolute() {
+                if let Ok(canonical_db) = fs::canonicalize(db_path) {
+                    if let Ok(canonical_dir) = fs::canonicalize(target_dir) {
+                        if let Ok(rel) = canonical_db.strip_prefix(&canonical_dir) {
+                            config.database = Some(format!("./{}", rel.display()));
+                        }
+                    }
+                }
+            }
+        }
+
+        serde_json::to_string_pretty(&config).unwrap_or_default()
+    }
+
+    /// Load configuration from database history.
+    pub fn load_from_db(db_path: &Path) -> Option<Self> {
+        let repo = ConfigHistoryRepository::new(db_path).ok()?;
+        let entry = repo.get_latest().ok()??;
+
+        match entry.format.to_lowercase().as_str() {
+            "json" => serde_json::from_str(&entry.data).ok(),
+            "toml" => toml::from_str(&entry.data).ok(),
+            _ => serde_json::from_str(&entry.data).ok(),
+        }
+    }
+
+    /// Save configuration to database history if it has changed.
+    /// Returns true if saved, false if unchanged, or logs warning on error.
+    pub fn save_to_db_if_changed(&self, db_path: &Path, target_dir: &Path) {
+        let hash = self.hash();
+        let data = self.to_json_relative(target_dir);
+        let format = "json";
+
+        match ConfigHistoryRepository::new(db_path) {
+            Ok(repo) => {
+                match repo.insert_if_new(&data, format, &hash) {
+                    Ok(true) => {
+                        tracing::debug!("Saved new config to history");
+                    }
+                    Ok(false) => {
+                        tracing::debug!("Config unchanged, not saving to history");
+                    }
+                    Err(e) => {
+                        // Check for lock errors and warn
+                        let msg = e.to_string();
+                        if msg.contains("locked") || msg.contains("SQLITE_BUSY") {
+                            tracing::warn!(
+                                "Could not save config to history (database locked): {}",
+                                e
+                            );
+                        } else {
+                            tracing::warn!("Could not save config to history: {}", e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Could not open config history repository: {}", e);
+            }
+        }
+    }
 }
 
 /// Options for loading settings.
@@ -252,26 +347,129 @@ pub struct LoadOptions {
     pub config_path: Option<PathBuf>,
     /// Use CWD for relative paths instead of config file directory.
     pub use_cwd: bool,
-    /// Override data directory (--data-dir flag).
-    pub data_dir: Option<PathBuf>,
+    /// Target directory or database file (--target flag).
+    /// Can be a directory containing foiacquire.db or a .db file directly.
+    pub target: Option<PathBuf>,
+}
+
+/// Resolved target information.
+#[derive(Debug, Clone)]
+pub struct ResolvedTarget {
+    /// The data directory (parent of database).
+    pub data_dir: PathBuf,
+    /// The database filename.
+    pub database_filename: String,
+    /// Full path to the database.
+    pub database_path: PathBuf,
+}
+
+impl ResolvedTarget {
+    /// Resolve a target path to data directory and database info.
+    /// - If target is a .db file, use its parent as data_dir
+    /// - If target is a directory, look for foiacquire.db inside
+    pub fn from_path(target: &Path) -> Self {
+        let target = if target.is_absolute() {
+            target.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(target)
+        };
+
+        // Check if it's a file (by extension or existence)
+        let is_db_file = target
+            .extension()
+            .is_some_and(|ext| ext == "db" || ext == "sqlite" || ext == "sqlite3")
+            || (target.exists() && target.is_file());
+
+        if is_db_file {
+            let data_dir = target.parent().unwrap_or(Path::new(".")).to_path_buf();
+            let database_filename = target
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("foiacquire.db")
+                .to_string();
+            Self {
+                data_dir,
+                database_filename,
+                database_path: target,
+            }
+        } else {
+            // It's a directory
+            let database_filename = "foiacquire.db".to_string();
+            let database_path = target.join(&database_filename);
+            Self {
+                data_dir: target,
+                database_filename,
+                database_path,
+            }
+        }
+    }
+}
+
+/// Look for a config file next to the database.
+/// Checks for foiacquire.json, foiacquire.toml, config.json, config.toml.
+fn find_config_next_to_db(data_dir: &Path) -> Option<PathBuf> {
+    let candidates = [
+        "foiacquire.json",
+        "foiacquire.toml",
+        "config.json",
+        "config.toml",
+    ];
+
+    for name in candidates {
+        let path = data_dir.join(name);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    None
 }
 
 /// Load settings with explicit options.
-pub async fn load_settings_with_options(options: LoadOptions) -> Settings {
-    // Load config from explicit path or auto-discover
-    let config = match &options.config_path {
-        Some(path) => Config::load_from_path(path).await.unwrap_or_default(),
-        None => Config::load().await,
+/// Returns (Settings, Config) tuple.
+pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Config) {
+    // If target is specified, resolve it first
+    let resolved_target = options.target.as_ref().map(|t| ResolvedTarget::from_path(t));
+
+    // Determine config loading order when --target is specified:
+    // 1. Explicit --config flag
+    // 2. Config file next to the database
+    // 3. Config from database history
+    // 4. Auto-discover via prefer
+    let config = if let Some(ref config_path) = options.config_path {
+        // Explicit config path takes priority
+        Config::load_from_path(config_path).await.unwrap_or_default()
+    } else if let Some(ref resolved) = resolved_target {
+        // Check for config file next to database
+        if let Some(config_path) = find_config_next_to_db(&resolved.data_dir) {
+            tracing::debug!("Found config next to database: {}", config_path.display());
+            Config::load_from_path(&config_path).await.unwrap_or_default()
+        } else if resolved.database_path.exists() {
+            // Try to load from database history
+            tracing::debug!(
+                "No config file found, trying database history: {}",
+                resolved.database_path.display()
+            );
+            Config::load_from_db(&resolved.database_path).unwrap_or_else(|| {
+                tracing::debug!("No config in database history, using defaults");
+                Config::default()
+            })
+        } else {
+            // Database doesn't exist yet, use auto-discovery
+            Config::load().await
+        }
+    } else {
+        // No target specified, use auto-discovery
+        Config::load().await
     };
 
     let mut settings = Settings::default();
 
     // Determine base directory for resolving relative paths
     let base_dir = if options.use_cwd {
-        // --cwd flag: use current working directory
         std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     } else {
-        // Default: use config file's directory, fall back to CWD
         config.base_dir().unwrap_or_else(|| {
             std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
         })
@@ -279,10 +477,18 @@ pub async fn load_settings_with_options(options: LoadOptions) -> Settings {
 
     config.apply_to_settings(&mut settings, &base_dir);
 
-    // --data-dir override takes precedence
-    if let Some(data_dir) = options.data_dir {
-        settings = Settings::with_data_dir(data_dir);
+    // --target override takes precedence
+    if let Some(resolved) = resolved_target {
+        settings.data_dir = resolved.data_dir;
+        settings.database_filename = resolved.database_filename;
+        settings.documents_dir = settings.data_dir.join("documents");
     }
 
-    settings
+    // Save config to database history if database exists
+    let db_path = settings.database_path();
+    if db_path.exists() {
+        config.save_to_db_if_changed(&db_path, &settings.data_dir);
+    }
+
+    (settings, config)
 }

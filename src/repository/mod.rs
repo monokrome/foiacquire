@@ -1,11 +1,14 @@
 //! Repository layer for database persistence.
 
 #![allow(dead_code)]
+#![allow(unused_imports)]
 
+mod config_history;
 mod crawl;
 mod document;
 mod source;
 
+pub use config_history::{ConfigHistoryEntry, ConfigHistoryRepository};
 pub use crawl::CrawlRepository;
 pub use document::{
     extract_filename_parts, sanitize_filename, DocumentRepository, DocumentSummary,
@@ -88,6 +91,7 @@ pub fn run_all_migrations(db_path: &Path, documents_dir: &Path) -> Result<Vec<St
     let _doc_repo = DocumentRepository::new(db_path, documents_dir)?;
     let _source_repo = SourceRepository::new(db_path)?;
     let _crawl_repo = CrawlRepository::new(db_path)?;
+    let _config_history_repo = ConfigHistoryRepository::new(db_path)?;
 
     // Also create the rate_limit_state table (used by scrapers)
     let conn = connect(db_path)?;
