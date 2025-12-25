@@ -163,17 +163,27 @@ jobs:
           - tag: latest
             features: browser
             tesseract: "false"
+            onnx: "false"
           - tag: tesseract
             features: browser
             tesseract: "true"
+            onnx: "false"
+          - tag: ocrs
+            features: browser,ocr-ocrs
+            tesseract: "false"
+            onnx: "true"
+          - tag: paddle
+            features: browser,ocr-paddle
+            tesseract: "false"
+            onnx: "true"
           - tag: redis
             features: browser,redis-backend
             tesseract: "false"
+            onnx: "false"
           - tag: annotate
             features: browser
             tesseract: "false"
-          # Note: ocrs and paddle tags disabled - ONNX Runtime doesn't support musl/Alpine
-          # TODO: Add Debian-based builds for these variants
+            onnx: "false"
     steps:
       - uses: actions/checkout@v4
 
@@ -207,5 +217,6 @@ jobs:
           build-args: |
             FEATURES=${{ matrix.features }}
             WITH_TESSERACT=${{ matrix.tesseract }}
+            WITH_ONNX=${{ matrix.onnx }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

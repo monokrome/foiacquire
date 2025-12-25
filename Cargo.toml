@@ -89,7 +89,8 @@ rten = { version = "0.22", optional = true }
 rten-imageproc = { version = "0.22", optional = true }
 
 # PaddleOCR - CNN-based OCR via ONNX (optional, models auto-download)
-paddle-ocr-rs = { version = "0.6", optional = true }
+# Disable default features to avoid downloading binaries (musl needs system ONNX Runtime)
+paddle-ocr-rs = { version = "0.6", optional = true, default-features = false }
 
 # UUID generation
 uuid = { version = "1", features = ["v4"] }
