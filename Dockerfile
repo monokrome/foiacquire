@@ -16,7 +16,7 @@ FROM alpine:latest
 
 ARG WITH_TESSERACT="false"
 
-RUN apk add --no-cache sqlite-libs ca-certificates \
+RUN apk add --no-cache sqlite-libs ca-certificates su-exec shadow \
     && if [ "$WITH_TESSERACT" = "true" ]; then \
          apk add --no-cache tesseract-ocr tesseract-ocr-data-eng; \
        fi
@@ -26,8 +26,6 @@ ENV TARGET_PATH=/opt/foiacquire
 RUN adduser -D foiacquire \
     && mkdir -p /opt/foiacquire \
     && chown foiacquire:foiacquire /opt/foiacquire
-
-USER foiacquire
 
 WORKDIR /opt/foiacquire
 VOLUME /opt/foiacquire
