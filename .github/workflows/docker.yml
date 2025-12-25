@@ -163,27 +163,16 @@ jobs:
           - tag: latest
             features: browser
             tesseract: "false"
-            onnx: "false"
           - tag: tesseract
             features: browser
             tesseract: "true"
-            onnx: "false"
-          - tag: ocrs
-            features: browser,ocr-ocrs
-            tesseract: "false"
-            onnx: "true"
-          - tag: paddle
-            features: browser,ocr-paddle
-            tesseract: "false"
-            onnx: "true"
           - tag: redis
             features: browser,redis-backend
             tesseract: "false"
-            onnx: "false"
           - tag: annotate
             features: browser
             tesseract: "false"
-            onnx: "false"
+          # TODO: ocrs/paddle disabled - ONNX Runtime dynamic linking issues on Alpine/musl
     steps:
       - uses: actions/checkout@v4
 
@@ -217,6 +206,5 @@ jobs:
           build-args: |
             FEATURES=${{ matrix.features }}
             WITH_TESSERACT=${{ matrix.tesseract }}
-            WITH_ONNX=${{ matrix.onnx }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
