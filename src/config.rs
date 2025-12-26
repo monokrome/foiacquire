@@ -21,6 +21,9 @@ pub struct Settings {
     pub data_dir: PathBuf,
     /// Database filename.
     pub database_filename: String,
+    /// Database URL (overrides data_dir/database_filename if set).
+    /// Supports sqlite:// URLs. Set via DATABASE_URL env var or config.
+    pub database_url: Option<String>,
     /// Directory for storing documents.
     pub documents_dir: PathBuf,
     /// User agent for HTTP requests.
@@ -48,6 +51,7 @@ impl Default for Settings {
             documents_dir: data_dir.join("documents"),
             data_dir,
             database_filename: "foiacquire.db".to_string(),
+            database_url: None,
             user_agent: "FOIAcquire/0.1 (academic research)".to_string(),
             request_timeout: 30,
             request_delay_ms: 500,
@@ -68,7 +72,22 @@ impl Settings {
         }
     }
 
-    /// Get the full path to the database.
+    /// Get the database URL, constructing from path if not explicitly set.
+    pub fn database_url(&self) -> String {
+        if let Some(ref url) = self.database_url {
+            url.clone()
+        } else {
+            let path = self.data_dir.join(&self.database_filename);
+            format!("sqlite:{}", path.display())
+        }
+    }
+
+    /// Check if using an explicit database URL (vs file path).
+    pub fn has_database_url(&self) -> bool {
+        self.database_url.is_some()
+    }
+
+    /// Get the full path to the database (for SQLite file-based databases).
     pub fn database_path(&self) -> PathBuf {
         self.data_dir.join(&self.database_filename)
     }
@@ -78,6 +97,19 @@ impl Settings {
         fs::create_dir_all(&self.data_dir)?;
         fs::create_dir_all(&self.documents_dir)?;
         Ok(())
+    }
+
+    /// Create a database context using the configured database URL or path.
+    ///
+    /// This is the preferred way to get a DbContext from settings.
+    pub async fn create_db_context(&self) -> anyhow::Result<crate::repository::DbContext> {
+        use crate::repository::DbContext;
+
+        if self.database_url.is_some() {
+            Ok(DbContext::from_url(&self.database_url(), &self.documents_dir).await?)
+        } else {
+            Ok(DbContext::new(&self.database_path(), &self.documents_dir).await?)
+        }
     }
 }
 
@@ -501,10 +533,20 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
         settings.documents_dir = settings.data_dir.join("documents");
     }
 
-    // Save config to database history if database exists
-    let db_path = settings.database_path();
-    if db_path.exists() {
-        config.save_to_db_if_changed(&db_path, &settings.data_dir).await;
+    // DATABASE_URL environment variable takes highest precedence
+    if let Ok(database_url) = std::env::var("DATABASE_URL") {
+        if !database_url.is_empty() {
+            tracing::debug!("Using DATABASE_URL from environment: {}", database_url);
+            settings.database_url = Some(database_url);
+        }
+    }
+
+    // Save config to database history if database exists (only for file-based DBs)
+    if settings.database_url.is_none() {
+        let db_path = settings.database_path();
+        if db_path.exists() {
+            config.save_to_db_if_changed(&db_path, &settings.data_dir).await;
+        }
     }
 
     (settings, config)
