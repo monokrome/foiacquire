@@ -42,6 +42,11 @@ fn set_scroll_region(top: u16, bottom: u16) -> io::Result<()> {
 ///
 /// Returns Ok(true) if TUI was activated, Ok(false) if not in interactive terminal.
 pub fn init(num_status_lines: u16) -> io::Result<bool> {
+    // Check environment variable to force TUI off (useful for containers)
+    if std::env::var("NO_TUI").is_ok() || std::env::var("FOIACQUIRE_NO_TUI").is_ok() {
+        return Ok(false);
+    }
+
     // Only activate in interactive terminals
     // Use try/catch pattern since Term::stdout() can fail in Docker without TTY
     let is_terminal = std::panic::catch_unwind(|| {
@@ -51,6 +56,11 @@ pub fn init(num_status_lines: u16) -> io::Result<bool> {
     .unwrap_or(false);
 
     if !is_terminal {
+        return Ok(false);
+    }
+
+    // Double-check with crossterm's detection (more reliable in some environments)
+    if !crossterm::tty::IsTty::is_tty(&io::stdout()) {
         return Ok(false);
     }
 
@@ -78,22 +88,34 @@ pub fn init(num_status_lines: u16) -> io::Result<bool> {
 
     let mut stdout = io::stdout();
 
-    // Clear the entire screen first to remove any previous output (e.g., cargo warnings)
-    execute!(stdout, terminal::Clear(ClearType::All), MoveTo(0, 0))?;
+    // Try to set up TUI - if any operation fails, fall back to non-TUI mode
+    // This prevents cryptic errors in container environments that claim to have a TTY but don't
+    let setup_result = (|| -> io::Result<()> {
+        // Clear the entire screen first to remove any previous output (e.g., cargo warnings)
+        execute!(stdout, terminal::Clear(ClearType::All), MoveTo(0, 0))?;
 
-    // Clear the status area lines
-    for _ in 0..num_status_lines {
-        execute!(stdout, terminal::Clear(ClearType::CurrentLine))?;
-        println!();
+        // Clear the status area lines
+        for _ in 0..num_status_lines {
+            execute!(stdout, terminal::Clear(ClearType::CurrentLine))?;
+            println!();
+        }
+
+        // Set scroll region to exclude top status lines (1-indexed)
+        set_scroll_region(num_status_lines + 1, height)?;
+
+        // Move cursor to start of scroll region
+        execute!(stdout, MoveTo(0, num_status_lines))?;
+
+        stdout.flush()?;
+        Ok(())
+    })();
+
+    if let Err(e) = setup_result {
+        // TUI setup failed - fall back to non-TUI mode silently
+        tracing::debug!("TUI setup failed, falling back to plain output: {}", e);
+        STATUS_LINES.store(0, Ordering::SeqCst);
+        return Ok(false);
     }
-
-    // Set scroll region to exclude top status lines (1-indexed)
-    set_scroll_region(num_status_lines + 1, height)?;
-
-    // Move cursor to start of scroll region
-    execute!(stdout, MoveTo(0, num_status_lines))?;
-
-    stdout.flush()?;
 
     TUI_ACTIVE.store(true, Ordering::SeqCst);
 
