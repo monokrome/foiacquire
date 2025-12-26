@@ -2,6 +2,7 @@
 //!
 //! This module contains the CLI parser and dispatches to command-specific modules.
 
+mod analyze;
 mod annotate;
 mod config_cmd;
 mod discover;
@@ -10,7 +11,6 @@ mod helpers;
 mod import;
 mod init;
 mod llm;
-mod ocr;
 mod scrape;
 mod serve;
 mod source;
@@ -133,8 +133,8 @@ enum Commands {
     /// Show system status
     Status,
 
-    /// Process documents with OCR and extract text
-    Ocr {
+    /// Analyze documents: detect content types, extract text, and run OCR
+    Analyze {
         /// Source ID (optional, processes all sources if not specified)
         source_id: Option<String>,
         /// Specific document ID to process
@@ -160,11 +160,11 @@ enum Commands {
         reload: ReloadMode,
     },
 
-    /// Check if required OCR tools are installed
-    OcrCheck,
+    /// Check if required analysis tools (OCR, etc.) are installed
+    AnalyzeCheck,
 
     /// Compare OCR backends on an image or PDF
-    OcrCompare {
+    AnalyzeCompare {
         /// Image file or PDF to OCR
         file: std::path::PathBuf,
         /// Page range (e.g., "1", "1-5", "1,3,5-10"). Default: all pages
@@ -507,7 +507,7 @@ pub async fn run() -> anyhow::Result<()> {
             .await
         }
         Commands::Status => scrape::cmd_status(&settings).await,
-        Commands::Ocr {
+        Commands::Analyze {
             source_id,
             doc_id,
             workers,
@@ -517,7 +517,7 @@ pub async fn run() -> anyhow::Result<()> {
             reload,
             ..
         } => {
-            ocr::cmd_ocr(
+            analyze::cmd_analyze(
                 &settings,
                 source_id.as_deref(),
                 doc_id.as_deref(),
@@ -529,13 +529,13 @@ pub async fn run() -> anyhow::Result<()> {
             )
             .await
         }
-        Commands::OcrCheck => ocr::cmd_ocr_check().await,
-        Commands::OcrCompare {
+        Commands::AnalyzeCheck => analyze::cmd_analyze_check().await,
+        Commands::AnalyzeCompare {
             file,
             pages,
             backends,
             deepseek_path,
-        } => ocr::cmd_ocr_compare(&file, pages.as_deref(), &backends, deepseek_path).await,
+        } => analyze::cmd_analyze_compare(&file, pages.as_deref(), &backends, deepseek_path).await,
         Commands::Serve { bind } => serve::cmd_serve(&settings, &bind).await,
         Commands::Refresh {
             source_id,

@@ -64,6 +64,9 @@ urlencoding = "2"
 # Regex
 regex = "1"
 
+# MIME type detection from file content
+infer = "0.16"
+
 # Web server
 axum = "0.7"
 tower = "0.5"

@@ -1,4 +1,4 @@
-//! OCR-related commands.
+//! Document analysis commands (MIME detection, text extraction, OCR).
 
 use std::sync::Arc;
 
@@ -12,8 +12,8 @@ use crate::repository::DocumentRepository;
 use super::helpers::truncate;
 use super::scrape::ReloadMode;
 
-/// Check OCR tool availability.
-pub async fn cmd_ocr_check() -> anyhow::Result<()> {
+/// Check analysis tool availability.
+pub async fn cmd_analyze_check() -> anyhow::Result<()> {
     use crate::ocr::{DeepSeekBackend, OcrBackend, TesseractBackend};
 
     println!("\n{}", style("OCR Tool Status").bold());
@@ -281,7 +281,7 @@ fn parse_backend_configs(backends_str: &str) -> Result<Vec<BackendConfig>, Strin
 }
 
 /// Compare OCR backends on an image or PDF.
-pub async fn cmd_ocr_compare(
+pub async fn cmd_analyze_compare(
     file: &std::path::Path,
     pages_str: Option<&str>,
     backends_str: &str,
@@ -601,9 +601,9 @@ pub async fn cmd_ocr_compare(
     Ok(())
 }
 
-/// Process documents with OCR.
+/// Analyze documents: detect MIME types, extract text, and run OCR.
 #[allow(clippy::too_many_arguments)]
-pub async fn cmd_ocr(
+pub async fn cmd_analyze(
     settings: &Settings,
     source_id: Option<&str>,
     doc_id: Option<&str>,

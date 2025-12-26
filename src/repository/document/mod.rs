@@ -36,7 +36,7 @@ pub use helpers::{
 };
 
 /// Current storage format version. Increment when changing file naming scheme.
-pub(crate) const STORAGE_FORMAT_VERSION: i32 = 12;
+pub(crate) const STORAGE_FORMAT_VERSION: i32 = 13;
 
 /// SQLite-backed document repository.
 pub struct DocumentRepository {

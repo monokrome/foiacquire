@@ -489,6 +489,40 @@ impl DocumentRepository {
             info!("Added file_categories table and backfilled category_id");
         }
 
+        if current_version < 13 {
+            // Add markup category for HTML/XML files
+            conn.execute_batch(
+                r#"
+                INSERT OR IGNORE INTO file_categories (id, description, doc_count) VALUES
+                    ('markup', 'HTML and XML markup files', 0);
+
+                -- Recategorize HTML/XML from documents to markup
+                UPDATE documents SET category_id = 'markup'
+                WHERE id IN (
+                    SELECT d.id FROM documents d
+                    JOIN document_versions dv ON dv.document_id = d.id
+                    WHERE dv.mime_type IN ('text/html', 'application/xhtml+xml', 'text/xml', 'application/xml')
+                    GROUP BY d.id
+                );
+
+                -- Also move XML from data to markup
+                UPDATE documents SET category_id = 'markup'
+                WHERE id IN (
+                    SELECT d.id FROM documents d
+                    JOIN document_versions dv ON dv.document_id = d.id
+                    WHERE dv.mime_type = 'application/xml'
+                    GROUP BY d.id
+                );
+
+                -- Recalculate all category counts
+                UPDATE file_categories SET doc_count = (
+                    SELECT COUNT(*) FROM documents WHERE category_id = file_categories.id
+                );
+                "#,
+            )?;
+            info!("Added markup category and recategorized HTML/XML files");
+        }
+
         // Migrate file paths if needed
         self.migrate_file_paths(&conn)?;
 

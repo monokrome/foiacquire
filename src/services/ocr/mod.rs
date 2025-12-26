@@ -1,11 +1,13 @@
-//! OCR processing service.
+//! Document analysis service.
 //!
-//! Handles document text extraction and OCR processing.
+//! Handles MIME detection, text extraction, and OCR processing.
 //! Separated from UI concerns - emits events for progress tracking.
 
 mod processing;
 mod types;
 
+use std::fs::File;
+use std::io::Read;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -34,7 +36,7 @@ impl OcrService {
         Ok((docs, pages))
     }
 
-    /// Process documents with OCR.
+    /// Analyze documents: detect MIME types, extract text, and run OCR.
     pub async fn process(
         &self,
         source_id: Option<&str>,
@@ -43,6 +45,8 @@ impl OcrService {
         event_tx: mpsc::Sender<OcrEvent>,
     ) -> anyhow::Result<OcrResult> {
         let mut result = OcrResult {
+            mime_checked: 0,
+            mime_fixed: 0,
             phase1_succeeded: 0,
             phase1_failed: 0,
             pages_created: 0,
@@ -61,6 +65,10 @@ impl OcrService {
             );
         }
 
+        // ==================== PHASE 0: MIME Detection ====================
+        self.process_phase0_mime(source_id, limit, &event_tx, &mut result)
+            .await?;
+
         // ==================== PHASE 1: Text Extraction ====================
         self.process_phase1(source_id, workers, limit, &event_tx, &mut result)
             .await?;
@@ -72,6 +80,128 @@ impl OcrService {
         // No separate Phase 3 needed.
 
         Ok(result)
+    }
+
+    /// Phase 0: Detect and fix MIME types based on file content.
+    async fn process_phase0_mime(
+        &self,
+        source_id: Option<&str>,
+        limit: usize,
+        event_tx: &mpsc::Sender<OcrEvent>,
+        result: &mut OcrResult,
+    ) -> anyhow::Result<()> {
+        // Get documents needing OCR (same as Phase 1) - we check MIME before processing
+        let total_count = self.doc_repo.count_needing_ocr(source_id)?;
+
+        if total_count == 0 {
+            return Ok(());
+        }
+
+        let effective_limit = if limit > 0 {
+            limit.min(total_count as usize)
+        } else {
+            total_count as usize
+        };
+
+        let _ = event_tx
+            .send(OcrEvent::MimeCheckStarted {
+                total_documents: effective_limit,
+            })
+            .await;
+
+        let docs = self.doc_repo.get_needing_ocr(source_id, effective_limit)?;
+        let mut checked = 0;
+        let mut fixed = 0;
+
+        for doc in docs {
+            checked += 1;
+
+            // Get the current version's file path and MIME type
+            if let Some(version) = doc.versions.last() {
+                let path = &version.file_path;
+                if path.exists() {
+                    if let Some((detected_mime, old_mime)) =
+                        self.detect_mime_mismatch(path, &version.mime_type)
+                    {
+                        // Update the MIME type in database
+                        if self
+                            .doc_repo
+                            .update_version_mime_type(&doc.id, version.id, &detected_mime)
+                            .is_ok()
+                        {
+                            fixed += 1;
+                            let _ = event_tx
+                                .send(OcrEvent::MimeFixed {
+                                    document_id: doc.id.clone(),
+                                    old_mime,
+                                    new_mime: detected_mime,
+                                })
+                                .await;
+                        }
+                    }
+                }
+            }
+        }
+
+        result.mime_checked = checked;
+        result.mime_fixed = fixed;
+
+        let _ = event_tx
+            .send(OcrEvent::MimeCheckComplete { checked, fixed })
+            .await;
+
+        Ok(())
+    }
+
+    /// Detect MIME type from file content and check if it differs from stored type.
+    /// Returns Some((detected_mime, old_mime)) if they differ, None if they match.
+    fn detect_mime_mismatch(
+        &self,
+        path: &std::path::Path,
+        stored_mime: &str,
+    ) -> Option<(String, String)> {
+        // Read first 8KB for magic byte detection
+        let mut file = File::open(path).ok()?;
+        let mut buffer = [0u8; 8192];
+        let bytes_read = file.read(&mut buffer).ok()?;
+
+        if bytes_read == 0 {
+            return None;
+        }
+
+        // Use infer to detect MIME type from content
+        let detected = infer::get(&buffer[..bytes_read])?;
+        let detected_mime = detected.mime_type();
+
+        // Normalize stored MIME for comparison (strip charset, etc.)
+        let stored_normalized = stored_mime
+            .split(';')
+            .next()
+            .unwrap_or(stored_mime)
+            .trim()
+            .to_lowercase();
+
+        // Check if they differ meaningfully
+        if detected_mime != stored_normalized {
+            // Don't "fix" generic types to specific ones if the stored type is reasonable
+            // e.g., don't change "application/octet-stream" -> detected
+            if stored_normalized == "application/octet-stream"
+                || stored_normalized == "binary/octet-stream"
+            {
+                return Some((detected_mime.to_string(), stored_normalized));
+            }
+
+            // Check for mismatched types (e.g., stored as text/html but actually PDF)
+            let stored_base = stored_normalized.split('/').next().unwrap_or("");
+            let detected_base = detected_mime.split('/').next().unwrap_or("");
+
+            if stored_base != detected_base {
+                // Different type families - definitely fix
+                return Some((detected_mime.to_string(), stored_normalized));
+            }
+        }
+
+        None
     }
 
     async fn process_phase1(

@@ -6,6 +6,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MimeCategory {
     Documents,
+    Markup,
     Images,
     Data,
     Archives,
@@ -17,6 +18,7 @@ impl MimeCategory {
     pub fn id(&self) -> &'static str {
         match self {
             Self::Documents => "documents",
+            Self::Markup => "markup",
             Self::Images => "images",
             Self::Data => "data",
             Self::Archives => "archives",
@@ -28,6 +30,7 @@ impl MimeCategory {
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::Documents => "Documents",
+            Self::Markup => "Markup",
             Self::Images => "Images",
             Self::Data => "Data",
             Self::Archives => "Archives",
@@ -39,6 +42,7 @@ impl MimeCategory {
     pub fn all() -> &'static [(&'static str, &'static str)] {
         &[
             ("documents", "Documents"),
+            ("markup", "Markup"),
             ("images", "Images"),
             ("data", "Data"),
             ("archives", "Archives"),
@@ -50,6 +54,7 @@ impl MimeCategory {
     pub fn from_id(id: &str) -> Option<Self> {
         match id.to_lowercase().as_str() {
             "documents" | "pdf" | "text" | "email" => Some(Self::Documents),
+            "markup" | "html" | "xml" => Some(Self::Markup),
             "images" => Some(Self::Images),
             "data" => Some(Self::Data),
             "archives" => Some(Self::Archives),
@@ -63,14 +68,19 @@ impl MimeCategory {
 pub fn mime_type_category(mime: &str) -> MimeCategory {
     let mime_lower = mime.to_lowercase();
 
-    if mime_lower == "application/pdf"
+    // Markup types (HTML, XML, XHTML)
+    if mime_lower == "text/html"
+        || mime_lower == "application/xhtml+xml"
+        || mime_lower == "text/xml"
+        || mime_lower == "application/xml"
+    {
+        MimeCategory::Markup
+    } else if mime_lower == "application/pdf"
         || mime_lower.contains("word")
         || mime_lower == "application/msword"
         || mime_lower.contains("rfc822")
         || mime_lower.starts_with("message/")
-        || (mime_lower.starts_with("text/")
-            && mime_lower != "text/csv"
-            && mime_lower != "text/html")
+        || (mime_lower.starts_with("text/") && mime_lower != "text/csv")
     {
         MimeCategory::Documents
     } else if mime_lower.starts_with("image/") {
@@ -80,7 +90,6 @@ pub fn mime_type_category(mime: &str) -> MimeCategory {
         || mime_lower == "application/vnd.ms-excel"
         || mime_lower == "text/csv"
         || mime_lower == "application/json"
-        || mime_lower == "application/xml"
     {
         MimeCategory::Data
     } else if mime_lower == "application/zip"
@@ -121,19 +130,25 @@ pub fn mime_type_sql_condition(category: &str) -> Option<String> {
             "(dv.mime_type = 'application/pdf' OR dv.mime_type LIKE '%word%' \
              OR dv.mime_type = 'application/msword' OR dv.mime_type LIKE '%rfc822%' \
              OR dv.mime_type LIKE 'message/%' \
-             OR (dv.mime_type LIKE 'text/%' AND dv.mime_type != 'text/csv'))"
+             OR (dv.mime_type LIKE 'text/%' AND dv.mime_type != 'text/csv' \
+                 AND dv.mime_type != 'text/html' AND dv.mime_type != 'text/xml'))"
+                .to_string(),
+        ),
+        "markup" | "html" | "xml" => Some(
+            "(dv.mime_type = 'text/html' OR dv.mime_type = 'application/xhtml+xml' \
+             OR dv.mime_type = 'text/xml' OR dv.mime_type = 'application/xml')"
                 .to_string(),
         ),
         "data" => Some(
             "(dv.mime_type LIKE '%spreadsheet%' OR dv.mime_type LIKE '%excel%' \
              OR dv.mime_type = 'application/vnd.ms-excel' OR dv.mime_type = 'text/csv' \
-             OR dv.mime_type = 'application/json' OR dv.mime_type = 'application/xml')"
+             OR dv.mime_type = 'application/json')"
                 .to_string(),
         ),
         "images" => Some("dv.mime_type LIKE 'image/%'".to_string()),
         "text" => Some(
             "(dv.mime_type LIKE 'text/%' AND dv.mime_type != 'text/html' \
-             AND dv.mime_type != 'text/csv')"
+             AND dv.mime_type != 'text/xml' AND dv.mime_type != 'text/csv')"
                 .to_string(),
         ),
         "email" => {
@@ -152,6 +167,7 @@ pub fn mime_type_sql_condition(category: &str) -> Option<String> {
              AND dv.mime_type NOT LIKE '%excel%' AND dv.mime_type NOT LIKE 'text/%' \
              AND dv.mime_type NOT LIKE '%rfc822%' AND dv.mime_type NOT LIKE 'message/%' \
              AND dv.mime_type != 'application/json' AND dv.mime_type != 'application/xml' \
+             AND dv.mime_type != 'application/xhtml+xml' \
              AND dv.mime_type NOT LIKE 'application/zip%' AND dv.mime_type NOT LIKE 'application/x-zip%' \
              AND dv.mime_type != 'application/x-tar' AND dv.mime_type != 'application/gzip' \
              AND dv.mime_type != 'application/x-rar-compressed' AND dv.mime_type != 'application/x-7z-compressed')"
@@ -171,6 +187,8 @@ mod tests {
             mime_type_category("application/pdf"),
             MimeCategory::Documents
         );
+        assert_eq!(mime_type_category("text/html"), MimeCategory::Markup);
+        assert_eq!(mime_type_category("application/xml"), MimeCategory::Markup);
         assert_eq!(mime_type_category("image/png"), MimeCategory::Images);
         assert_eq!(mime_type_category("text/csv"), MimeCategory::Data);
         assert_eq!(
@@ -193,6 +211,7 @@ mod tests {
     #[test]
     fn test_sql_condition() {
         assert!(mime_type_sql_condition("documents").is_some());
+        assert!(mime_type_sql_condition("markup").is_some());
         assert!(mime_type_sql_condition("invalid").is_none());
     }
 }
