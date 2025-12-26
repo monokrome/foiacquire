@@ -71,15 +71,17 @@ jobs:
 
       - name: Build amd64
         run: |
-          cross build --release --features "${{ matrix.features }}" --target x86_64-unknown-linux-musl
+          cargo build --release --features "${{ matrix.features }}" --target x86_64-unknown-linux-musl
           mkdir -p dist/amd64
           cp target/x86_64-unknown-linux-musl/release/foiacquire dist/amd64/
 
       - name: Build arm64
+        env:
+          CARGO_TARGET_DIR: target-cross
         run: |
           cross build --release --features "${{ matrix.features }}" --target aarch64-unknown-linux-musl
           mkdir -p dist/arm64
-          cp target/aarch64-unknown-linux-musl/release/foiacquire dist/arm64/
+          cp target-cross/aarch64-unknown-linux-musl/release/foiacquire dist/arm64/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
