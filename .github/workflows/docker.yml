@@ -240,10 +240,6 @@ jobs:
           - tag: redis
             artifact: foiacquire-redis
             tesseract: "false"
-          - tag: annotate
-            artifact: foiacquire-browser
-            tesseract: "false"
-          # TODO: ocrs/paddle disabled - ONNX Runtime dynamic linking issues on Alpine/musl
     steps:
       - uses: actions/checkout@v4
 
