@@ -19,7 +19,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::config::Settings;
-use crate::repository::{AsyncCrawlRepository, AsyncDocumentRepository, AsyncSourceRepository, DbContext};
+use crate::repository::{AsyncCrawlRepository, AsyncDocumentRepository, AsyncSourceRepository};
 
 use cache::StatsCache;
 
@@ -52,8 +52,7 @@ pub struct AppState {
 
 impl AppState {
     pub async fn new(settings: &Settings) -> anyhow::Result<Self> {
-        let db_path = settings.database_path();
-        let ctx = DbContext::new(&db_path, &settings.documents_dir).await?;
+        let ctx = settings.create_db_context().await?;
 
         Ok(Self {
             doc_repo: Arc::new(ctx.documents()),

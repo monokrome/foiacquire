@@ -7,8 +7,8 @@ use sqlx::sqlite::SqlitePool;
 use std::path::{Path, PathBuf};
 
 use super::{
-    create_pool, AsyncConfigHistoryRepository, AsyncCrawlRepository, AsyncDocumentRepository,
-    AsyncSourceRepository, Result,
+    create_pool, create_pool_from_url, AsyncConfigHistoryRepository, AsyncCrawlRepository,
+    AsyncDocumentRepository, AsyncSourceRepository, Result,
 };
 
 /// Database context that manages the connection pool and provides repository access.
@@ -29,11 +29,27 @@ pub struct DbContext {
 }
 
 impl DbContext {
-    /// Create a new database context.
+    /// Create a new database context from a file path.
     ///
     /// This opens a connection pool to the database and runs any pending migrations.
     pub async fn new(db_path: &Path, documents_dir: &Path) -> Result<Self> {
         let pool = create_pool(db_path).await?;
+
+        // Run schema initialization for all tables
+        Self::init_schema(&pool).await?;
+
+        Ok(Self {
+            pool,
+            documents_dir: documents_dir.to_path_buf(),
+        })
+    }
+
+    /// Create a new database context from a database URL.
+    ///
+    /// Supports SQLite URLs like `sqlite:path/to/db.sqlite`.
+    /// The URL can be set via the DATABASE_URL environment variable.
+    pub async fn from_url(database_url: &str, documents_dir: &Path) -> Result<Self> {
+        let pool = create_pool_from_url(database_url).await?;
 
         // Run schema initialization for all tables
         Self::init_schema(&pool).await?;

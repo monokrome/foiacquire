@@ -4,15 +4,13 @@ use console::style;
 
 use crate::config::{Config, Settings};
 use crate::models::{Source, SourceType};
-use crate::repository::DbContext;
 
 /// Initialize the data directory and database.
 pub async fn cmd_init(settings: &Settings) -> anyhow::Result<()> {
     settings.ensure_directories()?;
 
     // Initialize database with DbContext (runs migrations automatically)
-    let db_path = settings.database_path();
-    let ctx = DbContext::new(&db_path, &settings.documents_dir).await?;
+    let ctx = settings.create_db_context().await?;
     let source_repo = ctx.sources();
 
     // Load sources from config
