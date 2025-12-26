@@ -12,6 +12,7 @@ mod repository;
 mod scrapers;
 mod server;
 mod services;
+mod utils;
 
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 

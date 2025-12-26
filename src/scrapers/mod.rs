@@ -18,7 +18,7 @@ pub use browser::BrowserFetcher;
 pub use browser::{BrowserEngineConfig, BrowserEngineType};
 pub use config::ScraperConfig;
 pub use configurable::ConfigurableScraper;
-pub use http_client::HttpClient;
+pub use http_client::{HttpClient, HttpResponse};
 pub use rate_limiter::{load_rate_limit_state, save_rate_limit_state, RateLimiter};
 // ScrapeStream is defined in this file, no need to re-export
 #[allow(unused_imports)]
