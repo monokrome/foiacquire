@@ -13,6 +13,7 @@ mod stealth;
 mod types;
 
 pub use config::{BrowserEngineConfig, BrowserEngineType};
+#[allow(unused_imports)]
 pub use types::{BinaryFetchResponse, BrowserCookie, BrowserFetchResponse};
 
 #[cfg(not(feature = "browser"))]

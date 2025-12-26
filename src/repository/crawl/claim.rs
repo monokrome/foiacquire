@@ -22,7 +22,7 @@ impl CrawlRepository {
         )?;
 
         let urls = stmt
-            .query_map(params![source_id, limit], |row| row_to_crawl_url(row))?
+            .query_map(params![source_id, limit], row_to_crawl_url)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
         Ok(urls)
@@ -44,7 +44,7 @@ impl CrawlRepository {
                     LIMIT 1
                     "#,
                     params![sid],
-                    |row| row_to_crawl_url(row),
+                    row_to_crawl_url,
                 )
             } else {
                 conn.query_row(
@@ -55,7 +55,7 @@ impl CrawlRepository {
                     LIMIT 1
                     "#,
                     [],
-                    |row| row_to_crawl_url(row),
+                    row_to_crawl_url,
                 )
             };
 
@@ -99,7 +99,7 @@ impl CrawlRepository {
             "#,
             )?;
             let urls: Vec<CrawlUrl> = stmt
-                .query_map(params![source_id, limit], |row| row_to_crawl_url(row))?
+                .query_map(params![source_id, limit], row_to_crawl_url)?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
 
             for url in &urls {
@@ -151,7 +151,7 @@ impl CrawlRepository {
         let urls = stmt
             .query_map(
                 params![source_id, now_str, exhausted_cutoff, limit],
-                |row| row_to_crawl_url(row),
+                row_to_crawl_url,
             )?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 

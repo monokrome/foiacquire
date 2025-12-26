@@ -39,9 +39,7 @@ impl CrawlRepository {
     pub fn get_url(&self, source_id: &str, url: &str) -> Result<Option<CrawlUrl>> {
         let conn = self.connect()?;
         let mut stmt = conn.prepare("SELECT * FROM crawl_urls WHERE source_id = ? AND url = ?")?;
-        super::super::to_option(
-            stmt.query_row(params![source_id, url], |row| row_to_crawl_url(row)),
-        )
+        super::super::to_option(stmt.query_row(params![source_id, url], row_to_crawl_url))
     }
 
     /// Check if a URL has already been discovered.
@@ -149,7 +147,7 @@ impl CrawlRepository {
         "#,
         )?;
         let urls = stmt
-            .query_map(params![source_id, limit], |row| row_to_crawl_url(row))?
+            .query_map(params![source_id, limit], row_to_crawl_url)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(urls)
     }
@@ -166,7 +164,7 @@ impl CrawlRepository {
         "#,
         )?;
         let urls = stmt
-            .query_map(params![source_id, limit], |row| row_to_crawl_url(row))?
+            .query_map(params![source_id, limit], row_to_crawl_url)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(urls)
     }

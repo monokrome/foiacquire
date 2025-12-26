@@ -5,7 +5,9 @@
 mod response;
 mod user_agent;
 
+#[allow(unused_imports)]
 pub use response::{parse_content_disposition_filename, HeadResponse, HttpResponse};
+#[allow(unused_imports)]
 pub use user_agent::{resolve_user_agent, IMPERSONATE_USER_AGENTS, USER_AGENT};
 
 use std::collections::HashMap;

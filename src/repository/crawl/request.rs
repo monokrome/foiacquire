@@ -52,8 +52,6 @@ impl CrawlRepository {
         "#,
         )?;
 
-        super::super::to_option(
-            stmt.query_row(params![source_id, url], |row| row_to_crawl_request(row)),
-        )
+        super::super::to_option(stmt.query_row(params![source_id, url], row_to_crawl_request))
     }
 }
