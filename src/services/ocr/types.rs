@@ -1,9 +1,20 @@
 //! OCR service types and events.
 
-/// Events emitted during OCR processing.
+/// Events emitted during document analysis.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum OcrEvent {
+    /// Phase 0: MIME detection started
+    MimeCheckStarted { total_documents: usize },
+    /// Document MIME type was corrected
+    MimeFixed {
+        document_id: String,
+        old_mime: String,
+        new_mime: String,
+    },
+    /// Phase 0: MIME detection complete
+    MimeCheckComplete { checked: usize, fixed: usize },
+
     /// Phase 1: Text extraction started
     Phase1Started { total_documents: usize },
     /// Document text extraction started
@@ -51,10 +62,12 @@ pub enum OcrEvent {
     },
 }
 
-/// Result of OCR processing.
+/// Result of document analysis.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct OcrResult {
+    pub mime_checked: usize,
+    pub mime_fixed: usize,
     pub phase1_succeeded: usize,
     pub phase1_failed: usize,
     pub pages_created: usize,

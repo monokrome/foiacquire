@@ -497,4 +497,19 @@ impl DocumentRepository {
         })
         .optional()
     }
+
+    /// Update the MIME type of a specific document version.
+    pub fn update_version_mime_type(
+        &self,
+        document_id: &str,
+        version_id: i64,
+        new_mime_type: &str,
+    ) -> Result<()> {
+        let conn = self.connect()?;
+        conn.execute(
+            "UPDATE document_versions SET mime_type = ?1 WHERE document_id = ?2 AND id = ?3",
+            params![new_mime_type, document_id, version_id],
+        )?;
+        Ok(())
+    }
 }
