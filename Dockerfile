@@ -10,6 +10,8 @@ RUN apk add --no-cache sqlite-libs ca-certificates su-exec shadow \
        fi
 
 ENV TARGET_PATH=/opt/foiacquire
+ENV USER_ID=""
+ENV GROUP_ID=""
 
 RUN adduser -D foiacquire \
     && mkdir -p /opt/foiacquire \
