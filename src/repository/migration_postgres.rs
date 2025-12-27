@@ -475,6 +475,256 @@ impl PostgresMigrator {
         Ok(count)
     }
 
+    /// Import virtual files using COPY protocol.
+    pub async fn copy_virtual_files(
+        &self,
+        files: &[PortableVirtualFile],
+        progress: Option<ProgressCallback>,
+    ) -> Result<usize, DieselError> {
+        use futures_util::SinkExt;
+        use tokio_postgres::CopyInSink;
+
+        let (client, connection) = tokio_postgres::connect(&self.database_url, NoTls)
+            .await
+            .map_err(pg_error)?;
+
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                eprintln!("PostgreSQL connection error: {}", e);
+            }
+        });
+
+        let sink: CopyInSink<bytes::Bytes> = client
+            .copy_in(
+                "COPY virtual_files (id, document_id, version_id, archive_path, filename,
+                    mime_type, file_size, extracted_text, synopsis, tags, status,
+                    created_at, updated_at)
+                 FROM STDIN WITH (FORMAT text)",
+            )
+            .await
+            .map_err(pg_error)?;
+
+        pin_mut!(sink);
+
+        let mut count = 0;
+        let batch_size = 1000;
+
+        for chunk in files.chunks(batch_size) {
+            let mut data = String::with_capacity(chunk.len() * 300);
+
+            for f in chunk {
+                let row = format!(
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+                    Self::escape_copy_value(Some(&f.id)),
+                    Self::escape_copy_value(Some(&f.document_id)),
+                    f.version_id,
+                    Self::escape_copy_value(Some(&f.archive_path)),
+                    Self::escape_copy_value(Some(&f.filename)),
+                    Self::escape_copy_value(Some(&f.mime_type)),
+                    f.file_size,
+                    Self::escape_copy_value(f.extracted_text.as_deref()),
+                    Self::escape_copy_value(f.synopsis.as_deref()),
+                    Self::escape_copy_value(f.tags.as_deref()),
+                    Self::escape_copy_value(Some(&f.status)),
+                    Self::escape_copy_value(Some(&f.created_at)),
+                    Self::escape_copy_value(Some(&f.updated_at)),
+                );
+                data.push_str(&row);
+                count += 1;
+            }
+
+            sink.send(bytes::Bytes::from(data)).await.map_err(pg_error)?;
+
+            if let Some(ref cb) = progress {
+                cb(count);
+            }
+        }
+
+        sink.finish().await.map_err(pg_error)?;
+
+        Ok(count)
+    }
+
+    /// Import crawl configs using COPY protocol.
+    pub async fn copy_crawl_configs(
+        &self,
+        configs: &[PortableCrawlConfig],
+        progress: Option<ProgressCallback>,
+    ) -> Result<usize, DieselError> {
+        use futures_util::SinkExt;
+        use tokio_postgres::CopyInSink;
+
+        let (client, connection) = tokio_postgres::connect(&self.database_url, NoTls)
+            .await
+            .map_err(pg_error)?;
+
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                eprintln!("PostgreSQL connection error: {}", e);
+            }
+        });
+
+        let sink: CopyInSink<bytes::Bytes> = client
+            .copy_in(
+                "COPY crawl_config (source_id, config_hash, updated_at)
+                 FROM STDIN WITH (FORMAT text)",
+            )
+            .await
+            .map_err(pg_error)?;
+
+        pin_mut!(sink);
+
+        let mut count = 0;
+        let batch_size = 1000;
+
+        for chunk in configs.chunks(batch_size) {
+            let mut data = String::with_capacity(chunk.len() * 100);
+
+            for c in chunk {
+                let row = format!(
+                    "{}\t{}\t{}\n",
+                    Self::escape_copy_value(Some(&c.source_id)),
+                    Self::escape_copy_value(Some(&c.config_hash)),
+                    Self::escape_copy_value(Some(&c.updated_at)),
+                );
+                data.push_str(&row);
+                count += 1;
+            }
+
+            sink.send(bytes::Bytes::from(data)).await.map_err(pg_error)?;
+
+            if let Some(ref cb) = progress {
+                cb(count);
+            }
+        }
+
+        sink.finish().await.map_err(pg_error)?;
+
+        Ok(count)
+    }
+
+    /// Import config history using COPY protocol.
+    pub async fn copy_config_history(
+        &self,
+        history: &[PortableConfigHistory],
+        progress: Option<ProgressCallback>,
+    ) -> Result<usize, DieselError> {
+        use futures_util::SinkExt;
+        use tokio_postgres::CopyInSink;
+
+        let (client, connection) = tokio_postgres::connect(&self.database_url, NoTls)
+            .await
+            .map_err(pg_error)?;
+
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                eprintln!("PostgreSQL connection error: {}", e);
+            }
+        });
+
+        let sink: CopyInSink<bytes::Bytes> = client
+            .copy_in(
+                "COPY configuration_history (uuid, created_at, data, format, hash)
+                 FROM STDIN WITH (FORMAT text)",
+            )
+            .await
+            .map_err(pg_error)?;
+
+        pin_mut!(sink);
+
+        let mut count = 0;
+        let batch_size = 1000;
+
+        for chunk in history.chunks(batch_size) {
+            let mut data = String::with_capacity(chunk.len() * 500);
+
+            for h in chunk {
+                let row = format!(
+                    "{}\t{}\t{}\t{}\t{}\n",
+                    Self::escape_copy_value(Some(&h.uuid)),
+                    Self::escape_copy_value(Some(&h.created_at)),
+                    Self::escape_copy_value(Some(&h.data)),
+                    Self::escape_copy_value(Some(&h.format)),
+                    Self::escape_copy_value(Some(&h.hash)),
+                );
+                data.push_str(&row);
+                count += 1;
+            }
+
+            sink.send(bytes::Bytes::from(data)).await.map_err(pg_error)?;
+
+            if let Some(ref cb) = progress {
+                cb(count);
+            }
+        }
+
+        sink.finish().await.map_err(pg_error)?;
+
+        Ok(count)
+    }
+
+    /// Import rate limit states using COPY protocol.
+    pub async fn copy_rate_limit_states(
+        &self,
+        states: &[PortableRateLimitState],
+        progress: Option<ProgressCallback>,
+    ) -> Result<usize, DieselError> {
+        use futures_util::SinkExt;
+        use tokio_postgres::CopyInSink;
+
+        let (client, connection) = tokio_postgres::connect(&self.database_url, NoTls)
+            .await
+            .map_err(pg_error)?;
+
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                eprintln!("PostgreSQL connection error: {}", e);
+            }
+        });
+
+        let sink: CopyInSink<bytes::Bytes> = client
+            .copy_in(
+                "COPY rate_limit_state (domain, current_delay_ms, in_backoff, total_requests,
+                    rate_limit_hits, updated_at)
+                 FROM STDIN WITH (FORMAT text)",
+            )
+            .await
+            .map_err(pg_error)?;
+
+        pin_mut!(sink);
+
+        let mut count = 0;
+        let batch_size = 1000;
+
+        for chunk in states.chunks(batch_size) {
+            let mut data = String::with_capacity(chunk.len() * 100);
+
+            for s in chunk {
+                let row = format!(
+                    "{}\t{}\t{}\t{}\t{}\t{}\n",
+                    Self::escape_copy_value(Some(&s.domain)),
+                    s.current_delay_ms,
+                    s.in_backoff,
+                    s.total_requests,
+                    s.rate_limit_hits,
+                    Self::escape_copy_value(Some(&s.updated_at)),
+                );
+                data.push_str(&row);
+                count += 1;
+            }
+
+            sink.send(bytes::Bytes::from(data)).await.map_err(pg_error)?;
+
+            if let Some(ref cb) = progress {
+                cb(count);
+            }
+        }
+
+        sink.finish().await.map_err(pg_error)?;
+
+        Ok(count)
+    }
+
     /// Clear specific tables by name.
     /// Uses a single TRUNCATE statement for atomicity and proper FK handling.
     pub async fn clear_tables(&self, tables: &[&str]) -> Result<(), DieselError> {

@@ -481,14 +481,12 @@ where
         finish();
     }
 
-    // Virtual files - use INSERT (usually small)
+    // Virtual files - use COPY
     if options.should_copy("virtual_files") {
         let files = source.export_virtual_files().await?;
-        let (pb, cb) = maybe_progress(options.show_progress, files.len() as u64, "virtual_files");
-        target.import_virtual_files(&files, cb).await?;
-        if let Some(pb) = pb {
-            pb.finish();
-        }
+        let (cb, finish) = create_copy_progress(options.show_progress, files.len() as u64, "virtual_files");
+        target.copy_virtual_files(&files, cb).await?;
+        finish();
     }
 
     // Crawl URLs - use COPY
@@ -507,42 +505,28 @@ where
         finish();
     }
 
-    // Crawl configs - use INSERT (usually small)
+    // Crawl configs - use COPY
     if options.should_copy("crawl_config") {
         let configs = source.export_crawl_configs().await?;
-        let (pb, cb) = maybe_progress(options.show_progress, configs.len() as u64, "crawl_config");
-        target.import_crawl_configs(&configs, cb).await?;
-        if let Some(pb) = pb {
-            pb.finish();
-        }
+        let (cb, finish) = create_copy_progress(options.show_progress, configs.len() as u64, "crawl_config");
+        target.copy_crawl_configs(&configs, cb).await?;
+        finish();
     }
 
-    // Config history - use INSERT (usually small)
+    // Config history - use COPY
     if options.should_copy("configuration_history") {
         let history = source.export_config_history().await?;
-        let (pb, cb) = maybe_progress(
-            options.show_progress,
-            history.len() as u64,
-            "configuration_history",
-        );
-        target.import_config_history(&history, cb).await?;
-        if let Some(pb) = pb {
-            pb.finish();
-        }
+        let (cb, finish) = create_copy_progress(options.show_progress, history.len() as u64, "configuration_history");
+        target.copy_config_history(&history, cb).await?;
+        finish();
     }
 
-    // Rate limit states - use INSERT (usually small)
+    // Rate limit states - use COPY
     if options.should_copy("rate_limit_state") {
         let states = source.export_rate_limit_states().await?;
-        let (pb, cb) = maybe_progress(
-            options.show_progress,
-            states.len() as u64,
-            "rate_limit_state",
-        );
-        target.import_rate_limit_states(&states, cb).await?;
-        if let Some(pb) = pb {
-            pb.finish();
-        }
+        let (cb, finish) = create_copy_progress(options.show_progress, states.len() as u64, "rate_limit_state");
+        target.copy_rate_limit_states(&states, cb).await?;
+        finish();
     }
 
     // Reset sequences for SERIAL columns
