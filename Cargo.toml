@@ -18,8 +18,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "coo
 scraper = "0.20"
 
 # Database - Diesel ORM with compile-time checking
-diesel = { version = "2", features = ["sqlite", "postgres", "chrono", "r2d2"] }
-diesel-async = { version = "0.5", features = ["postgres", "sqlite", "deadpool", "sync-connection-wrapper"] }
+diesel = { version = "2", features = ["sqlite", "chrono", "r2d2"] }
+diesel-async = { version = "0.5", features = ["sqlite", "deadpool", "sync-connection-wrapper"] }
 deadpool = "0.12"
 
 # Serialization
@@ -122,6 +122,7 @@ lapin = { version = "2", optional = true }
 [features]
 default = ["browser"]
 browser = ["chromiumoxide"]
+postgres = ["diesel/postgres", "diesel-async/postgres"]
 redis-backend = ["redis"]
 amqp-broker = ["lapin"]
 ocr-ocrs = ["ocrs", "rten", "rten-imageproc", "image"]
