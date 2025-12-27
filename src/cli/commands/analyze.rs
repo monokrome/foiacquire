@@ -7,7 +7,6 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::config::{Config, Settings};
 use crate::ocr::TextExtractor;
-use crate::repository::DbContext;
 
 use super::helpers::truncate;
 use super::scrape::ReloadMode;

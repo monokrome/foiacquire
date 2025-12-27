@@ -8,7 +8,6 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::config::{Config, Settings};
 use crate::models::{Source, SourceType};
-use crate::repository::DbContext;
 use crate::scrapers::ConfigurableScraper;
 
 use super::helpers::format_bytes;

@@ -293,7 +293,7 @@ pub async fn api_recent_docs(
 /// API endpoint to get document type statistics.
 pub async fn api_type_stats(
     State(state): State<AppState>,
-    Query(params): Query<SourceFilterParams>,
+    Query(_params): Query<SourceFilterParams>,
 ) -> impl IntoResponse {
     let stats = state
         .doc_repo

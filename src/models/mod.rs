@@ -6,7 +6,7 @@ mod document_page;
 mod source;
 mod virtual_file;
 
-pub use crawl::{CrawlRequest, CrawlState, CrawlUrl, DiscoveryMethod, RequestStats, UrlStatus};
+pub use crawl::{CrawlRequest, CrawlUrl, DiscoveryMethod, UrlStatus};
 pub use document::{Document, DocumentDisplay, DocumentStatus, DocumentVersion};
 pub use document_page::{DocumentPage, PageOcrStatus};
 pub use source::{Source, SourceType};

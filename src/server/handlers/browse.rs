@@ -72,7 +72,7 @@ pub async fn browse_documents(
         (cached, cached.is_none())
     };
 
-    let effective_total = if skip_count { Some(0) } else { cached_total };
+    let _effective_total = if skip_count { Some(0) } else { cached_total };
 
     let has_filters = !types.is_empty() || !tags.is_empty() || params.q.is_some();
 

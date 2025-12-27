@@ -4,7 +4,6 @@
 //! for SQLite. Since SQLite connections are lightweight, we create new
 //! connections per request rather than pooling.
 
-use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use diesel_async::sync_connection_wrapper::SyncConnectionWrapper;
 use diesel_async::AsyncConnection;
@@ -49,6 +48,7 @@ impl AsyncSqlitePool {
     }
 
     /// Get the database URL.
+    #[allow(dead_code)]
     pub fn database_url(&self) -> &str {
         &self.database_url
     }

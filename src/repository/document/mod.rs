@@ -5,7 +5,4 @@
 mod helpers;
 
 // Re-export public types
-pub use helpers::{
-    extract_filename_parts, sanitize_filename, BrowseResult, DocumentNavigation, DocumentSummary,
-    VersionSummary,
-};
+pub use helpers::{extract_filename_parts, sanitize_filename, DocumentNavigation, DocumentSummary};

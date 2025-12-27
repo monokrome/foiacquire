@@ -2,8 +2,6 @@
 //!
 //! Only compiled when the `postgres` feature is enabled.
 
-#![cfg(feature = "postgres")]
-
 use async_trait::async_trait;
 use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;

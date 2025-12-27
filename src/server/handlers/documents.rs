@@ -45,7 +45,7 @@ pub async fn document_detail(
         }
     };
 
-    let types: Vec<String> = params
+    let _types: Vec<String> = params
         .types
         .as_ref()
         .map(|t| {
@@ -56,7 +56,7 @@ pub async fn document_detail(
         })
         .unwrap_or_default();
 
-    let tags: Vec<String> = params
+    let _tags: Vec<String> = params
         .tags
         .as_ref()
         .map(|t| {
@@ -67,7 +67,7 @@ pub async fn document_detail(
         })
         .unwrap_or_default();
 
-    let source_for_nav = params.source.as_ref().map(|s| s.as_str()).unwrap_or("");
+    let source_for_nav = params.source.as_deref().unwrap_or("");
     let navigation = state
         .doc_repo
         .get_document_navigation(&doc_id, source_for_nav)

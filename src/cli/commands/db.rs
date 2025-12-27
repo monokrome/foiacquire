@@ -16,6 +16,7 @@ use crate::repository::{AsyncSqlitePool, DatabaseExporter, DatabaseImporter, Sql
 
 /// Options for database copy operations.
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct CopyOptions {
     pub clear: bool,
     pub batch_size: usize,
@@ -27,11 +28,13 @@ pub struct CopyOptions {
 }
 
 /// Logger for duplicate records during merge operations.
+#[allow(dead_code)]
 pub struct DuplicateLogger {
     file: File,
     count: usize,
 }
 
+#[allow(dead_code)]
 impl DuplicateLogger {
     /// Create a new duplicate logger writing to the specified file.
     pub fn new(path: &PathBuf) -> std::io::Result<Self> {
@@ -64,6 +67,7 @@ impl CopyOptions {
 }
 
 /// Copy data between databases.
+#[allow(clippy::too_many_arguments)]
 pub async fn cmd_db_copy(
     source_url: &str,
     target_url: &str,

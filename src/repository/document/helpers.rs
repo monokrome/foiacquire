@@ -7,6 +7,7 @@ use crate::models::{Document, DocumentStatus, DocumentVersion};
 
 /// Partial document data loaded from a row, before versions are attached.
 /// Used internally by bulk-load methods to avoid N+1 queries.
+#[allow(dead_code)]
 pub(crate) struct DocumentPartial {
     pub id: String,
     pub source_id: String,
@@ -23,6 +24,7 @@ pub(crate) struct DocumentPartial {
 }
 
 impl DocumentPartial {
+    #[allow(dead_code)]
     pub fn with_versions(self, versions: Vec<DocumentVersion>) -> Document {
         Document {
             id: self.id,
@@ -44,6 +46,7 @@ impl DocumentPartial {
 
 /// Lightweight document summary for listings (excludes extracted_text for memory efficiency).
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DocumentSummary {
     pub id: String,
     pub source_id: String,
@@ -60,6 +63,7 @@ pub struct DocumentSummary {
 
 /// Lightweight version summary.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct VersionSummary {
     pub content_hash: String,
     pub file_path: PathBuf,
@@ -84,6 +88,7 @@ pub struct DocumentNavigation {
 
 /// Result of cursor-based pagination browse query.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct BrowseResult {
     pub documents: Vec<Document>,
     /// ID of the first document on the previous page (for "Previous" link)
@@ -127,6 +132,7 @@ pub fn extract_filename_parts(url: &str, title: &str, mime_type: &str) -> (Strin
 }
 
 /// Map MIME type to category.
+#[allow(dead_code)]
 pub fn mime_to_category(mime: &str) -> &'static str {
     match mime {
         "application/pdf" => "documents",

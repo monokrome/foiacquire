@@ -219,7 +219,7 @@ pub async fn api_reocr_document(
                     ..Default::default()
                 };
                 let backend = DeepSeekBackend::with_config(config);
-                backend.ocr_pdf_page(&pdf_path_clone, page_number as u32)
+                backend.ocr_pdf_page(&pdf_path_clone, page_number)
             })
             .await;
 
@@ -231,7 +231,7 @@ pub async fn api_reocr_document(
                             page_id,
                             "deepseek",
                             Some(&result.text),
-                            result.confidence.map(|c| c as f32),
+                            result.confidence,
                             None, // error field
                         )
                         .await

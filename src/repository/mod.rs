@@ -23,25 +23,18 @@ pub mod migration_sqlite;
 mod document;
 
 // Re-export main types using Diesel implementations
-pub use diesel_config_history::{
-    DieselConfigHistoryEntry as ConfigHistoryEntry, DieselConfigHistoryRepository,
-};
 pub use diesel_context::DieselDbContext as DbContext;
-pub use diesel_crawl::{CrawlState, CrawlStats, DieselCrawlRepository, RequestStats};
+pub use diesel_crawl::DieselCrawlRepository;
 pub use diesel_document::DieselDocumentRepository;
-pub use diesel_pool::{AsyncSqliteConnection, AsyncSqlitePool, DieselError};
+pub use diesel_pool::{AsyncSqlitePool, DieselError};
 pub use diesel_source::DieselSourceRepository;
-pub use migration::{DatabaseExporter, DatabaseImporter, ProgressCallback};
+pub use migration::{DatabaseExporter, DatabaseImporter};
 pub use migration_sqlite::SqliteMigrator;
 
 // Re-export helper types from document module
-pub use document::{
-    extract_filename_parts, sanitize_filename, BrowseResult, DocumentNavigation, DocumentSummary,
-    VersionSummary,
-};
+pub use document::{extract_filename_parts, sanitize_filename, DocumentSummary};
 
 use chrono::{DateTime, Utc};
-use thiserror::Error;
 
 /// Parse a datetime string from the database, defaulting to Unix epoch on error.
 pub fn parse_datetime(s: &str) -> DateTime<Utc> {
@@ -58,15 +51,3 @@ pub fn parse_datetime_opt(s: Option<String>) -> Option<DateTime<Utc>> {
             .ok()
     })
 }
-
-#[derive(Error, Debug)]
-pub enum RepositoryError {
-    #[error("Diesel error: {0}")]
-    Diesel(#[from] diesel::result::Error),
-    #[error("Serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
-    #[error("Not found: {0}")]
-    NotFound(String),
-}
-
-pub type Result<T> = std::result::Result<T, RepositoryError>;

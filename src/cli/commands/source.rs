@@ -50,7 +50,6 @@ pub async fn cmd_source_rename(
     new_id: &str,
     confirm: bool,
 ) -> anyhow::Result<()> {
-    use diesel::prelude::*;
     use diesel_async::RunQueryDsl;
     use std::io::{self, Write};
 

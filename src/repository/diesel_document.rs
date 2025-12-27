@@ -16,6 +16,7 @@ use crate::schema::{document_pages, document_versions, documents, virtual_files}
 
 /// OCR result for a page.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct OcrResult {
     pub backend: String,
     pub text: Option<String>,
@@ -26,6 +27,7 @@ pub struct OcrResult {
 
 /// Summary of a document for list views.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DieselDocumentSummary {
     pub id: String,
     pub source_id: String,
@@ -42,6 +44,7 @@ pub struct DieselDocumentSummary {
 #[derive(Clone)]
 pub struct DieselDocumentRepository {
     pool: AsyncSqlitePool,
+    #[allow(dead_code)]
     documents_dir: PathBuf,
 }
 
@@ -55,6 +58,7 @@ impl DieselDocumentRepository {
     }
 
     /// Get the documents directory path.
+    #[allow(dead_code)]
     pub fn documents_dir(&self) -> &Path {
         &self.documents_dir
     }
@@ -424,6 +428,7 @@ impl DieselDocumentRepository {
     }
 
     /// Check if a document exists.
+    #[allow(dead_code)]
     pub async fn exists(&self, id: &str) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().await?;
 
@@ -464,6 +469,7 @@ impl DieselDocumentRepository {
     }
 
     /// Delete a document.
+    #[allow(dead_code)]
     pub async fn delete(&self, id: &str) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().await?;
 
@@ -533,6 +539,7 @@ impl DieselDocumentRepository {
     }
 
     /// Add a new version.
+    #[allow(dead_code)]
     pub async fn add_version(
         &self,
         document_id: &str,
@@ -568,6 +575,7 @@ impl DieselDocumentRepository {
     }
 
     /// Get latest version.
+    #[allow(dead_code)]
     pub async fn get_latest_version(
         &self,
         document_id: &str,
@@ -856,6 +864,7 @@ impl DieselDocumentRepository {
                 .await
                 .unwrap_or_default();
 
+        #[allow(clippy::get_first)]
         Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
     }
 
@@ -1069,6 +1078,7 @@ impl DieselDocumentRepository {
 
         let result: Vec<CountRow> =
             diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
+        #[allow(clippy::get_first)]
         Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
     }
 
@@ -1095,6 +1105,7 @@ impl DieselDocumentRepository {
 
         let result: Vec<CountRow> =
             diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
+        #[allow(clippy::get_first)]
         Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
     }
 

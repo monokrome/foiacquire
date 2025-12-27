@@ -7,9 +7,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use super::rate_limit_backend::{
-    DomainRateState, RateLimitBackend, RateLimitError, RateLimitResult,
-};
+use super::rate_limit_backend::{DomainRateState, RateLimitBackend, RateLimitResult};
 
 /// SQLx-backed rate limit storage (currently stubbed).
 #[derive(Clone)]

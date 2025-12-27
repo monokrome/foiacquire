@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 
-use super::diesel_models::{NewSource, SourceRecord};
+use super::diesel_models::SourceRecord;
 use super::diesel_pool::{AsyncSqlitePool, DieselError};
 use super::{parse_datetime, parse_datetime_opt};
 use crate::models::{Source, SourceType};
@@ -90,6 +90,7 @@ impl DieselSourceRepository {
     }
 
     /// Delete a source.
+    #[allow(dead_code)]
     pub async fn delete(&self, id: &str) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().await?;
 
@@ -115,6 +116,7 @@ impl DieselSourceRepository {
     }
 
     /// Update last scraped timestamp.
+    #[allow(dead_code)]
     pub async fn update_last_scraped(
         &self,
         id: &str,

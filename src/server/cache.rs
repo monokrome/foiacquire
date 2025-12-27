@@ -115,6 +115,7 @@ impl StatsCache {
     }
 
     /// Get cached type stats, or None if expired/missing.
+    #[allow(dead_code)]
     pub fn get_type_stats(&self) -> Option<Vec<(String, u64)>> {
         self.type_stats
             .read()
@@ -123,6 +124,7 @@ impl StatsCache {
     }
 
     /// Set type stats in cache.
+    #[allow(dead_code)]
     pub fn set_type_stats(&self, stats: Vec<(String, u64)>) {
         if let Ok(mut guard) = self.type_stats.write() {
             *guard = Some(CacheEntry::new(stats, self.ttl));

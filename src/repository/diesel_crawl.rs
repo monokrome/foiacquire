@@ -151,6 +151,7 @@ impl DieselCrawlRepository {
     }
 
     /// Check if a URL has already been discovered.
+    #[allow(dead_code)]
     pub async fn url_exists(&self, source_id: &str, url: &str) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().await?;
 
@@ -413,7 +414,7 @@ impl DieselCrawlRepository {
             .await
             .optional()?;
 
-        Ok(stored_hash.map_or(true, |h| h != current_hash))
+        Ok(stored_hash.is_none_or(|h| h != current_hash))
     }
 
     /// Store the current config hash.
@@ -496,6 +497,7 @@ impl DieselCrawlRepository {
         let results: Vec<StatsRow> =
             diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
 
+        #[allow(clippy::get_first)]
         if let Some(row) = results.get(0) {
             Ok(RequestStats {
                 total_requests: row.total_requests as u64,
@@ -614,6 +616,7 @@ impl DieselCrawlRepository {
     // ========================================================================
 
     /// Clear pending crawl state for a source (keeps fetched URLs).
+    #[allow(dead_code)]
     pub async fn clear_source(&self, source_id: &str) -> Result<(), DieselError> {
         let mut conn = self.pool.get().await?;
 
@@ -803,6 +806,7 @@ struct StatusCount {
 }
 
 #[derive(QueryableByName)]
+#[allow(dead_code)]
 struct LastInsertRowId {
     #[diesel(sql_type = diesel::sql_types::BigInt, column_name = "last_insert_rowid()")]
     id: i64,
@@ -811,6 +815,7 @@ struct LastInsertRowId {
 /// Raw crawl URL record for QueryableByName (used with sql_query).
 #[derive(QueryableByName, Debug)]
 struct CrawlUrlRecordRaw {
+    #[allow(dead_code)]
     #[diesel(sql_type = diesel::sql_types::Integer)]
     id: i32,
     #[diesel(sql_type = diesel::sql_types::Text)]

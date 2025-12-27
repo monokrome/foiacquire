@@ -1,6 +1,7 @@
 //! Repository utilities.
 
 use diesel::result::DatabaseErrorInformation;
+#[cfg(feature = "postgres")]
 use std::error::Error;
 
 /// Simple error info wrapper for database errors.

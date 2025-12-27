@@ -83,6 +83,7 @@ impl Settings {
     }
 
     /// Check if using an explicit database URL (vs file path).
+    #[allow(dead_code)]
     pub fn has_database_url(&self) -> bool {
         self.database_url.is_some()
     }

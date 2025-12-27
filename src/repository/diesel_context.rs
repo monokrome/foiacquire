@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use diesel_async::{AsyncConnection, SimpleAsyncConnection};
+use diesel_async::SimpleAsyncConnection;
 
 use super::diesel_config_history::DieselConfigHistoryRepository;
 use super::diesel_crawl::DieselCrawlRepository;
@@ -52,6 +52,7 @@ impl DieselDbContext {
     }
 
     /// Create a context with an existing pool.
+    #[allow(dead_code)]
     pub fn with_pool(pool: AsyncSqlitePool, documents_dir: PathBuf) -> Self {
         Self {
             pool,
@@ -238,9 +239,8 @@ impl DieselDbContext {
     }
 
     /// Get list of all tables in the database.
+    #[allow(dead_code)]
     pub async fn list_tables(&self) -> Result<Vec<String>, DieselError> {
-        use diesel_async::RunQueryDsl;
-
         let mut conn = self.pool.get().await?;
 
         let rows: Vec<TableName> = diesel_async::RunQueryDsl::load(
@@ -255,9 +255,8 @@ impl DieselDbContext {
     }
 }
 
-use diesel::prelude::*;
-
 #[derive(diesel::QueryableByName)]
+#[allow(dead_code)]
 struct TableName {
     #[diesel(sql_type = diesel::sql_types::Text)]
     name: String,

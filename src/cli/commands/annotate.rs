@@ -6,7 +6,6 @@ use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::config::{Config, Settings};
-use crate::repository::DbContext;
 
 use super::helpers::truncate;
 use super::scrape::ReloadMode;
@@ -405,7 +404,7 @@ pub async fn cmd_detect_dates(
                 // Update database with detected date
                 doc_repo
                     .update_estimated_date(
-                        &doc_id,
+                        doc_id,
                         est.date,
                         est.confidence.as_str(),
                         est.source.as_str(),
@@ -414,7 +413,7 @@ pub async fn cmd_detect_dates(
                 // Record that we processed this document
                 doc_repo
                     .record_annotation(
-                        &doc_id,
+                        doc_id,
                         "date_detection",
                         1,
                         Some(&format!("detected:{}", est.source.as_str())),
@@ -427,7 +426,7 @@ pub async fn cmd_detect_dates(
             if !dry_run {
                 // Record that we tried but found no date
                 doc_repo
-                    .record_annotation(&doc_id, "date_detection", 1, Some("no_date"), None)
+                    .record_annotation(doc_id, "date_detection", 1, Some("no_date"), None)
                     .await?;
             }
         }

@@ -21,6 +21,7 @@ pub struct DieselConfigHistoryEntry {
     pub created_at: DateTime<Utc>,
     pub data: String,
     pub format: String,
+    #[allow(dead_code)]
     pub hash: String,
 }
 
