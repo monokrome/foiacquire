@@ -6,7 +6,7 @@ ARG WITH_TESSERACT="false"
 
 ARG WITH_POSTGRES="true"
 
-RUN apk add --no-cache sqlite-libs ca-certificates \
+RUN apk add --no-cache sqlite-libs ca-certificates su-exec \
     && if [ "$WITH_POSTGRES" = "true" ]; then \
          apk add --no-cache libpq; \
        fi \
@@ -15,13 +15,13 @@ RUN apk add --no-cache sqlite-libs ca-certificates \
        fi
 
 ENV TARGET_PATH=/opt/foiacquire
+ENV USER_ID=1000
+ENV GROUP_ID=1000
 
-# Create non-root user for running the application
+# Create default non-root user (can be overridden with USER_ID env var)
 RUN adduser -D -u 1000 foiacquire \
     && mkdir -p /opt/foiacquire \
     && chown foiacquire:foiacquire /opt/foiacquire
-
-USER foiacquire
 
 WORKDIR /opt/foiacquire
 VOLUME /opt/foiacquire
