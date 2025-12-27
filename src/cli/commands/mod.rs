@@ -537,7 +537,20 @@ pub async fn run() -> anyhow::Result<()> {
                 tables,
                 analyze,
                 skip_duplicates,
-            } => db::cmd_db_copy(&from, &to, clear, batch_size, copy, progress, tables, analyze, skip_duplicates).await,
+            } => {
+                db::cmd_db_copy(
+                    &from,
+                    &to,
+                    clear,
+                    batch_size,
+                    copy,
+                    progress,
+                    tables,
+                    analyze,
+                    skip_duplicates,
+                )
+                .await
+            }
         },
         Commands::Scrape {
             source_ids,

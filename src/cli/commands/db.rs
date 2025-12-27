@@ -109,13 +109,20 @@ pub async fn cmd_db_copy(
             );
             return Ok(());
         }
-        println!("  Tables: {}", set.iter().cloned().collect::<Vec<_>>().join(", "));
+        println!(
+            "  Tables: {}",
+            set.iter().cloned().collect::<Vec<_>>().join(", ")
+        );
     }
 
     // Create duplicate logger if skip_duplicates is specified
     let duplicate_log = if let Some(ref path) = skip_duplicates {
         let path = PathBuf::from(path);
-        println!("  Skip duplicates: {} (logging to {})", style("yes").green(), path.display());
+        println!(
+            "  Skip duplicates: {} (logging to {})",
+            style("yes").green(),
+            path.display()
+        );
         Some(Arc::new(Mutex::new(DuplicateLogger::new(&path)?)))
     } else {
         None
@@ -336,7 +343,11 @@ where
     // Crawl requests
     if options.should_copy("crawl_requests") {
         let requests = source.export_crawl_requests().await?;
-        let (pb, cb) = maybe_progress(options.show_progress, requests.len() as u64, "crawl_requests");
+        let (pb, cb) = maybe_progress(
+            options.show_progress,
+            requests.len() as u64,
+            "crawl_requests",
+        );
         target.import_crawl_requests(&requests, cb).await?;
         if let Some(pb) = pb {
             pb.finish();
@@ -481,11 +492,7 @@ where
     println!("\nCopying tables (skipping duplicates):");
 
     // Helper to log duplicates
-    fn log_dups(
-        log: &Arc<Mutex<DuplicateLogger>>,
-        table: &str,
-        ids: impl Iterator<Item = String>,
-    ) {
+    fn log_dups(log: &Arc<Mutex<DuplicateLogger>>, table: &str, ids: impl Iterator<Item = String>) {
         if let Ok(mut logger) = log.lock() {
             for id in ids {
                 let _ = logger.log(table, &id);
@@ -497,10 +504,11 @@ where
     if options.should_copy("sources") {
         let sources = source.export_sources().await?;
         let ids: Vec<String> = sources.iter().map(|s| s.id.clone()).collect();
-        let existing = target.get_existing_string_ids("sources", "id", &ids).await?;
-        let (to_insert, dups): (Vec<_>, Vec<_>) = sources
-            .into_iter()
-            .partition(|s| !existing.contains(&s.id));
+        let existing = target
+            .get_existing_string_ids("sources", "id", &ids)
+            .await?;
+        let (to_insert, dups): (Vec<_>, Vec<_>) =
+            sources.into_iter().partition(|s| !existing.contains(&s.id));
         log_dups(dup_log, "sources", dups.iter().map(|s| s.id.clone()));
         println!(
             "  {:>20}: {} new, {} duplicates",
@@ -517,7 +525,9 @@ where
     if options.should_copy("documents") {
         let documents = source.export_documents().await?;
         let ids: Vec<String> = documents.iter().map(|d| d.id.clone()).collect();
-        let existing = target.get_existing_string_ids("documents", "id", &ids).await?;
+        let existing = target
+            .get_existing_string_ids("documents", "id", &ids)
+            .await?;
         let (to_insert, dups): (Vec<_>, Vec<_>) = documents
             .into_iter()
             .partition(|d| !existing.contains(&d.id));
@@ -537,7 +547,9 @@ where
     if options.should_copy("document_versions") {
         let versions = source.export_document_versions().await?;
         let ids: Vec<i32> = versions.iter().map(|v| v.id).collect();
-        let existing = target.get_existing_int_ids("document_versions", "id", &ids).await?;
+        let existing = target
+            .get_existing_int_ids("document_versions", "id", &ids)
+            .await?;
         let (to_insert, dups): (Vec<_>, Vec<_>) = versions
             .into_iter()
             .partition(|v| !existing.contains(&v.id));
@@ -561,10 +573,11 @@ where
     if options.should_copy("document_pages") {
         let pages = source.export_document_pages().await?;
         let ids: Vec<i32> = pages.iter().map(|p| p.id).collect();
-        let existing = target.get_existing_int_ids("document_pages", "id", &ids).await?;
-        let (to_insert, dups): (Vec<_>, Vec<_>) = pages
-            .into_iter()
-            .partition(|p| !existing.contains(&p.id));
+        let existing = target
+            .get_existing_int_ids("document_pages", "id", &ids)
+            .await?;
+        let (to_insert, dups): (Vec<_>, Vec<_>) =
+            pages.into_iter().partition(|p| !existing.contains(&p.id));
         log_dups(
             dup_log,
             "document_pages",
@@ -585,10 +598,11 @@ where
     if options.should_copy("virtual_files") {
         let files = source.export_virtual_files().await?;
         let ids: Vec<String> = files.iter().map(|f| f.id.clone()).collect();
-        let existing = target.get_existing_string_ids("virtual_files", "id", &ids).await?;
-        let (to_insert, dups): (Vec<_>, Vec<_>) = files
-            .into_iter()
-            .partition(|f| !existing.contains(&f.id));
+        let existing = target
+            .get_existing_string_ids("virtual_files", "id", &ids)
+            .await?;
+        let (to_insert, dups): (Vec<_>, Vec<_>) =
+            files.into_iter().partition(|f| !existing.contains(&f.id));
         log_dups(dup_log, "virtual_files", dups.iter().map(|f| f.id.clone()));
         println!(
             "  {:>20}: {} new, {} duplicates",
@@ -605,10 +619,11 @@ where
     if options.should_copy("crawl_urls") {
         let urls = source.export_crawl_urls().await?;
         let ids: Vec<i32> = urls.iter().map(|u| u.id).collect();
-        let existing = target.get_existing_int_ids("crawl_urls", "id", &ids).await?;
-        let (to_insert, dups): (Vec<_>, Vec<_>) = urls
-            .into_iter()
-            .partition(|u| !existing.contains(&u.id));
+        let existing = target
+            .get_existing_int_ids("crawl_urls", "id", &ids)
+            .await?;
+        let (to_insert, dups): (Vec<_>, Vec<_>) =
+            urls.into_iter().partition(|u| !existing.contains(&u.id));
         log_dups(dup_log, "crawl_urls", dups.iter().map(|u| u.id.to_string()));
         println!(
             "  {:>20}: {} new, {} duplicates",
@@ -625,7 +640,9 @@ where
     if options.should_copy("crawl_requests") {
         let requests = source.export_crawl_requests().await?;
         let ids: Vec<i32> = requests.iter().map(|r| r.id).collect();
-        let existing = target.get_existing_int_ids("crawl_requests", "id", &ids).await?;
+        let existing = target
+            .get_existing_int_ids("crawl_requests", "id", &ids)
+            .await?;
         let (to_insert, dups): (Vec<_>, Vec<_>) = requests
             .into_iter()
             .partition(|r| !existing.contains(&r.id));
@@ -766,7 +783,8 @@ where
     // Sources - use COPY
     if options.should_copy("sources") {
         let sources = source.export_sources().await?;
-        let (cb, finish) = create_copy_progress(options.show_progress, sources.len() as u64, "sources");
+        let (cb, finish) =
+            create_copy_progress(options.show_progress, sources.len() as u64, "sources");
         target.copy_sources(&sources, cb).await?;
         finish();
     }
@@ -774,7 +792,8 @@ where
     // Documents - use COPY
     if options.should_copy("documents") {
         let documents = source.export_documents().await?;
-        let (cb, finish) = create_copy_progress(options.show_progress, documents.len() as u64, "documents");
+        let (cb, finish) =
+            create_copy_progress(options.show_progress, documents.len() as u64, "documents");
         target.copy_documents(&documents, cb).await?;
         finish();
     }
@@ -782,7 +801,11 @@ where
     // Document versions - use COPY
     if options.should_copy("document_versions") {
         let versions = source.export_document_versions().await?;
-        let (cb, finish) = create_copy_progress(options.show_progress, versions.len() as u64, "document_versions");
+        let (cb, finish) = create_copy_progress(
+            options.show_progress,
+            versions.len() as u64,
+            "document_versions",
+        );
         target.copy_document_versions(&versions, cb).await?;
         finish();
     }
@@ -790,7 +813,8 @@ where
     // Document pages - use COPY
     if options.should_copy("document_pages") {
         let pages = source.export_document_pages().await?;
-        let (cb, finish) = create_copy_progress(options.show_progress, pages.len() as u64, "document_pages");
+        let (cb, finish) =
+            create_copy_progress(options.show_progress, pages.len() as u64, "document_pages");
         target.copy_document_pages(&pages, cb).await?;
         finish();
     }
@@ -798,7 +822,8 @@ where
     // Virtual files - use COPY
     if options.should_copy("virtual_files") {
         let files = source.export_virtual_files().await?;
-        let (cb, finish) = create_copy_progress(options.show_progress, files.len() as u64, "virtual_files");
+        let (cb, finish) =
+            create_copy_progress(options.show_progress, files.len() as u64, "virtual_files");
         target.copy_virtual_files(&files, cb).await?;
         finish();
     }
@@ -806,7 +831,8 @@ where
     // Crawl URLs - use COPY
     if options.should_copy("crawl_urls") {
         let urls = source.export_crawl_urls().await?;
-        let (cb, finish) = create_copy_progress(options.show_progress, urls.len() as u64, "crawl_urls");
+        let (cb, finish) =
+            create_copy_progress(options.show_progress, urls.len() as u64, "crawl_urls");
         target.copy_crawl_urls(&urls, cb).await?;
         finish();
     }
@@ -814,7 +840,11 @@ where
     // Crawl requests - use COPY
     if options.should_copy("crawl_requests") {
         let requests = source.export_crawl_requests().await?;
-        let (cb, finish) = create_copy_progress(options.show_progress, requests.len() as u64, "crawl_requests");
+        let (cb, finish) = create_copy_progress(
+            options.show_progress,
+            requests.len() as u64,
+            "crawl_requests",
+        );
         target.copy_crawl_requests(&requests, cb).await?;
         finish();
     }
@@ -822,7 +852,8 @@ where
     // Crawl configs - use COPY
     if options.should_copy("crawl_config") {
         let configs = source.export_crawl_configs().await?;
-        let (cb, finish) = create_copy_progress(options.show_progress, configs.len() as u64, "crawl_config");
+        let (cb, finish) =
+            create_copy_progress(options.show_progress, configs.len() as u64, "crawl_config");
         target.copy_crawl_configs(&configs, cb).await?;
         finish();
     }
@@ -830,7 +861,11 @@ where
     // Config history - use COPY
     if options.should_copy("configuration_history") {
         let history = source.export_config_history().await?;
-        let (cb, finish) = create_copy_progress(options.show_progress, history.len() as u64, "configuration_history");
+        let (cb, finish) = create_copy_progress(
+            options.show_progress,
+            history.len() as u64,
+            "configuration_history",
+        );
         target.copy_config_history(&history, cb).await?;
         finish();
     }
@@ -838,7 +873,11 @@ where
     // Rate limit states - use COPY
     if options.should_copy("rate_limit_state") {
         let states = source.export_rate_limit_states().await?;
-        let (cb, finish) = create_copy_progress(options.show_progress, states.len() as u64, "rate_limit_state");
+        let (cb, finish) = create_copy_progress(
+            options.show_progress,
+            states.len() as u64,
+            "rate_limit_state",
+        );
         target.copy_rate_limit_states(&states, cb).await?;
         finish();
     }

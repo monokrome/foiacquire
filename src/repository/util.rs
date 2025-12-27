@@ -51,8 +51,14 @@ pub fn pg_to_diesel_error(e: tokio_postgres::Error) -> diesel::result::Error {
             "{}: {}{}{}",
             db_err.severity(),
             db_err.message(),
-            db_err.detail().map(|d| format!(" DETAIL: {}", d)).unwrap_or_default(),
-            db_err.hint().map(|h| format!(" HINT: {}", h)).unwrap_or_default(),
+            db_err
+                .detail()
+                .map(|d| format!(" DETAIL: {}", d))
+                .unwrap_or_default(),
+            db_err
+                .hint()
+                .map(|h| format!(" HINT: {}", h))
+                .unwrap_or_default(),
         )
     } else {
         // Fall back to source chain for non-db errors
@@ -86,8 +92,8 @@ pub fn redact_url_password(url: &str) -> String {
             "postgres://"
         };
 
-        // Find the @ separator
-        if let Some(at_pos) = rest.find('@') {
+        // Find the @ separator - use rfind to handle passwords containing @
+        if let Some(at_pos) = rest.rfind('@') {
             let auth = &rest[..at_pos];
             let host_and_rest = &rest[at_pos..];
 

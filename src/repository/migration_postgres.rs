@@ -33,7 +33,10 @@ impl PostgresMigrator {
     /// Create a new PostgreSQL migrator.
     pub async fn new(database_url: &str) -> Result<Self, DieselError> {
         let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
-        let pool = Pool::builder(config).max_size(10).build().map_err(to_diesel_error)?;
+        let pool = Pool::builder(config)
+            .max_size(10)
+            .build()
+            .map_err(to_diesel_error)?;
         Ok(Self {
             pool,
             database_url: database_url.to_string(),
@@ -126,7 +129,9 @@ impl PostgresMigrator {
                 count += 1;
             }
 
-            sink.send(bytes::Bytes::from(data)).await.map_err(pg_error)?;
+            sink.send(bytes::Bytes::from(data))
+                .await
+                .map_err(pg_error)?;
 
             if let Some(ref cb) = progress {
                 cb(count);
@@ -186,7 +191,9 @@ impl PostgresMigrator {
             count += 1;
         }
 
-        sink.send(bytes::Bytes::from(data)).await.map_err(pg_error)?;
+        sink.send(bytes::Bytes::from(data))
+            .await
+            .map_err(pg_error)?;
 
         sink.finish().await.map_err(pg_error)?;
 
@@ -246,13 +253,17 @@ impl PostgresMigrator {
                     Self::escape_copy_value(v.source_url.as_deref()),
                     Self::escape_copy_value(v.original_filename.as_deref()),
                     Self::escape_copy_value(v.server_date.as_deref()),
-                    v.page_count.map(|n| n.to_string()).unwrap_or_else(|| "\\N".to_string()),
+                    v.page_count
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| "\\N".to_string()),
                 );
                 data.push_str(&row);
                 count += 1;
             }
 
-            sink.send(bytes::Bytes::from(data)).await.map_err(pg_error)?;
+            sink.send(bytes::Bytes::from(data))
+                .await
+                .map_err(pg_error)?;
 
             if let Some(ref cb) = progress {
                 cb(count);
@@ -318,7 +329,9 @@ impl PostgresMigrator {
                 count += 1;
             }
 
-            sink.send(bytes::Bytes::from(data)).await.map_err(pg_error)?;
+            sink.send(bytes::Bytes::from(data))
+                .await
+                .map_err(pg_error)?;
 
             if let Some(ref cb) = progress {
                 cb(count);
@@ -392,7 +405,9 @@ impl PostgresMigrator {
                 count += 1;
             }
 
-            sink.send(bytes::Bytes::from(data)).await.map_err(pg_error)?;
+            sink.send(bytes::Bytes::from(data))
+                .await
+                .map_err(pg_error)?;
 
             if let Some(ref cb) = progress {
                 cb(count);
@@ -450,11 +465,17 @@ impl PostgresMigrator {
                     Self::escape_copy_value(Some(&r.method)),
                     Self::escape_copy_value(Some(&r.request_headers)),
                     Self::escape_copy_value(Some(&r.request_at)),
-                    r.response_status.map(|n| n.to_string()).unwrap_or_else(|| "\\N".to_string()),
+                    r.response_status
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| "\\N".to_string()),
                     Self::escape_copy_value(Some(&r.response_headers)),
                     Self::escape_copy_value(r.response_at.as_deref()),
-                    r.response_size.map(|n| n.to_string()).unwrap_or_else(|| "\\N".to_string()),
-                    r.duration_ms.map(|n| n.to_string()).unwrap_or_else(|| "\\N".to_string()),
+                    r.response_size
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| "\\N".to_string()),
+                    r.duration_ms
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| "\\N".to_string()),
                     Self::escape_copy_value(r.error.as_deref()),
                     r.was_conditional,
                     r.was_not_modified,
@@ -463,7 +484,9 @@ impl PostgresMigrator {
                 count += 1;
             }
 
-            sink.send(bytes::Bytes::from(data)).await.map_err(pg_error)?;
+            sink.send(bytes::Bytes::from(data))
+                .await
+                .map_err(pg_error)?;
 
             if let Some(ref cb) = progress {
                 cb(count);
@@ -533,7 +556,9 @@ impl PostgresMigrator {
                 count += 1;
             }
 
-            sink.send(bytes::Bytes::from(data)).await.map_err(pg_error)?;
+            sink.send(bytes::Bytes::from(data))
+                .await
+                .map_err(pg_error)?;
 
             if let Some(ref cb) = progress {
                 cb(count);
@@ -591,7 +616,9 @@ impl PostgresMigrator {
                 count += 1;
             }
 
-            sink.send(bytes::Bytes::from(data)).await.map_err(pg_error)?;
+            sink.send(bytes::Bytes::from(data))
+                .await
+                .map_err(pg_error)?;
 
             if let Some(ref cb) = progress {
                 cb(count);
@@ -651,7 +678,9 @@ impl PostgresMigrator {
                 count += 1;
             }
 
-            sink.send(bytes::Bytes::from(data)).await.map_err(pg_error)?;
+            sink.send(bytes::Bytes::from(data))
+                .await
+                .map_err(pg_error)?;
 
             if let Some(ref cb) = progress {
                 cb(count);
@@ -713,7 +742,9 @@ impl PostgresMigrator {
                 count += 1;
             }
 
-            sink.send(bytes::Bytes::from(data)).await.map_err(pg_error)?;
+            sink.send(bytes::Bytes::from(data))
+                .await
+                .map_err(pg_error)?;
 
             if let Some(ref cb) = progress {
                 cb(count);
@@ -832,8 +863,10 @@ impl PostgresMigrator {
                 placeholders.join(", ")
             );
 
-            let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
-                chunk.iter().map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+            let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = chunk
+                .iter()
+                .map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync))
+                .collect();
 
             let rows = client.query(&sql, &params).await.map_err(pg_error)?;
             for row in rows {
@@ -879,8 +912,10 @@ impl PostgresMigrator {
                 placeholders.join(", ")
             );
 
-            let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
-                chunk.iter().map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+            let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = chunk
+                .iter()
+                .map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync))
+                .collect();
 
             let rows = client.query(&sql, &params).await.map_err(pg_error)?;
             for row in rows {
