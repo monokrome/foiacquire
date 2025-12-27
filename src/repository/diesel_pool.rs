@@ -45,12 +45,7 @@ impl AsyncSqlitePool {
     pub async fn get(&self) -> Result<AsyncSqliteConnection, DieselError> {
         AsyncSqliteConnection::establish(&self.database_url)
             .await
-            .map_err(|e| {
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UnableToSendCommand,
-                    Box::new(e.to_string()),
-                )
-            })
+            .map_err(super::util::to_diesel_error)
     }
 
     /// Get the database URL.

@@ -11,6 +11,13 @@ pub mod diesel_document;
 pub mod diesel_models;
 pub mod diesel_pool;
 pub mod diesel_source;
+pub mod util;
+
+// Database migration
+pub mod migration;
+#[cfg(feature = "postgres")]
+pub mod migration_postgres;
+pub mod migration_sqlite;
 
 // Keep the document helpers (types like DocumentNavigation, etc.)
 mod document;
@@ -24,6 +31,8 @@ pub use diesel_crawl::{CrawlState, CrawlStats, DieselCrawlRepository, RequestSta
 pub use diesel_document::DieselDocumentRepository;
 pub use diesel_pool::{AsyncSqliteConnection, AsyncSqlitePool, DieselError};
 pub use diesel_source::DieselSourceRepository;
+pub use migration::{DatabaseExporter, DatabaseImporter, ProgressCallback};
+pub use migration_sqlite::SqliteMigrator;
 
 // Re-export helper types from document module
 pub use document::{

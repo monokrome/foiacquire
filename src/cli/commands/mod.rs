@@ -5,6 +5,7 @@
 mod analyze;
 mod annotate;
 mod config_cmd;
+mod db;
 mod discover;
 mod documents;
 mod helpers;
@@ -101,6 +102,12 @@ enum Commands {
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
+    },
+
+    /// Database management (copy between SQLite/Postgres)
+    Db {
+        #[command(subcommand)]
+        command: DbCommands,
     },
 
     /// Scrape documents from one or more sources (crawl + download combined)
@@ -434,6 +441,36 @@ enum StateCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum DbCommands {
+    /// Copy data between databases (e.g., SQLite to Postgres)
+    Copy {
+        /// Source database URL (e.g., ./data.db or postgres://user:pass@host/db)
+        from: String,
+        /// Destination database URL
+        to: String,
+        /// Clear destination database before copy
+        #[arg(long)]
+        clear: bool,
+        /// Batch size for inserts (default: 1000)
+        #[arg(long, default_value = "1000")]
+        batch_size: usize,
+        /// Use COPY command for faster initial load (requires empty target, Postgres only)
+        #[arg(long)]
+        copy: bool,
+        /// Show progress bars (requires counting records first)
+        #[arg(long)]
+        progress: bool,
+        /// Only copy specific tables (comma-separated). Available: sources, documents,
+        /// document_versions, document_pages, virtual_files, crawl_urls, crawl_requests,
+        /// crawl_config, configuration_history, rate_limit_state
+        // num_args + default_missing_value allows `--tables` without a value, so we can
+        // show a helpful message listing available tables instead of clap's generic error
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        tables: Option<String>,
+    },
+}
+
 /// Run the CLI.
 pub async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -482,6 +519,17 @@ pub async fn run() -> anyhow::Result<()> {
             ConfigCommands::History { full } => {
                 config_cmd::cmd_config_history(&settings, full).await
             }
+        },
+        Commands::Db { command } => match command {
+            DbCommands::Copy {
+                from,
+                to,
+                clear,
+                batch_size,
+                copy,
+                progress,
+                tables,
+            } => db::cmd_db_copy(&from, &to, clear, batch_size, copy, progress, tables).await,
         },
         Commands::Scrape {
             source_ids,
