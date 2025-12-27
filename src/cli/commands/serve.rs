@@ -1,15 +1,8 @@
 //! Web server command.
 
-use std::io::{self, Write};
-
 use console::style;
 
 use crate::config::Settings;
-
-/// Flush stdout to ensure output is visible in containers
-fn flush_stdout() {
-    let _ = io::stdout().flush();
-}
 
 /// Start the web server.
 pub async fn cmd_serve(settings: &Settings, bind: &str) -> anyhow::Result<()> {
@@ -17,12 +10,10 @@ pub async fn cmd_serve(settings: &Settings, bind: &str) -> anyhow::Result<()> {
 
     // Run database migrations first
     println!("{} Running database migrations...", style("→").cyan(),);
-    flush_stdout();
     let ctx = settings.create_db_context();
     match ctx.init_schema().await {
         Ok(()) => {
             println!("  {} Database ready", style("✓").green(),);
-            flush_stdout();
         }
         Err(e) => {
             eprintln!("  {} Migration failed: {}", style("✗").red(), e);
@@ -37,7 +28,6 @@ pub async fn cmd_serve(settings: &Settings, bind: &str) -> anyhow::Result<()> {
         port
     );
     println!("  Press Ctrl+C to stop");
-    flush_stdout();
 
     crate::server::serve(settings, &host, port).await
 }
