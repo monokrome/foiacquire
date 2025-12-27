@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::llm::LlmConfig;
-use crate::repository::{create_pool, AsyncConfigHistoryRepository};
+use crate::repository::DbContext;
 use crate::scrapers::ScraperConfig;
 
 /// Default refresh TTL in days (14 days).
@@ -102,13 +102,11 @@ impl Settings {
     /// Create a database context using the configured database URL or path.
     ///
     /// This is the preferred way to get a DbContext from settings.
-    pub async fn create_db_context(&self) -> anyhow::Result<crate::repository::DbContext> {
-        use crate::repository::DbContext;
-
+    pub fn create_db_context(&self) -> DbContext {
         if self.database_url.is_some() {
-            Ok(DbContext::from_url(&self.database_url(), &self.documents_dir).await?)
+            DbContext::from_url(&self.database_url(), &self.documents_dir)
         } else {
-            Ok(DbContext::new(&self.database_path(), &self.documents_dir).await?)
+            DbContext::new(&self.database_path(), &self.documents_dir)
         }
     }
 }
@@ -333,9 +331,10 @@ impl Config {
 
     /// Load configuration from database history.
     pub async fn load_from_db(db_path: &Path) -> Option<Self> {
-        let pool = create_pool(db_path).await.ok()?;
-        let repo = AsyncConfigHistoryRepository::new(pool);
-        let entry = repo.get_latest().await.ok()??;
+        // Use a dummy documents dir since we only need config_history
+        let docs_dir = db_path.parent().unwrap_or(Path::new(".")).join("documents");
+        let ctx = DbContext::new(db_path, &docs_dir);
+        let entry = ctx.config_history().get_latest().await.ok()??;
 
         match entry.format.to_lowercase().as_str() {
             "json" => serde_json::from_str(&entry.data).ok(),
@@ -351,32 +350,28 @@ impl Config {
         let data = self.to_json_relative(target_dir);
         let format = "json";
 
-        match create_pool(db_path).await {
-            Ok(pool) => {
-                let repo = AsyncConfigHistoryRepository::new(pool);
-                match repo.insert_if_new(&data, format, &hash).await {
-                    Ok(true) => {
-                        tracing::debug!("Saved new config to history");
-                    }
-                    Ok(false) => {
-                        tracing::debug!("Config unchanged, not saving to history");
-                    }
-                    Err(e) => {
-                        // Check for lock errors and warn
-                        let msg = e.to_string();
-                        if msg.contains("locked") || msg.contains("SQLITE_BUSY") {
-                            tracing::warn!(
-                                "Could not save config to history (database locked): {}",
-                                e
-                            );
-                        } else {
-                            tracing::warn!("Could not save config to history: {}", e);
-                        }
-                    }
-                }
+        let docs_dir = db_path.parent().unwrap_or(Path::new(".")).join("documents");
+        let ctx = DbContext::new(db_path, &docs_dir);
+        let repo = ctx.config_history();
+
+        match repo.insert_if_new(&data, format, &hash).await {
+            Ok(true) => {
+                tracing::debug!("Saved new config to history");
+            }
+            Ok(false) => {
+                tracing::debug!("Config unchanged, not saving to history");
             }
             Err(e) => {
-                tracing::warn!("Could not open config history repository: {}", e);
+                // Check for lock errors and warn
+                let msg = e.to_string();
+                if msg.contains("locked") || msg.contains("SQLITE_BUSY") {
+                    tracing::warn!(
+                        "Could not save config to history (database locked): {}",
+                        e
+                    );
+                } else {
+                    tracing::warn!("Could not save config to history: {}", e);
+                }
             }
         }
     }

@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 
 use crate::models::{Document, DocumentVersion, UrlStatus};
 use crate::repository::{
-    extract_filename_parts, sanitize_filename, AsyncCrawlRepository, AsyncDocumentRepository,
+    extract_filename_parts, sanitize_filename, DieselCrawlRepository, DieselDocumentRepository,
 };
 use crate::scrapers::{extract_title_from_url, HttpClient};
 use crate::services::youtube;
@@ -24,16 +24,16 @@ use youtube_download::download_youtube_video;
 
 /// Service for downloading documents from the crawl queue.
 pub struct DownloadService {
-    doc_repo: Arc<AsyncDocumentRepository>,
-    crawl_repo: Arc<AsyncCrawlRepository>,
+    doc_repo: Arc<DieselDocumentRepository>,
+    crawl_repo: Arc<DieselCrawlRepository>,
     config: DownloadConfig,
 }
 
 impl DownloadService {
     /// Create a new download service.
     pub fn new(
-        doc_repo: Arc<AsyncDocumentRepository>,
-        crawl_repo: Arc<AsyncCrawlRepository>,
+        doc_repo: Arc<DieselDocumentRepository>,
+        crawl_repo: Arc<DieselCrawlRepository>,
         config: DownloadConfig,
     ) -> Self {
         Self {
@@ -296,7 +296,7 @@ impl DownloadService {
                     );
 
                     // Check for existing document
-                    let existing = doc_repo.get_by_url(&url).await.ok().flatten();
+                    let existing = doc_repo.get_by_url(&url).await.ok().and_then(|v| v.into_iter().next());
                     let new_document = existing.is_none();
 
                     if let Some(mut doc) = existing {

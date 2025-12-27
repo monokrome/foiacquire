@@ -14,7 +14,7 @@ use super::config::ScraperConfig;
 use super::rate_limiter::RateLimiter;
 use super::HttpClient;
 use crate::models::Source;
-use crate::repository::AsyncCrawlRepository;
+use crate::repository::DieselCrawlRepository;
 
 mod api;
 mod discovery;
@@ -28,7 +28,7 @@ pub struct ConfigurableScraper {
     pub(crate) source: Source,
     pub(crate) config: ScraperConfig,
     pub(crate) client: HttpClient,
-    pub(crate) crawl_repo: Option<Arc<AsyncCrawlRepository>>,
+    pub(crate) crawl_repo: Option<Arc<DieselCrawlRepository>>,
     /// Refresh TTL in days - URLs older than this will be re-checked.
     pub(crate) refresh_ttl_days: u64,
     /// Browser fetcher for anti-bot protected sites (created lazily when needed).
@@ -41,7 +41,7 @@ impl ConfigurableScraper {
     pub fn new(
         source: Source,
         config: ScraperConfig,
-        crawl_repo: Option<Arc<AsyncCrawlRepository>>,
+        crawl_repo: Option<Arc<DieselCrawlRepository>>,
         request_delay: Duration,
         refresh_ttl_days: u64,
     ) -> Self {
@@ -59,7 +59,7 @@ impl ConfigurableScraper {
     pub fn with_rate_limiter(
         source: Source,
         config: ScraperConfig,
-        crawl_repo: Option<Arc<AsyncCrawlRepository>>,
+        crawl_repo: Option<Arc<DieselCrawlRepository>>,
         request_delay: Duration,
         refresh_ttl_days: u64,
         rate_limiter: Option<RateLimiter>,

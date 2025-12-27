@@ -641,8 +641,7 @@ pub async fn cmd_analyze(
             None
         };
 
-    let db_path = settings.database_path();
-    let ctx = DbContext::new(&db_path, &settings.documents_dir).await?;
+    let ctx = settings.create_db_context();
     let doc_repo = ctx.documents();
     let config_history = ctx.config_history();
 

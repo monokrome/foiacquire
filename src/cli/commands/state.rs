@@ -8,7 +8,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::config::{Config, Settings};
 use crate::models::{Source, SourceType};
-use crate::repository::{create_pool, AsyncCrawlRepository, AsyncSourceRepository, DbContext};
+use crate::repository::DbContext;
 use crate::scrapers::ConfigurableScraper;
 
 use super::helpers::format_bytes;
@@ -18,9 +18,9 @@ pub async fn cmd_crawl_status(
     settings: &Settings,
     source_id: Option<String>,
 ) -> anyhow::Result<()> {
-    let pool = create_pool(&settings.database_path()).await?;
-    let source_repo = AsyncSourceRepository::new(pool.clone());
-    let crawl_repo = AsyncCrawlRepository::new(pool);
+    let ctx = settings.create_db_context();
+    let source_repo = ctx.sources();
+    let crawl_repo = ctx.crawl();
 
     let sources = match &source_id {
         Some(id) => source_repo.get(id).await?.into_iter().collect(),
@@ -47,18 +47,13 @@ pub async fn cmd_crawl_status(
 
     for source in sources {
         // Use bulk-loaded data when available, otherwise fetch individually
-        let state = if source_id.is_none() {
-            all_states
-                .get(&source.id)
-                .cloned()
-                .unwrap_or_else(|| crate::models::CrawlState {
-                    source_id: source.id.clone(),
-                    ..Default::default()
-                })
+        let crawl_stats = if source_id.is_none() {
+            all_states.get(&source.id).cloned().unwrap_or_default()
         } else {
-            crawl_repo.get_crawl_state(&source.id).await?
+            crawl_repo.get_all_stats_for_source(&source.id).await?
         };
 
+        let state = &crawl_stats.crawl_state;
         let stats = if source_id.is_none() {
             all_stats.get(&source.id).cloned().unwrap_or_default()
         } else {
@@ -81,18 +76,18 @@ pub async fn cmd_crawl_status(
 
         println!("{:<20} {}", "Status:", status_str);
 
-        if let Some(started) = state.last_crawl_started {
+        if let Some(ref started) = state.last_crawl_started {
             println!(
                 "{:<20} {}",
                 "Last Started:",
-                started.format("%Y-%m-%d %H:%M")
+                started
             );
         }
-        if let Some(completed) = state.last_crawl_completed {
+        if let Some(ref completed) = state.last_crawl_completed {
             println!(
                 "{:<20} {}",
                 "Last Completed:",
-                completed.format("%Y-%m-%d %H:%M")
+                completed
             );
         }
 
@@ -139,8 +134,8 @@ pub async fn cmd_crawl_clear(
         return Ok(());
     }
 
-    let pool = create_pool(&settings.database_path()).await?;
-    let crawl_repo = AsyncCrawlRepository::new(pool);
+    let ctx = settings.create_db_context();
+    let crawl_repo = ctx.crawl();
     crawl_repo.clear_source_all(source_id).await?;
 
     println!(
@@ -170,8 +165,7 @@ pub async fn cmd_crawl(settings: &Settings, source_id: &str, _limit: usize) -> a
         }
     };
 
-    let db_path = settings.database_path();
-    let ctx = DbContext::new(&db_path, &settings.documents_dir).await?;
+    let ctx = settings.create_db_context();
     let source_repo = ctx.sources();
     let crawl_repo = Arc::new(ctx.crawl());
 
@@ -195,15 +189,24 @@ pub async fn cmd_crawl(settings: &Settings, source_id: &str, _limit: usize) -> a
         }
     };
 
-    // Check crawl state
+    // Check crawl state and update config hash
     {
-        let (config_changed, _has_pending_urls) = crawl_repo
-            .check_config_changed(source_id, &scraper_config)
+        let config_hash = {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let json = serde_json::to_string(&scraper_config).unwrap_or_default();
+            let mut hasher = DefaultHasher::new();
+            json.hash(&mut hasher);
+            format!("{:x}", hasher.finish())
+        };
+
+        let config_changed = crawl_repo
+            .check_config_changed(source_id, &config_hash)
             .await?;
 
         // Update config hash (we never clear discovered URLs - they're valuable!)
         crawl_repo
-            .store_config_hash(source_id, &scraper_config)
+            .store_config_hash(source_id, &config_hash)
             .await?;
 
         let state = crawl_repo.get_crawl_state(source_id).await?;

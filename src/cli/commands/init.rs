@@ -9,8 +9,9 @@ use crate::models::{Source, SourceType};
 pub async fn cmd_init(settings: &Settings) -> anyhow::Result<()> {
     settings.ensure_directories()?;
 
-    // Initialize database with DbContext (runs migrations automatically)
-    let ctx = settings.create_db_context().await?;
+    // Initialize database with DbContext
+    let ctx = settings.create_db_context();
+    ctx.init_schema().await?;
     let source_repo = ctx.sources();
 
     // Load sources from config

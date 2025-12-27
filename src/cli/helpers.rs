@@ -3,12 +3,12 @@
 use std::path::Path;
 
 use crate::models::{Document, DocumentVersion};
-use crate::repository::{extract_filename_parts, sanitize_filename, AsyncDocumentRepository};
+use crate::repository::{extract_filename_parts, sanitize_filename, DieselDocumentRepository};
 use crate::scrapers::ScraperResult;
 
 /// Save scraped document content to disk and database.
 pub async fn save_scraped_document_async(
-    doc_repo: &AsyncDocumentRepository,
+    doc_repo: &DieselDocumentRepository,
     content: &[u8],
     result: &ScraperResult,
     source_id: &str,
@@ -44,7 +44,7 @@ pub async fn save_scraped_document_async(
     // Check existing document
     let existing = doc_repo.get_by_url(&result.url).await?;
 
-    if let Some(mut doc) = existing {
+    if let Some(mut doc) = existing.into_iter().next() {
         if doc.add_version(version) {
             doc_repo.save(&doc).await?;
         }

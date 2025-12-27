@@ -3,7 +3,6 @@
 use console::style;
 
 use crate::config::Settings;
-use crate::repository::{create_pool, AsyncCrawlRepository, AsyncDocumentRepository};
 
 /// Analyze URL patterns and discover new URLs.
 pub async fn cmd_discover(
@@ -17,10 +16,9 @@ pub async fn cmd_discover(
     use regex::Regex;
     use std::collections::{HashMap, HashSet};
 
-    let db_path = settings.database_path();
-    let pool = create_pool(&db_path).await?;
-    let doc_repo = AsyncDocumentRepository::new(pool.clone(), settings.documents_dir.clone());
-    let crawl_repo = AsyncCrawlRepository::new(pool);
+    let ctx = settings.create_db_context();
+    let doc_repo = ctx.documents();
+    let crawl_repo = ctx.crawl();
 
     println!(
         "{} Analyzing URL patterns for source: {}",

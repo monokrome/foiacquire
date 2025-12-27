@@ -6,26 +6,31 @@ use axum::{
 };
 
 use super::super::AppState;
-use super::helpers::{build_timeline_from_summaries, DateRangeParams, TimelineResponse};
+use super::helpers::{DateRangeParams, TimelineResponse};
 
 /// Timeline aggregate across all sources.
 pub async fn timeline_aggregate(
     State(state): State<AppState>,
     Query(_params): Query<DateRangeParams>,
 ) -> impl IntoResponse {
-    let summaries = match state.doc_repo.get_all_summaries().await {
-        Ok(s) => s,
+    match state.doc_repo.get_all_summaries().await {
+        Ok(summaries) => {
+            // Simple timeline: count by acquired_at date
+            let total = summaries.len() as u64;
+            axum::Json(TimelineResponse {
+                buckets: vec![],  // TODO: implement bucketing
+                total,
+                error: None,
+            })
+        }
         Err(e) => {
-            return axum::Json(TimelineResponse {
+            axum::Json(TimelineResponse {
                 buckets: vec![],
                 total: 0,
                 error: Some(e.to_string()),
-            });
+            })
         }
-    };
-
-    let timeline = build_timeline_from_summaries(&summaries);
-    axum::Json(timeline)
+    }
 }
 
 /// Timeline for a specific source.
@@ -34,17 +39,21 @@ pub async fn timeline_source(
     Path(source_id): Path<String>,
     Query(_params): Query<DateRangeParams>,
 ) -> impl IntoResponse {
-    let summaries = match state.doc_repo.get_summaries_by_source(&source_id).await {
-        Ok(s) => s,
+    match state.doc_repo.get_summaries_by_source(&source_id).await {
+        Ok(summaries) => {
+            let total = summaries.len() as u64;
+            axum::Json(TimelineResponse {
+                buckets: vec![],  // TODO: implement bucketing
+                total,
+                error: None,
+            })
+        }
         Err(e) => {
-            return axum::Json(TimelineResponse {
+            axum::Json(TimelineResponse {
                 buckets: vec![],
                 total: 0,
                 error: Some(e.to_string()),
-            });
+            })
         }
-    };
-
-    let timeline = build_timeline_from_summaries(&summaries);
-    axum::Json(timeline)
+    }
 }

@@ -6,7 +6,7 @@ use super::super::browser::BrowserEngineConfig;
 use super::super::config::ScraperConfig;
 use super::super::HttpClient;
 use super::ConfigurableScraper;
-use crate::repository::AsyncCrawlRepository;
+use crate::repository::DieselCrawlRepository;
 
 impl ConfigurableScraper {
     /// Streaming discovery that sends URLs as they're found (with browser support).
@@ -15,7 +15,7 @@ impl ConfigurableScraper {
         config: &ScraperConfig,
         client: &HttpClient,
         source_id: &str,
-        crawl_repo: &Option<Arc<AsyncCrawlRepository>>,
+        crawl_repo: &Option<Arc<DieselCrawlRepository>>,
         url_tx: &tokio::sync::mpsc::Sender<String>,
         browser_config: &Option<BrowserEngineConfig>,
     ) {
@@ -51,7 +51,7 @@ impl ConfigurableScraper {
         config: &ScraperConfig,
         client: &HttpClient,
         source_id: &str,
-        crawl_repo: &Option<Arc<AsyncCrawlRepository>>,
+        crawl_repo: &Option<Arc<DieselCrawlRepository>>,
         url_tx: &tokio::sync::mpsc::Sender<String>,
     ) {
         match config.discovery.discovery_type.as_str() {

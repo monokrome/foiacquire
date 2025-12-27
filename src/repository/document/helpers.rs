@@ -4,7 +4,6 @@ use chrono::{DateTime, Utc};
 use std::path::PathBuf;
 
 use crate::models::{Document, DocumentStatus, DocumentVersion};
-pub(crate) use crate::utils::mime_type_sql_condition as mime_type_condition;
 
 /// Partial document data loaded from a row, before versions are attached.
 /// Used internally by bulk-load methods to avoid N+1 queries.

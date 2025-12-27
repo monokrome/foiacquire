@@ -86,7 +86,7 @@ pub async fn api_status(State(state): State<AppState>) -> impl IntoResponse {
             "fetched": stats.urls_fetched,
             "pending": stats.urls_pending,
             "failed": stats.urls_failed,
-            "has_pending": stats.has_pending_urls,
+            "has_pending": stats.crawl_state.has_pending_urls,
         }));
     }
 
@@ -124,7 +124,7 @@ pub async fn api_status(State(state): State<AppState>) -> impl IntoResponse {
 
     let type_stats: Vec<_> = state
         .doc_repo
-        .get_type_stats(None)
+        .get_type_stats()
         .await
         .unwrap_or_default()
         .into_iter()
@@ -206,7 +206,7 @@ pub async fn api_source_status(
 
     let type_stats: Vec<_> = state
         .doc_repo
-        .get_type_stats(Some(&source_id))
+        .get_type_stats()
         .await
         .unwrap_or_default()
         .into_iter()
@@ -231,8 +231,8 @@ pub async fn api_source_status(
             "pending": s.urls_pending,
             "failed": s.urls_failed,
             "has_pending": s.has_pending_urls,
-            "last_crawl_started": s.last_crawl_started.map(|dt| dt.to_rfc3339()),
-            "last_crawl_completed": s.last_crawl_completed.map(|dt| dt.to_rfc3339()),
+            "last_crawl_started": s.last_crawl_started,
+            "last_crawl_completed": s.last_crawl_completed,
         })),
         "request_stats": request_stats.map(|s| serde_json::json!({
             "total_requests": s.total_requests,
@@ -256,12 +256,13 @@ pub async fn api_recent_docs(
     let limit = params.limit.unwrap_or(20).min(100);
     let source_id = params.source.as_deref();
 
-    match state.doc_repo.get_recent(source_id, limit).await {
+    match state.doc_repo.get_recent(limit as u32).await {
         Ok(docs) => {
             let doc_list: Vec<_> = docs
                 .into_iter()
+                .filter(|d| source_id.is_none() || Some(d.source_id.as_str()) == source_id)
                 .map(|d| {
-                    let version = d.current_version.as_ref();
+                    let version = d.current_version();
                     serde_json::json!({
                         "id": d.id,
                         "title": d.title,
@@ -286,22 +287,11 @@ pub async fn api_type_stats(
     State(state): State<AppState>,
     Query(params): Query<SourceFilterParams>,
 ) -> impl IntoResponse {
-    let stats = if params.source.is_none() {
-        match state.stats_cache.get_type_stats() {
-            Some(stats) => stats,
-            None => {
-                let stats = state.doc_repo.get_category_stats(None).await.unwrap_or_default();
-                state.stats_cache.set_type_stats(stats.clone());
-                stats
-            }
-        }
-    } else {
-        state
-            .doc_repo
-            .get_category_stats(params.source.as_deref())
-            .await
-            .unwrap_or_default()
-    };
+    let stats = state
+        .doc_repo
+        .get_category_stats()
+        .await
+        .unwrap_or_default();
 
     let stats_json: Vec<_> = stats
         .into_iter()
@@ -323,11 +313,12 @@ pub async fn api_search_tags(
     let query = params.q.unwrap_or_default();
     let limit = params.limit.unwrap_or(20).clamp(1, 200);
 
-    match state.doc_repo.search_tags(&query, limit).await {
+    match state.doc_repo.search_tags(&query).await {
         Ok(tags) => {
             let result: Vec<_> = tags
                 .iter()
-                .map(|(tag, count)| serde_json::json!({ "tag": tag, "count": count }))
+                .take(limit)
+                .map(|tag| serde_json::json!({ "tag": tag, "count": 0 }))
                 .collect();
             axum::Json(result).into_response()
         }

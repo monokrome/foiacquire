@@ -19,13 +19,13 @@ use reqwest::{Client, StatusCode};
 
 use super::rate_limiter::RateLimiter;
 use crate::models::{CrawlRequest, CrawlUrl, UrlStatus};
-use crate::repository::AsyncCrawlRepository;
+use crate::repository::DieselCrawlRepository;
 
 /// HTTP client with request logging and conditional request support.
 #[derive(Clone)]
 pub struct HttpClient {
     client: Client,
-    crawl_repo: Option<Arc<AsyncCrawlRepository>>,
+    crawl_repo: Option<Arc<DieselCrawlRepository>>,
     source_id: String,
     request_delay: Duration,
     referer: Option<String>,
@@ -111,7 +111,7 @@ impl HttpClient {
     }
 
     /// Set the crawl repository for request logging.
-    pub fn with_crawl_repo(mut self, repo: Arc<AsyncCrawlRepository>) -> Self {
+    pub fn with_crawl_repo(mut self, repo: Arc<DieselCrawlRepository>) -> Self {
         self.crawl_repo = Some(repo);
         self
     }

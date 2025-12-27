@@ -27,8 +27,7 @@ pub async fn cmd_annotate(
     use crate::services::{AnnotationEvent, AnnotationService};
     use tokio::sync::mpsc;
 
-    let db_path = settings.database_path();
-    let ctx = DbContext::new(&db_path, &settings.documents_dir).await?;
+    let ctx = settings.create_db_context();
     let doc_repo = ctx.documents();
 
     // Set up config watcher for stop-process and inplace modes
@@ -313,11 +312,9 @@ pub async fn cmd_detect_dates(
     limit: usize,
     dry_run: bool,
 ) -> anyhow::Result<()> {
-    use crate::repository::DbContext;
     use crate::services::date_detection::{detect_date, DateConfidence};
 
-    let db_path = settings.database_path();
-    let ctx = DbContext::new(&db_path, &settings.documents_dir).await?;
+    let ctx = settings.create_db_context();
     let doc_repo = ctx.documents();
 
     // Count documents needing date estimation
@@ -364,8 +361,15 @@ pub async fn cmd_detect_dates(
     let mut detected = 0u64;
     let mut no_date = 0u64;
 
-    for (doc_id, filename, server_date, acquired_at, source_url) in documents {
-        pb.set_message(truncate(&doc_id, 36));
+    for doc in documents {
+        pb.set_message(truncate(&doc.id, 36));
+
+        // Extract date detection inputs from document
+        let version = doc.current_version();
+        let filename = version.and_then(|v| v.original_filename.clone());
+        let server_date = version.and_then(|v| v.server_date);
+        let acquired_at = version.map(|v| v.acquired_at).unwrap_or(doc.created_at);
+        let source_url = Some(doc.source_url.clone());
 
         // Run date detection
         let estimate = detect_date(
@@ -374,6 +378,7 @@ pub async fn cmd_detect_dates(
             filename.as_deref(),
             source_url.as_deref(),
         );
+        let doc_id = &doc.id;
 
         if let Some(est) = estimate {
             detected += 1;

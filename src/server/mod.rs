@@ -19,7 +19,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::config::Settings;
-use crate::repository::{AsyncCrawlRepository, AsyncDocumentRepository, AsyncSourceRepository};
+use crate::repository::{DieselCrawlRepository, DieselDocumentRepository, DieselSourceRepository};
 
 use cache::StatsCache;
 
@@ -41,9 +41,9 @@ pub struct DeepSeekJobStatus {
 /// Shared state for the web server.
 #[derive(Clone)]
 pub struct AppState {
-    pub doc_repo: Arc<AsyncDocumentRepository>,
-    pub source_repo: Arc<AsyncSourceRepository>,
-    pub crawl_repo: Arc<AsyncCrawlRepository>,
+    pub doc_repo: Arc<DieselDocumentRepository>,
+    pub source_repo: Arc<DieselSourceRepository>,
+    pub crawl_repo: Arc<DieselCrawlRepository>,
     pub documents_dir: PathBuf,
     pub stats_cache: Arc<StatsCache>,
     /// DeepSeek OCR job status (only one can run at a time).
@@ -52,7 +52,7 @@ pub struct AppState {
 
 impl AppState {
     pub async fn new(settings: &Settings) -> anyhow::Result<Self> {
-        let ctx = settings.create_db_context().await?;
+        let ctx = settings.create_db_context();
 
         Ok(Self {
             doc_repo: Arc::new(ctx.documents()),

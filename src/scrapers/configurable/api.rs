@@ -8,7 +8,7 @@ use super::super::HttpClient;
 use super::extract::{extract_path, extract_url, extract_urls};
 use super::ConfigurableScraper;
 use crate::models::{CrawlUrl, DiscoveryMethod};
-use crate::repository::AsyncCrawlRepository;
+use crate::repository::DieselCrawlRepository;
 
 impl ConfigurableScraper {
     /// Streaming API paginated discovery.
@@ -16,7 +16,7 @@ impl ConfigurableScraper {
         config: &ScraperConfig,
         client: &HttpClient,
         source_id: &str,
-        crawl_repo: &Option<Arc<AsyncCrawlRepository>>,
+        crawl_repo: &Option<Arc<DieselCrawlRepository>>,
         url_tx: &tokio::sync::mpsc::Sender<String>,
     ) {
         let api = match &config.discovery.api {
@@ -182,7 +182,7 @@ impl ConfigurableScraper {
         config: &ScraperConfig,
         client: &HttpClient,
         source_id: &str,
-        crawl_repo: &Option<Arc<AsyncCrawlRepository>>,
+        crawl_repo: &Option<Arc<DieselCrawlRepository>>,
         url_tx: &tokio::sync::mpsc::Sender<String>,
     ) {
         let api = match &config.discovery.api {

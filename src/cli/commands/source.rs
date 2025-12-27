@@ -3,16 +3,13 @@
 use console::style;
 
 use crate::config::Settings;
-use crate::repository::{
-    create_pool, AsyncCrawlRepository, AsyncDocumentRepository, AsyncSourceRepository,
-};
 
 use super::helpers::truncate;
 
 /// List configured sources.
 pub async fn cmd_source_list(settings: &Settings) -> anyhow::Result<()> {
-    let pool = create_pool(&settings.database_path()).await?;
-    let source_repo = AsyncSourceRepository::new(pool);
+    let ctx = settings.create_db_context();
+    let source_repo = ctx.sources();
     let sources = source_repo.get_all().await?;
 
     if sources.is_empty() {
@@ -53,13 +50,14 @@ pub async fn cmd_source_rename(
     new_id: &str,
     confirm: bool,
 ) -> anyhow::Result<()> {
+    use diesel::prelude::*;
+    use diesel_async::RunQueryDsl;
     use std::io::{self, Write};
 
-    let db_path = settings.database_path();
-    let pool = create_pool(&db_path).await?;
-    let source_repo = AsyncSourceRepository::new(pool.clone());
-    let doc_repo = AsyncDocumentRepository::new(pool.clone(), settings.documents_dir.clone());
-    let crawl_repo = AsyncCrawlRepository::new(pool.clone());
+    let ctx = settings.create_db_context();
+    let source_repo = ctx.sources();
+    let doc_repo = ctx.documents();
+    let crawl_repo = ctx.crawl();
 
     // Check old source exists
     let old_source = source_repo.get(old_id).await?;
@@ -103,44 +101,42 @@ pub async fn cmd_source_rename(
         }
     }
 
-    // Perform the rename using sqlx transaction for atomicity
-    let mut tx = pool.begin().await?;
+    // Perform the rename using raw SQL for atomicity
+    let mut conn = ctx.pool().get().await?;
 
     // Update documents
-    let docs_result = sqlx::query!(
+    let docs_updated = diesel::sql_query(
         "UPDATE documents SET source_id = ?1 WHERE source_id = ?2",
-        new_id,
-        old_id
     )
-    .execute(&mut *tx)
+    .bind::<diesel::sql_types::Text, _>(new_id)
+    .bind::<diesel::sql_types::Text, _>(old_id)
+    .execute(&mut conn)
     .await?;
-    let docs_updated = docs_result.rows_affected();
 
     // Update crawl_urls
-    let crawls_result = sqlx::query!(
+    let crawls_updated = diesel::sql_query(
         "UPDATE crawl_urls SET source_id = ?1 WHERE source_id = ?2",
-        new_id,
-        old_id
     )
-    .execute(&mut *tx)
+    .bind::<diesel::sql_types::Text, _>(new_id)
+    .bind::<diesel::sql_types::Text, _>(old_id)
+    .execute(&mut conn)
     .await?;
-    let crawls_updated = crawls_result.rows_affected();
 
     // Update crawl_config
-    sqlx::query!(
+    diesel::sql_query(
         "UPDATE crawl_config SET source_id = ?1 WHERE source_id = ?2",
-        new_id,
-        old_id
     )
-    .execute(&mut *tx)
+    .bind::<diesel::sql_types::Text, _>(new_id)
+    .bind::<diesel::sql_types::Text, _>(old_id)
+    .execute(&mut conn)
     .await?;
 
     // Update source itself
-    sqlx::query!("UPDATE sources SET id = ?1 WHERE id = ?2", new_id, old_id)
-        .execute(&mut *tx)
+    diesel::sql_query("UPDATE sources SET id = ?1 WHERE id = ?2")
+        .bind::<diesel::sql_types::Text, _>(new_id)
+        .bind::<diesel::sql_types::Text, _>(old_id)
+        .execute(&mut conn)
         .await?;
-
-    tx.commit().await?;
 
     println!(
         "\n{} Renamed '{}' → '{}'",

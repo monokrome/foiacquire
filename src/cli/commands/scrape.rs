@@ -166,7 +166,7 @@ pub async fn cmd_scrape(
     }
 
     // Use DbContext for config history
-    let ctx = DbContext::new(&db_path, &settings.documents_dir).await?;
+    let ctx = settings.create_db_context();
     let config_history = ctx.config_history();
 
     // Initial config load for source list
@@ -484,8 +484,7 @@ async fn cmd_scrape_single_tui(
         }
     }
 
-    let db_path = settings.database_path();
-    let ctx = DbContext::new(&db_path, &settings.documents_dir).await?;
+    let ctx = settings.create_db_context();
     let source_repo = ctx.sources();
     let doc_repo = ctx.documents();
     let crawl_repo = Arc::new(ctx.crawl());
@@ -505,19 +504,23 @@ async fn cmd_scrape_single_tui(
         }
     };
 
-    // Check crawl state
+    // Check crawl state and update config hash
     {
-        let (config_changed, _) = crawl_repo
-            .check_config_changed(source_id, &scraper_config)
+        let config_hash = {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let json = serde_json::to_string(&scraper_config).unwrap_or_default();
+            let mut hasher = DefaultHasher::new();
+            json.hash(&mut hasher);
+            format!("{:x}", hasher.finish())
+        };
+
+        let config_changed = crawl_repo
+            .check_config_changed(source_id, &config_hash)
             .await?;
         if config_changed {
             crawl_repo
-                .store_config_hash(source_id, &scraper_config)
-                .await?;
-        }
-        if !config_changed {
-            crawl_repo
-                .store_config_hash(source_id, &scraper_config)
+                .store_config_hash(source_id, &config_hash)
                 .await?;
         }
     }
@@ -607,8 +610,7 @@ pub async fn cmd_download(
 
     settings.ensure_directories()?;
 
-    let db_path = settings.database_path();
-    let ctx = DbContext::new(&db_path, &settings.documents_dir).await?;
+    let ctx = settings.create_db_context();
     let doc_repo = Arc::new(ctx.documents());
     let crawl_repo = Arc::new(ctx.crawl());
 
@@ -764,17 +766,16 @@ async fn get_pending_count(ctx: &DbContext, source_id: Option<&str>) -> anyhow::
 pub async fn cmd_status(settings: &Settings) -> anyhow::Result<()> {
     let db_path = settings.database_path();
 
-    let ctx = match DbContext::new(&db_path, &settings.documents_dir).await {
-        Ok(c) => c,
-        Err(_) => {
-            println!(
-                "{} System not initialized. Run 'foiacquire init' first.",
-                style("!").yellow()
-            );
-            return Ok(());
-        }
-    };
+    // Check if database exists
+    if !db_path.exists() {
+        println!(
+            "{} System not initialized. Run 'foiacquire init' first.",
+            style("!").yellow()
+        );
+        return Ok(());
+    }
 
+    let ctx = settings.create_db_context();
     let doc_repo = ctx.documents();
     let source_repo = ctx.sources();
 
@@ -814,8 +815,7 @@ pub async fn cmd_refresh(
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::sync::Semaphore;
 
-    let db_path = settings.database_path();
-    let ctx = DbContext::new(&db_path, &settings.documents_dir).await?;
+    let ctx = settings.create_db_context();
     let doc_repo = Arc::new(ctx.documents());
 
     // Get documents that need metadata refresh

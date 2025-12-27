@@ -67,18 +67,12 @@ pub async fn document_detail(
         })
         .unwrap_or_default();
 
+    let source_for_nav = params.source.as_ref().map(|s| s.as_str()).unwrap_or("");
     let navigation = state
         .doc_repo
-        .get_document_navigation(
-            &doc_id,
-            &types,
-            &tags,
-            params.source.as_deref(),
-            params.q.as_deref(),
-        )
+        .get_document_navigation(&doc_id, source_for_nav)
         .await
-        .ok()
-        .flatten();
+        .ok();
 
     let nav_query_string = {
         let mut qs_parts = Vec::new();
@@ -128,15 +122,21 @@ pub async fn document_detail(
         vec![]
     };
 
-    let virtual_files: Vec<VirtualFile> = state
-        .doc_repo
-        .get_virtual_files(&doc_id)
-        .await
-        .unwrap_or_default();
+    let current_version = doc.current_version();
+    let current_version_id = current_version.map(|v| v.id);
 
-    let current_version_id = doc.current_version().map(|v| v.id);
+    let virtual_files: Vec<VirtualFile> = if let Some(vid) = current_version_id {
+        state
+            .doc_repo
+            .get_virtual_files(&doc_id, vid as i32)
+            .await
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
     let page_count: Option<u32> = match current_version_id {
-        Some(vid) => state.doc_repo.count_pages(&doc_id, vid).await.ok(),
+        Some(vid) => state.doc_repo.count_pages(&doc_id, vid as i32).await.ok(),
         None => None,
     };
 

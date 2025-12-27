@@ -7,7 +7,6 @@ use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::config::Settings;
-use crate::repository::{create_pool, AsyncDocumentRepository, AsyncSourceRepository};
 
 /// Import documents from WARC archive files.
 #[allow(clippy::too_many_arguments)]
@@ -67,11 +66,10 @@ pub async fn cmd_import(
         }
     }
 
-    let db_path = settings.database_path();
     let documents_dir = settings.documents_dir.clone();
-    let pool = create_pool(&db_path).await?;
-    let doc_repo = AsyncDocumentRepository::new(pool.clone(), documents_dir.clone());
-    let source_repo = AsyncSourceRepository::new(pool);
+    let ctx = settings.create_db_context();
+    let doc_repo = ctx.documents();
+    let source_repo = ctx.sources();
 
     // Pre-load all existing URLs into a HashSet for O(1) duplicate detection.
     // This is much faster than querying the DB for each WARC record.

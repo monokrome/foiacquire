@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
 use crate::models::{CrawlUrl, Document, DocumentVersion, UrlStatus};
-use crate::repository::{AsyncCrawlRepository, AsyncDocumentRepository};
+use crate::repository::{DieselCrawlRepository, DieselDocumentRepository};
 use crate::services::youtube;
 
 use super::types::DownloadEvent;
@@ -20,8 +20,8 @@ pub async fn download_youtube_video(
     url: &str,
     crawl_url: &CrawlUrl,
     documents_dir: &Path,
-    doc_repo: &Arc<AsyncDocumentRepository>,
-    crawl_repo: &Arc<AsyncCrawlRepository>,
+    doc_repo: &Arc<DieselDocumentRepository>,
+    crawl_repo: &Arc<DieselCrawlRepository>,
     worker_id: usize,
     event_tx: &mpsc::Sender<DownloadEvent>,
     downloaded: &Arc<AtomicUsize>,
@@ -95,7 +95,7 @@ pub async fn download_youtube_video(
             }
 
             // Check for existing document
-            let existing = doc_repo.get_by_url(url).await.ok().flatten();
+            let existing = doc_repo.get_by_url(url).await.ok().and_then(|v| v.into_iter().next());
             let new_document = existing.is_none();
 
             if let Some(mut doc) = existing {

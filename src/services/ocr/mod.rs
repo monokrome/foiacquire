@@ -13,19 +13,19 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use crate::repository::AsyncDocumentRepository;
+use crate::repository::DieselDocumentRepository;
 
 pub use processing::{extract_document_text_per_page, ocr_document_page};
 pub use types::{OcrEvent, OcrResult};
 
 /// Service for OCR processing.
 pub struct OcrService {
-    doc_repo: AsyncDocumentRepository,
+    doc_repo: DieselDocumentRepository,
 }
 
 impl OcrService {
     /// Create a new OCR service.
-    pub fn new(doc_repo: AsyncDocumentRepository) -> Self {
+    pub fn new(doc_repo: DieselDocumentRepository) -> Self {
         Self { doc_repo }
     }
 
@@ -57,7 +57,7 @@ impl OcrService {
 
         // First, finalize any documents that have all pages complete but weren't finalized
         // (this handles documents processed before incremental finalization was added)
-        let pending_finalized = self.doc_repo.finalize_pending_documents(source_id).await?;
+        let pending_finalized = self.doc_repo.finalize_pending_documents().await?;
         if pending_finalized > 0 {
             tracing::info!(
                 "Finalized {} documents that had all pages complete",
@@ -109,7 +109,7 @@ impl OcrService {
             })
             .await;
 
-        let docs = self.doc_repo.get_needing_ocr(source_id, effective_limit).await?;
+        let docs = self.doc_repo.get_needing_ocr(effective_limit).await?;
         let mut checked = 0;
         let mut fixed = 0;
 
@@ -126,7 +126,7 @@ impl OcrService {
                         // Update the MIME type in database
                         if self
                             .doc_repo
-                            .update_version_mime_type(&doc.id, version.id, &detected_mime)
+                            .update_version_mime_type(version.id, &detected_mime)
                             .await
                             .is_ok()
                         {
@@ -241,7 +241,7 @@ impl OcrService {
 
         while offset < effective_limit {
             let batch_limit = (effective_limit - offset).min(batch_size);
-            let docs = self.doc_repo.get_needing_ocr(source_id, batch_limit).await?;
+            let docs = self.doc_repo.get_needing_ocr(batch_limit).await?;
 
             if docs.is_empty() {
                 break;
@@ -365,7 +365,7 @@ impl OcrService {
 
         while offset < effective_limit {
             let batch_limit = (effective_limit - offset).min(batch_size);
-            let pages = self.doc_repo.get_pages_needing_ocr(batch_limit).await?;
+            let pages = self.doc_repo.get_pages_needing_ocr("", 0, batch_limit).await?;
 
             if pages.is_empty() {
                 break;

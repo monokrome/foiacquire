@@ -76,17 +76,16 @@ pub async fn browse_documents(
 
     let has_filters = !types.is_empty() || !tags.is_empty() || params.q.is_some();
 
-    // Run browse query
-    let browse_result = match state
+    // Run browse query with simpler signature
+    let offset = page.saturating_sub(1) * per_page;
+    let documents = match state
         .doc_repo
         .browse(
-            &types,
-            &tags,
             params.source.as_deref(),
-            params.q.as_deref(),
-            page,
-            per_page,
-            effective_total,
+            None, // status
+            None, // category
+            per_page as u32,
+            offset as u32,
         )
         .await
     {
@@ -100,12 +99,24 @@ pub async fn browse_documents(
         }
     };
 
+    // Get total count for pagination
+    let total = match state
+        .doc_repo
+        .browse_count(params.source.as_deref(), None, None)
+        .await
+    {
+        Ok(count) => count,
+        Err(_) => documents.len() as u64,
+    };
+
     // Get type stats
     let type_stats: Vec<(String, u64)> = state
         .doc_repo
-        .get_category_stats(None)
+        .get_category_stats()
         .await
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
 
     // Get tags and sources if no filters are active
     let (all_tags, sources) = if has_filters {
@@ -126,22 +137,19 @@ pub async fn browse_documents(
 
     if skip_count {
         let state_for_count = state.clone();
-        let types_bg = types.clone();
-        let tags_bg = tags.clone();
         let source_bg = params.source.clone();
-        let q_bg = params.q.clone();
 
         let cache_key = StatsCache::browse_count_key(
             source_bg.as_deref(),
-            &types_bg,
-            &tags_bg,
-            q_bg.as_deref(),
+            &types,
+            &tags,
+            params.q.as_deref(),
         );
 
         tokio::spawn(async move {
             if let Ok(count) = state_for_count
                 .doc_repo
-                .browse_count(&types_bg, &tags_bg, source_bg.as_deref(), q_bg.as_deref())
+                .browse_count(source_bg.as_deref(), None, None)
                 .await
             {
                 state_for_count
@@ -151,11 +159,10 @@ pub async fn browse_documents(
         });
     }
 
-    let timeline = build_timeline_data(&browse_result.documents);
+    let timeline = build_timeline_data(&documents);
     let timeline_json = serde_json::to_string(&timeline).unwrap_or_else(|_| "{}".to_string());
 
-    let doc_data: Vec<_> = browse_result
-        .documents
+    let doc_data: Vec<_> = documents
         .iter()
         .filter_map(|doc| {
             let version = doc.current_version()?;
@@ -177,18 +184,28 @@ pub async fn browse_documents(
         })
         .collect();
 
+    // Calculate pagination cursors
+    let start_position = offset as u64;
+    let has_prev = page > 1;
+    let has_next = start_position + (per_page as u64) < total;
+    let prev_cursor = if has_prev { Some(format!("{}", page - 1)) } else { None };
+    let next_cursor = if has_next { Some(format!("{}", page + 1)) } else { None };
+
+    // Convert tags to expected format
+    let all_tags_with_counts: Vec<(String, usize)> = all_tags.iter().map(|t| (t.clone(), 0)).collect();
+
     let content = templates::browse_page(
         &doc_data,
         &type_stats,
         &types,
         &tags,
         params.source.as_deref(),
-        &all_tags,
+        &all_tags_with_counts,
         &sources,
-        browse_result.prev_cursor.as_deref(),
-        browse_result.next_cursor.as_deref(),
-        browse_result.start_position,
-        browse_result.total,
+        prev_cursor.as_deref(),
+        next_cursor.as_deref(),
+        start_position,
+        total,
         per_page,
     );
     Html(templates::base_template(

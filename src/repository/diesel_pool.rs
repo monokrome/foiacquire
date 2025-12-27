@@ -1,89 +1,58 @@
-//! Diesel connection pool management for SQLite.
+//! Diesel async connection pool management for SQLite.
 //!
-//! Since diesel-async only supports Postgres/MySQL, SQLite operations
-//! use sync Diesel with r2d2 connection pooling, wrapped in spawn_blocking.
+//! Uses diesel-async's SyncConnectionWrapper to provide an async interface
+//! for SQLite. Since SQLite connections are lightweight, we create new
+//! connections per request rather than pooling.
 
 use diesel::prelude::*;
-use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
+use diesel::sqlite::SqliteConnection;
+use diesel_async::sync_connection_wrapper::SyncConnectionWrapper;
+use diesel_async::AsyncConnection;
 use std::path::Path;
-use std::time::Duration;
 
 /// Diesel error type alias.
 pub type DieselError = diesel::result::Error;
 
-/// r2d2 pool error type alias.
-pub type R2D2Error = diesel::r2d2::PoolError;
+/// Async SQLite connection using SyncConnectionWrapper.
+pub type AsyncSqliteConnection = SyncConnectionWrapper<SqliteConnection>;
 
-/// Connection pool for SQLite using r2d2.
-pub type SqlitePool = Pool<ConnectionManager<SqliteConnection>>;
-
-/// Pooled connection type.
-pub type PooledConn = PooledConnection<ConnectionManager<SqliteConnection>>;
-
-/// Create a Diesel connection pool for SQLite.
+/// A simple async connection factory for SQLite.
 ///
-/// Returns an r2d2 pool that can be used with spawn_blocking for async operations.
-pub fn create_diesel_pool(db_path: &Path) -> Result<SqlitePool, R2D2Error> {
-    let db_url = format!("sqlite:{}", db_path.display());
-    create_diesel_pool_from_url(&db_url)
+/// Since SQLite connections are lightweight and file-based, we create
+/// new connections per request. The SyncConnectionWrapper internally
+/// uses spawn_blocking for async operation.
+#[derive(Clone)]
+pub struct AsyncSqlitePool {
+    database_url: String,
 }
 
-/// Create a Diesel connection pool from a database URL.
-pub fn create_diesel_pool_from_url(database_url: &str) -> Result<SqlitePool, R2D2Error> {
-    // Strip "sqlite:" prefix if present for Diesel
-    let url = database_url.strip_prefix("sqlite:").unwrap_or(database_url);
+impl AsyncSqlitePool {
+    /// Create a new async SQLite pool.
+    pub fn new(database_url: &str, _max_size: usize) -> Self {
+        // Strip sqlite: prefix if present for diesel
+        let url = database_url.strip_prefix("sqlite:").unwrap_or(database_url);
+        Self {
+            database_url: url.to_string(),
+        }
+    }
 
-    let manager = ConnectionManager::<SqliteConnection>::new(url);
+    /// Create pool from a file path.
+    pub fn from_path(db_path: &Path, max_size: usize) -> Self {
+        Self::new(&db_path.display().to_string(), max_size)
+    }
 
-    Pool::builder()
-        .max_size(10)
-        .connection_timeout(Duration::from_secs(30))
-        .build(manager)
-}
-
-/// Initialize SQLite pragmas for a connection.
-///
-/// This should be called when a connection is first acquired from the pool.
-pub fn init_connection_pragmas(conn: &mut SqliteConnection) -> Result<(), DieselError> {
-    diesel::sql_query("PRAGMA journal_mode = WAL").execute(conn)?;
-    diesel::sql_query("PRAGMA synchronous = NORMAL").execute(conn)?;
-    diesel::sql_query("PRAGMA foreign_keys = ON").execute(conn)?;
-    diesel::sql_query("PRAGMA cache_size = -64000").execute(conn)?; // 64MB
-    diesel::sql_query("PRAGMA mmap_size = 268435456").execute(conn)?; // 256MB
-    diesel::sql_query("PRAGMA temp_store = MEMORY").execute(conn)?;
-    Ok(())
-}
-
-/// Run a blocking Diesel operation asynchronously.
-///
-/// This wraps a sync closure in spawn_blocking, allowing Diesel operations
-/// to be used in async contexts without blocking the runtime.
-///
-/// # Example
-/// ```ignore
-/// let result = run_blocking(pool.clone(), |conn| {
-///     sources::table.find("my-id").first::<SourceRecord>(conn)
-/// }).await?;
-/// ```
-pub async fn run_blocking<F, T>(pool: SqlitePool, f: F) -> Result<T, DieselError>
-where
-    F: FnOnce(&mut SqliteConnection) -> Result<T, DieselError> + Send + 'static,
-    T: Send + 'static,
-{
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get().map_err(|e| {
-            DieselError::DatabaseError(
-                diesel::result::DatabaseErrorKind::Unknown,
+    /// Get a new connection.
+    pub async fn get(&self) -> Result<AsyncSqliteConnection, DieselError> {
+        AsyncSqliteConnection::establish(&self.database_url)
+            .await
+            .map_err(|e| diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UnableToSendCommand,
                 Box::new(e.to_string()),
-            )
-        })?;
-        f(&mut conn)
-    })
-    .await
-    .map_err(|e| {
-        DieselError::DatabaseError(
-            diesel::result::DatabaseErrorKind::Unknown,
-            Box::new(e.to_string()),
-        )
-    })?
+            ))
+    }
+
+    /// Get the database URL.
+    pub fn database_url(&self) -> &str {
+        &self.database_url
+    }
 }

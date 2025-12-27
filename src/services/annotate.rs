@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 
 use crate::llm::{LlmClient, LlmConfig};
 use crate::models::DocumentStatus;
-use crate::repository::AsyncDocumentRepository;
+use crate::repository::DieselDocumentRepository;
 
 /// Events emitted during annotation processing.
 #[derive(Debug, Clone)]
@@ -43,13 +43,13 @@ pub struct AnnotationResult {
 
 /// Service for annotating documents with LLM.
 pub struct AnnotationService {
-    doc_repo: AsyncDocumentRepository,
+    doc_repo: DieselDocumentRepository,
     llm_client: LlmClient,
 }
 
 impl AnnotationService {
     /// Create a new annotation service.
-    pub fn new(doc_repo: AsyncDocumentRepository, llm_config: LlmConfig) -> Self {
+    pub fn new(doc_repo: DieselDocumentRepository, llm_config: LlmConfig) -> Self {
         let llm_client = LlmClient::new(llm_config);
         Self {
             doc_repo,
@@ -115,7 +115,7 @@ impl AnnotationService {
             let batch_limit = (effective_limit - processed).min(10);
             let docs = self
                 .doc_repo
-                .get_needing_summarization(source_id, batch_limit)
+                .get_needing_summarization(batch_limit)
                 .await?;
 
             if docs.is_empty() {
@@ -151,7 +151,7 @@ impl AnnotationService {
 
                 let text = match self
                     .doc_repo
-                    .get_combined_page_text(&doc.id, version_id)
+                    .get_combined_page_text(&doc.id, version_id as i32)
                     .await
                 {
                     Ok(Some(t)) if !t.is_empty() => t,
@@ -268,7 +268,7 @@ impl AnnotationService {
         // Get combined text from pages
         let text = match self
             .doc_repo
-            .get_combined_page_text(doc_id, version_id)
+            .get_combined_page_text(doc_id, version_id as i32)
             .await
         {
             Ok(Some(t)) if !t.is_empty() => t,

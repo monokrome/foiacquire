@@ -22,7 +22,9 @@ pub async fn list_tags(State(state): State<AppState>) -> impl IntoResponse {
         }
     };
 
-    let content = templates::tags_list(&tags);
+    // Convert tags to format expected by template (with dummy counts)
+    let tags_with_counts: Vec<(String, usize)> = tags.into_iter().map(|t| (t, 0)).collect();
+    let content = templates::tags_list(&tags_with_counts);
     Html(templates::base_template("Tags", &content, None))
 }
 
@@ -61,12 +63,14 @@ pub async fn list_tag_documents(
 
 /// API endpoint to get all tags as JSON.
 pub async fn api_tags(State(state): State<AppState>) -> impl IntoResponse {
-    let tags = match state.stats_cache.get_all_tags() {
+    // Get tags, converting to expected format with counts
+    let tags: Vec<(String, usize)> = match state.stats_cache.get_all_tags() {
         Some(cached) => cached,
         None => {
-            let tags = state.doc_repo.get_all_tags().await.unwrap_or_default();
-            state.stats_cache.set_all_tags(tags.clone());
-            tags
+            let raw_tags = state.doc_repo.get_all_tags().await.unwrap_or_default();
+            let tags_with_counts: Vec<(String, usize)> = raw_tags.into_iter().map(|t| (t, 0)).collect();
+            state.stats_cache.set_all_tags(tags_with_counts.clone());
+            tags_with_counts
         }
     };
 

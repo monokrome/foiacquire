@@ -209,7 +209,9 @@ pub async fn api_reocr_document(
     tokio::spawn(async move {
         let mut processed = 0u32;
 
-        for (page_id, page_number) in pages_needing_ocr {
+        for page in pages_needing_ocr {
+            let page_id = page.id;
+            let page_number = page.page_number;
             let pdf_path_clone = pdf_path.clone();
             let ocr_result = tokio::task::spawn_blocking(move || {
                 let config = OcrConfig {
@@ -229,8 +231,8 @@ pub async fn api_reocr_document(
                             page_id,
                             "deepseek",
                             Some(&result.text),
-                            result.confidence.map(|c| c as f64),
-                            Some(result.processing_time_ms),
+                            result.confidence.map(|c| c as f32),
+                            None,  // error field
                         )
                         .await
                     {

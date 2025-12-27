@@ -2,7 +2,7 @@
 
 use crate::models::{Document, DocumentPage, PageOcrStatus};
 use crate::ocr::TextExtractor;
-use crate::repository::AsyncDocumentRepository;
+use crate::repository::DieselDocumentRepository;
 
 use super::types::PageOcrResult;
 
@@ -10,7 +10,7 @@ use super::types::PageOcrResult;
 /// This function runs in a blocking context and uses the runtime handle to call async methods.
 pub fn extract_document_text_per_page(
     doc: &Document,
-    doc_repo: &AsyncDocumentRepository,
+    doc_repo: &DieselDocumentRepository,
     handle: &tokio::runtime::Handle,
 ) -> anyhow::Result<usize> {
     let extractor = TextExtractor::new();
@@ -53,7 +53,7 @@ pub fn extract_document_text_per_page(
     }
 
     // Delete any existing pages for this document version (in case of re-processing)
-    handle.block_on(doc_repo.delete_pages(&doc.id, version.id))?;
+    handle.block_on(doc_repo.delete_pages(&doc.id, version.id as i32))?;
 
     let mut pages_created = 0;
 
@@ -92,7 +92,7 @@ pub fn extract_document_text_per_page(
 /// This function runs in a blocking context and uses the runtime handle to call async methods.
 pub fn ocr_document_page(
     page: &DocumentPage,
-    doc_repo: &AsyncDocumentRepository,
+    doc_repo: &DieselDocumentRepository,
     handle: &tokio::runtime::Handle,
 ) -> anyhow::Result<PageOcrResult> {
     let extractor = TextExtractor::new();
@@ -159,9 +159,8 @@ pub fn ocr_document_page(
 
     // Check if all pages for this document are now complete, and if so, finalize it
     let mut document_finalized = false;
-    if handle.block_on(doc_repo.are_all_pages_complete(&page.document_id, page.version_id))?
-        && handle.block_on(doc_repo.finalize_document(&page.document_id))?
-    {
+    if handle.block_on(doc_repo.are_all_pages_complete(&page.document_id, page.version_id as i32))? {
+        let _ = handle.block_on(doc_repo.finalize_document(&page.document_id));
         document_finalized = true;
         tracing::debug!(
             "Document {} finalized after page {} completed",

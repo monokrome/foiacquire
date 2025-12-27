@@ -7,7 +7,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::config::Settings;
 use crate::models::Document;
-use crate::repository::{create_pool, AsyncDocumentRepository};
+use crate::repository::DieselDocumentRepository;
 
 use super::helpers::{format_bytes, mime_short, truncate};
 
@@ -91,7 +91,7 @@ fn extract_and_ocr_from_email(
 /// Process a single archive document.
 async fn process_archive(
     doc: &Document,
-    doc_repo: &AsyncDocumentRepository,
+    doc_repo: &DieselDocumentRepository,
     run_ocr: bool,
     text_extractor: &crate::ocr::TextExtractor,
 ) -> Option<(usize, usize)> {
@@ -151,7 +151,7 @@ async fn process_archive(
 /// Process a single email document.
 async fn process_email(
     doc: &Document,
-    doc_repo: &AsyncDocumentRepository,
+    doc_repo: &DieselDocumentRepository,
     run_ocr: bool,
     text_extractor: &crate::ocr::TextExtractor,
 ) -> Option<(usize, usize)> {
@@ -234,9 +234,8 @@ pub async fn cmd_archive(
 ) -> anyhow::Result<()> {
     use crate::ocr::TextExtractor;
 
-    let db_path = settings.database_path();
-    let pool = create_pool(&db_path).await?;
-    let doc_repo = AsyncDocumentRepository::new(pool, settings.documents_dir.clone());
+    let ctx = settings.create_db_context();
+    let doc_repo = ctx.documents();
 
     let archive_count = doc_repo.count_unprocessed_archives(source_id).await?;
     let email_count = doc_repo.count_unprocessed_emails(source_id).await?;
@@ -331,9 +330,8 @@ pub async fn cmd_ls(
     limit: usize,
     format: &str,
 ) -> anyhow::Result<()> {
-    let db_path = settings.database_path();
-    let pool = create_pool(&db_path).await?;
-    let doc_repo = AsyncDocumentRepository::new(pool, settings.documents_dir.clone());
+    let ctx = settings.create_db_context();
+    let doc_repo = ctx.documents();
 
     // Get documents based on filters
     let documents: Vec<Document> = if let Some(tag_name) = tag {
@@ -426,9 +424,8 @@ pub async fn cmd_ls(
 
 /// Show document info/metadata.
 pub async fn cmd_info(settings: &Settings, doc_id: &str) -> anyhow::Result<()> {
-    let db_path = settings.database_path();
-    let pool = create_pool(&db_path).await?;
-    let doc_repo = AsyncDocumentRepository::new(pool, settings.documents_dir.clone());
+    let ctx = settings.create_db_context();
+    let doc_repo = ctx.documents();
 
     // Try to find document by ID
     let doc = match doc_repo.get(doc_id).await? {
@@ -542,9 +539,8 @@ pub async fn cmd_info(settings: &Settings, doc_id: &str) -> anyhow::Result<()> {
 
 /// Output document content to stdout.
 pub async fn cmd_read(settings: &Settings, doc_id: &str, text_only: bool) -> anyhow::Result<()> {
-    let db_path = settings.database_path();
-    let pool = create_pool(&db_path).await?;
-    let doc_repo = AsyncDocumentRepository::new(pool, settings.documents_dir.clone());
+    let ctx = settings.create_db_context();
+    let doc_repo = ctx.documents();
 
     // Find document
     let doc = match doc_repo.get(doc_id).await? {
@@ -608,9 +604,8 @@ pub async fn cmd_search(
     source_id: Option<&str>,
     limit: usize,
 ) -> anyhow::Result<()> {
-    let db_path = settings.database_path();
-    let pool = create_pool(&db_path).await?;
-    let doc_repo = AsyncDocumentRepository::new(pool, settings.documents_dir.clone());
+    let ctx = settings.create_db_context();
+    let doc_repo = ctx.documents();
 
     let query_lower = query.to_lowercase();
 

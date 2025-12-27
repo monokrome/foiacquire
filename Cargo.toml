@@ -17,12 +17,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "coo
 # HTML parsing
 scraper = "0.20"
 
-# Database - SQLx (being migrated to Diesel)
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
-
 # Database - Diesel ORM with compile-time checking
 diesel = { version = "2", features = ["sqlite", "postgres", "chrono", "r2d2"] }
-diesel-async = { version = "0.5", features = ["postgres", "deadpool"] }
+diesel-async = { version = "0.5", features = ["postgres", "sqlite", "deadpool", "sync-connection-wrapper"] }
 deadpool = "0.12"
 
 # Serialization

@@ -20,7 +20,7 @@ use super::super::HttpClient;
 use super::extract::resolve_url;
 use super::ConfigurableScraper;
 use crate::models::{CrawlUrl, DiscoveryMethod};
-use crate::repository::AsyncCrawlRepository;
+use crate::repository::DieselCrawlRepository;
 
 /// Configuration for the BFS HTML crawler, parsed from ScraperConfig.
 struct CrawlerConfig {
@@ -217,7 +217,7 @@ async fn send_document_url(
     parent_url: &str,
     depth: u32,
     discovery_method: DiscoveryMethod,
-    crawl_repo: &Option<Arc<AsyncCrawlRepository>>,
+    crawl_repo: &Option<Arc<DieselCrawlRepository>>,
     url_tx: &tokio::sync::mpsc::Sender<String>,
     visited: &mut HashSet<String>,
 ) -> Result<(), ()> {
@@ -314,7 +314,7 @@ impl ConfigurableScraper {
         config: &ScraperConfig,
         client: &HttpClient,
         source_id: &str,
-        crawl_repo: &Option<Arc<AsyncCrawlRepository>>,
+        crawl_repo: &Option<Arc<DieselCrawlRepository>>,
         url_tx: &tokio::sync::mpsc::Sender<String>,
         browser_config: &Option<BrowserEngineConfig>,
     ) {
@@ -472,7 +472,7 @@ impl ConfigurableScraper {
         config: &ScraperConfig,
         client: &HttpClient,
         source_id: &str,
-        _crawl_repo: &Option<Arc<AsyncCrawlRepository>>,
+        _crawl_repo: &Option<Arc<DieselCrawlRepository>>,
         url_tx: &tokio::sync::mpsc::Sender<String>,
     ) {
         let default_base = String::new();

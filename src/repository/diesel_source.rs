@@ -1,14 +1,14 @@
 //! Diesel-based source repository for SQLite.
 //!
-//! This module provides async database access for source operations using Diesel ORM.
-//! Since diesel-async only supports Postgres/MySQL, SQLite operations use sync Diesel
-//! wrapped in spawn_blocking.
+//! Uses diesel-async's SyncConnectionWrapper to provide an async interface
+//! while maintaining Diesel's compile-time query checking.
 
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
+use diesel_async::RunQueryDsl;
 
 use super::diesel_models::{NewSource, SourceRecord};
-use super::diesel_pool::{run_blocking, SqlitePool};
+use super::diesel_pool::{AsyncSqlitePool, DieselError};
 use super::{parse_datetime, parse_datetime_opt};
 use crate::models::{Source, SourceType};
 use crate::schema::sources;
@@ -31,111 +31,86 @@ impl From<SourceRecord> for Source {
 /// Diesel-based source repository with compile-time query checking.
 #[derive(Clone)]
 pub struct DieselSourceRepository {
-    pool: SqlitePool,
+    pool: AsyncSqlitePool,
 }
 
 impl DieselSourceRepository {
     /// Create a new Diesel source repository with an existing pool.
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: AsyncSqlitePool) -> Self {
         Self { pool }
     }
 
     /// Get a source by ID.
-    pub async fn get(&self, id: &str) -> Result<Option<Source>, diesel::result::Error> {
-        let id = id.to_string();
-        let pool = self.pool.clone();
+    pub async fn get(&self, id: &str) -> Result<Option<Source>, DieselError> {
+        let mut conn = self.pool.get().await?;
 
-        run_blocking(pool, move |conn| {
-            sources::table
-                .find(&id)
-                .first::<SourceRecord>(conn)
-                .optional()
-        })
-        .await
-        .map(|opt| opt.map(Source::from))
+        sources::table
+            .find(id)
+            .first::<SourceRecord>(&mut conn)
+            .await
+            .optional()
+            .map(|opt| opt.map(Source::from))
     }
 
     /// Get all sources.
-    pub async fn get_all(&self) -> Result<Vec<Source>, diesel::result::Error> {
-        let pool = self.pool.clone();
+    pub async fn get_all(&self) -> Result<Vec<Source>, DieselError> {
+        let mut conn = self.pool.get().await?;
 
-        run_blocking(pool, move |conn| {
-            sources::table.load::<SourceRecord>(conn)
-        })
-        .await
-        .map(|records| records.into_iter().map(Source::from).collect())
+        sources::table
+            .load::<SourceRecord>(&mut conn)
+            .await
+            .map(|records| records.into_iter().map(Source::from).collect())
     }
 
     /// Save a source (insert or update using ON CONFLICT).
-    pub async fn save(&self, source: &Source) -> Result<(), diesel::result::Error> {
+    pub async fn save(&self, source: &Source) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().await?;
+
         let metadata_json = serde_json::to_string(&source.metadata).unwrap_or_else(|_| "{}".to_string());
         let created_at = source.created_at.to_rfc3339();
         let last_scraped = source.last_scraped.map(|dt| dt.to_rfc3339());
         let source_type = source.source_type.as_str().to_string();
 
-        let new_source = NewSource {
-            id: &source.id,
-            source_type: &source_type,
-            name: &source.name,
-            base_url: &source.base_url,
-            metadata: &metadata_json,
-            created_at: &created_at,
-            last_scraped: last_scraped.as_deref(),
-        };
+        // Use replace_into for SQLite upsert
+        diesel::replace_into(sources::table)
+            .values((
+                sources::id.eq(&source.id),
+                sources::source_type.eq(&source_type),
+                sources::name.eq(&source.name),
+                sources::base_url.eq(&source.base_url),
+                sources::metadata.eq(&metadata_json),
+                sources::created_at.eq(&created_at),
+                sources::last_scraped.eq(&last_scraped),
+            ))
+            .execute(&mut conn)
+            .await?;
 
-        let id = source.id.clone();
-        let name = source.name.clone();
-        let base_url = source.base_url.clone();
-        let source_type_owned = source_type.clone();
-        let metadata_owned = metadata_json.clone();
-        let created_at_owned = created_at.clone();
-        let last_scraped_owned = last_scraped.clone();
-        let pool = self.pool.clone();
-
-        run_blocking(pool, move |conn| {
-            // Use replace_into for SQLite upsert
-            diesel::replace_into(sources::table)
-                .values((
-                    sources::id.eq(&id),
-                    sources::source_type.eq(&source_type_owned),
-                    sources::name.eq(&name),
-                    sources::base_url.eq(&base_url),
-                    sources::metadata.eq(&metadata_owned),
-                    sources::created_at.eq(&created_at_owned),
-                    sources::last_scraped.eq(&last_scraped_owned),
-                ))
-                .execute(conn)?;
-            Ok(())
-        })
-        .await
+        Ok(())
     }
 
     /// Delete a source.
-    pub async fn delete(&self, id: &str) -> Result<bool, diesel::result::Error> {
-        let id = id.to_string();
-        let pool = self.pool.clone();
+    pub async fn delete(&self, id: &str) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().await?;
 
-        run_blocking(pool, move |conn| {
-            let rows = diesel::delete(sources::table.find(&id)).execute(conn)?;
-            Ok(rows > 0)
-        })
-        .await
+        let rows = diesel::delete(sources::table.find(id))
+            .execute(&mut conn)
+            .await?;
+
+        Ok(rows > 0)
     }
 
     /// Check if a source exists.
-    pub async fn exists(&self, id: &str) -> Result<bool, diesel::result::Error> {
-        let id = id.to_string();
-        let pool = self.pool.clone();
+    pub async fn exists(&self, id: &str) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().await?;
 
-        run_blocking(pool, move |conn| {
-            use diesel::dsl::count_star;
-            let count: i64 = sources::table
-                .filter(sources::id.eq(&id))
-                .select(count_star())
-                .first(conn)?;
-            Ok(count > 0)
-        })
-        .await
+        use diesel::dsl::count_star;
+        let count: i64 = sources::table
+            .filter(sources::id.eq(id))
+            .select(count_star())
+            .first(&mut conn)
+            .await?;
+
+        Ok(count > 0)
     }
 
     /// Update last scraped timestamp.
@@ -143,50 +118,45 @@ impl DieselSourceRepository {
         &self,
         id: &str,
         timestamp: DateTime<Utc>,
-    ) -> Result<(), diesel::result::Error> {
-        let id = id.to_string();
+    ) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().await?;
         let ts = timestamp.to_rfc3339();
-        let pool = self.pool.clone();
 
-        run_blocking(pool, move |conn| {
-            diesel::update(sources::table.find(&id))
-                .set(sources::last_scraped.eq(Some(&ts)))
-                .execute(conn)?;
-            Ok(())
-        })
-        .await
+        diesel::update(sources::table.find(id))
+            .set(sources::last_scraped.eq(Some(&ts)))
+            .execute(&mut conn)
+            .await?;
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repository::diesel_pool::create_diesel_pool_from_url;
+    use diesel_async::{AsyncConnection, SimpleAsyncConnection};
     use tempfile::tempdir;
 
-    async fn setup_test_db() -> (SqlitePool, tempfile::TempDir) {
+    async fn setup_test_db() -> (AsyncSqlitePool, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let db_url = format!("{}", db_path.display());
+        let db_url = db_path.display().to_string();
 
-        let pool = create_diesel_pool_from_url(&db_url).unwrap();
+        let pool = AsyncSqlitePool::new(&db_url, 5);
+        let mut conn = pool.get().await.unwrap();
 
         // Create tables
-        run_blocking(pool.clone(), |conn| {
-            diesel::sql_query(
-                r#"CREATE TABLE IF NOT EXISTS sources (
-                    id TEXT PRIMARY KEY,
-                    source_type TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    base_url TEXT NOT NULL,
-                    metadata TEXT NOT NULL DEFAULT '{}',
-                    created_at TEXT NOT NULL,
-                    last_scraped TEXT
-                )"#,
-            )
-            .execute(conn)?;
-            Ok(())
-        })
+        conn.batch_execute(
+            r#"CREATE TABLE IF NOT EXISTS sources (
+                id TEXT PRIMARY KEY,
+                source_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                last_scraped TEXT
+            )"#,
+        )
         .await
         .unwrap();
 

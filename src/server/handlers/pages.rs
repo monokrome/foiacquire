@@ -73,7 +73,7 @@ pub async fn api_document_pages(
         }
     };
 
-    let all_pages = match state.doc_repo.get_pages(&doc_id, version_id).await {
+    let all_pages: Vec<crate::models::DocumentPage> = match state.doc_repo.get_pages(&doc_id, version_id as i32).await {
         Ok(p) => p,
         Err(e) => {
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
@@ -101,7 +101,9 @@ pub async fn api_document_pages(
     let mut deepseek_map: std::collections::HashMap<i64, Option<String>> =
         std::collections::HashMap::new();
     for (page_id, ocr_results) in all_ocr_results {
-        for (backend, text, _, _) in ocr_results {
+        for result in ocr_results {
+            let backend = result.backend;
+            let text = result.text;
             if backend == "deepseek" {
                 deepseek_map.insert(page_id, text);
                 break;
