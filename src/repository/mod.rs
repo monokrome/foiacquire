@@ -16,7 +16,9 @@ pub mod diesel_source;
 mod document;
 
 // Re-export main types using Diesel implementations
-pub use diesel_config_history::{DieselConfigHistoryEntry as ConfigHistoryEntry, DieselConfigHistoryRepository};
+pub use diesel_config_history::{
+    DieselConfigHistoryEntry as ConfigHistoryEntry, DieselConfigHistoryRepository,
+};
 pub use diesel_context::DieselDbContext as DbContext;
 pub use diesel_crawl::{CrawlState, CrawlStats, DieselCrawlRepository, RequestStats};
 pub use diesel_document::DieselDocumentRepository;

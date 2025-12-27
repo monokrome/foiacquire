@@ -10,7 +10,10 @@ use super::RateLimiter;
 /// Load rate limit state from database into a RateLimiter.
 ///
 /// Currently stubbed - returns 0 (no domains loaded).
-pub async fn load_rate_limit_state(_limiter: &RateLimiter, _db_path: &Path) -> anyhow::Result<usize> {
+pub async fn load_rate_limit_state(
+    _limiter: &RateLimiter,
+    _db_path: &Path,
+) -> anyhow::Result<usize> {
     // TODO: Implement with Diesel once migration is complete
     Ok(0)
 }
@@ -18,7 +21,10 @@ pub async fn load_rate_limit_state(_limiter: &RateLimiter, _db_path: &Path) -> a
 /// Save rate limit state to database.
 ///
 /// Currently stubbed - returns 0 (no domains saved).
-pub async fn save_rate_limit_state(_limiter: &RateLimiter, _db_path: &Path) -> anyhow::Result<usize> {
+pub async fn save_rate_limit_state(
+    _limiter: &RateLimiter,
+    _db_path: &Path,
+) -> anyhow::Result<usize> {
     // TODO: Implement with Diesel once migration is complete
     Ok(0)
 }

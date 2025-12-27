@@ -318,7 +318,9 @@ pub async fn cmd_detect_dates(
     let doc_repo = ctx.documents();
 
     // Count documents needing date estimation
-    let total_count = doc_repo.count_documents_needing_date_estimation(source_id).await?;
+    let total_count = doc_repo
+        .count_documents_needing_date_estimation(source_id)
+        .await?;
 
     if total_count == 0 {
         println!("{} No documents need date estimation", style("!").yellow());
@@ -347,7 +349,9 @@ pub async fn cmd_detect_dates(
     }
 
     // Fetch documents needing estimation
-    let documents = doc_repo.get_documents_needing_date_estimation(source_id, effective_limit).await?;
+    let documents = doc_repo
+        .get_documents_needing_date_estimation(source_id, effective_limit)
+        .await?;
 
     let pb = ProgressBar::new(documents.len() as u64);
     pb.set_style(
@@ -399,26 +403,32 @@ pub async fn cmd_detect_dates(
                 ));
             } else {
                 // Update database with detected date
-                doc_repo.update_estimated_date(
-                    &doc_id,
-                    est.date,
-                    est.confidence.as_str(),
-                    est.source.as_str(),
-                ).await?;
+                doc_repo
+                    .update_estimated_date(
+                        &doc_id,
+                        est.date,
+                        est.confidence.as_str(),
+                        est.source.as_str(),
+                    )
+                    .await?;
                 // Record that we processed this document
-                doc_repo.record_annotation(
-                    &doc_id,
-                    "date_detection",
-                    1,
-                    Some(&format!("detected:{}", est.source.as_str())),
-                    None,
-                ).await?;
+                doc_repo
+                    .record_annotation(
+                        &doc_id,
+                        "date_detection",
+                        1,
+                        Some(&format!("detected:{}", est.source.as_str())),
+                        None,
+                    )
+                    .await?;
             }
         } else {
             no_date += 1;
             if !dry_run {
                 // Record that we tried but found no date
-                doc_repo.record_annotation(&doc_id, "date_detection", 1, Some("no_date"), None).await?;
+                doc_repo
+                    .record_annotation(&doc_id, "date_detection", 1, Some("no_date"), None)
+                    .await?;
             }
         }
 

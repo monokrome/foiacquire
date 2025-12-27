@@ -53,7 +53,10 @@ impl DieselDbContext {
 
     /// Create a context with an existing pool.
     pub fn with_pool(pool: AsyncSqlitePool, documents_dir: PathBuf) -> Self {
-        Self { pool, documents_dir }
+        Self {
+            pool,
+            documents_dir,
+        }
     }
 
     /// Get the underlying connection pool.

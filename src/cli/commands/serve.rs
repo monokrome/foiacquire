@@ -13,10 +13,7 @@ pub async fn cmd_serve(settings: &Settings, bind: &str) -> anyhow::Result<()> {
     let ctx = settings.create_db_context();
     match ctx.init_schema().await {
         Ok(()) => {
-            println!(
-                "  {} Database ready",
-                style("✓").green(),
-            );
+            println!("  {} Database ready", style("✓").green(),);
         }
         Err(e) => {
             eprintln!("  {} Migration failed: {}", style("✗").red(), e);

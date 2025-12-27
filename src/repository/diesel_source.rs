@@ -66,7 +66,8 @@ impl DieselSourceRepository {
     pub async fn save(&self, source: &Source) -> Result<(), DieselError> {
         let mut conn = self.pool.get().await?;
 
-        let metadata_json = serde_json::to_string(&source.metadata).unwrap_or_else(|_| "{}".to_string());
+        let metadata_json =
+            serde_json::to_string(&source.metadata).unwrap_or_else(|_| "{}".to_string());
         let created_at = source.created_at.to_rfc3339();
         let last_scraped = source.last_scraped.map(|dt| dt.to_rfc3339());
         let source_type = source.source_type.as_str().to_string();

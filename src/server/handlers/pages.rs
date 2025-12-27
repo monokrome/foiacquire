@@ -73,12 +73,13 @@ pub async fn api_document_pages(
         }
     };
 
-    let all_pages: Vec<crate::models::DocumentPage> = match state.doc_repo.get_pages(&doc_id, version_id as i32).await {
-        Ok(p) => p,
-        Err(e) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-        }
-    };
+    let all_pages: Vec<crate::models::DocumentPage> =
+        match state.doc_repo.get_pages(&doc_id, version_id as i32).await {
+            Ok(p) => p,
+            Err(e) => {
+                return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+            }
+        };
 
     let total_pages = all_pages.len() as u32;
     let offset = params.offset.unwrap_or(0).min(100_000);

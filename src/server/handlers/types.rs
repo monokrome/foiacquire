@@ -64,8 +64,7 @@ pub async fn list_by_type(
         }
     };
 
-    let category_stats: Option<Vec<(String, u64)>> = match state.doc_repo.get_type_stats().await
-    {
+    let category_stats: Option<Vec<(String, u64)>> = match state.doc_repo.get_type_stats().await {
         Ok(stats) => {
             let mut cat_counts: std::collections::HashMap<String, u64> =
                 std::collections::HashMap::new();

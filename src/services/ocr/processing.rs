@@ -159,7 +159,9 @@ pub fn ocr_document_page(
 
     // Check if all pages for this document are now complete, and if so, finalize it
     let mut document_finalized = false;
-    if handle.block_on(doc_repo.are_all_pages_complete(&page.document_id, page.version_id as i32))? {
+    if handle
+        .block_on(doc_repo.are_all_pages_complete(&page.document_id, page.version_id as i32))?
+    {
         let _ = handle.block_on(doc_repo.finalize_document(&page.document_id));
         document_finalized = true;
         tracing::debug!(

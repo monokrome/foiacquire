@@ -123,7 +123,11 @@ pub async fn browse_documents(
         (Vec::new(), Vec::new())
     } else {
         let tags_result = state.doc_repo.get_all_tags().await.unwrap_or_default();
-        let counts = state.doc_repo.get_all_source_counts().await.unwrap_or_default();
+        let counts = state
+            .doc_repo
+            .get_all_source_counts()
+            .await
+            .unwrap_or_default();
         let source_list = state.source_repo.get_all().await.unwrap_or_default();
         let sources_result: Vec<_> = source_list
             .into_iter()
@@ -139,12 +143,8 @@ pub async fn browse_documents(
         let state_for_count = state.clone();
         let source_bg = params.source.clone();
 
-        let cache_key = StatsCache::browse_count_key(
-            source_bg.as_deref(),
-            &types,
-            &tags,
-            params.q.as_deref(),
-        );
+        let cache_key =
+            StatsCache::browse_count_key(source_bg.as_deref(), &types, &tags, params.q.as_deref());
 
         tokio::spawn(async move {
             if let Ok(count) = state_for_count
@@ -188,11 +188,20 @@ pub async fn browse_documents(
     let start_position = offset as u64;
     let has_prev = page > 1;
     let has_next = start_position + (per_page as u64) < total;
-    let prev_cursor = if has_prev { Some(format!("{}", page - 1)) } else { None };
-    let next_cursor = if has_next { Some(format!("{}", page + 1)) } else { None };
+    let prev_cursor = if has_prev {
+        Some(format!("{}", page - 1))
+    } else {
+        None
+    };
+    let next_cursor = if has_next {
+        Some(format!("{}", page + 1))
+    } else {
+        None
+    };
 
     // Convert tags to expected format
-    let all_tags_with_counts: Vec<(String, usize)> = all_tags.iter().map(|t| (t.clone(), 0)).collect();
+    let all_tags_with_counts: Vec<(String, usize)> =
+        all_tags.iter().map(|t| (t.clone(), 0)).collect();
 
     let content = templates::browse_page(
         &doc_data,

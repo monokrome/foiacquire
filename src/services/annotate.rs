@@ -113,10 +113,7 @@ impl AnnotationService {
         // Process documents one at a time (sequentially to avoid LLM memory pressure)
         while processed < effective_limit {
             let batch_limit = (effective_limit - processed).min(10);
-            let docs = self
-                .doc_repo
-                .get_needing_summarization(batch_limit)
-                .await?;
+            let docs = self.doc_repo.get_needing_summarization(batch_limit).await?;
 
             if docs.is_empty() {
                 break;

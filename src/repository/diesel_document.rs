@@ -48,7 +48,10 @@ pub struct DieselDocumentRepository {
 impl DieselDocumentRepository {
     /// Create a new Diesel document repository.
     pub fn new(pool: AsyncSqlitePool, documents_dir: PathBuf) -> Self {
-        Self { pool, documents_dir }
+        Self {
+            pool,
+            documents_dir,
+        }
     }
 
     /// Get the documents directory path.
@@ -70,7 +73,9 @@ impl DieselDocumentRepository {
     }
 
     /// Get document counts per source.
-    pub async fn get_all_source_counts(&self) -> Result<std::collections::HashMap<String, u64>, DieselError> {
+    pub async fn get_all_source_counts(
+        &self,
+    ) -> Result<std::collections::HashMap<String, u64>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         let rows: Vec<SourceCount> = diesel::sql_query(
@@ -99,17 +104,17 @@ impl DieselDocumentRepository {
             query = query.filter(documents::source_id.eq(sid));
         }
 
-        let count: i64 = query
-            .count()
-            .get_result(&mut conn)
-            .await?;
+        let count: i64 = query.count().get_result(&mut conn).await?;
 
         Ok(count as u64)
     }
 
     /// Count documents needing summarization.
     /// Documents need summarization if status is 'ocr_complete' (OCR done but not indexed).
-    pub async fn count_needing_summarization(&self, source_id: Option<&str>) -> Result<u64, DieselError> {
+    pub async fn count_needing_summarization(
+        &self,
+        source_id: Option<&str>,
+    ) -> Result<u64, DieselError> {
         let mut conn = self.pool.get().await?;
 
         let mut query = documents::table
@@ -120,16 +125,15 @@ impl DieselDocumentRepository {
             query = query.filter(documents::source_id.eq(sid));
         }
 
-        let count: i64 = query
-            .count()
-            .get_result(&mut conn)
-            .await?;
+        let count: i64 = query.count().get_result(&mut conn).await?;
 
         Ok(count as u64)
     }
 
     /// Get type statistics - count documents by MIME type.
-    pub async fn get_type_stats(&self) -> Result<std::collections::HashMap<String, u64>, DieselError> {
+    pub async fn get_type_stats(
+        &self,
+    ) -> Result<std::collections::HashMap<String, u64>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         // Get counts per mime type from document_versions (latest version per document)
@@ -138,10 +142,10 @@ impl DieselDocumentRepository {
                 r#"SELECT COALESCE(dv.mime_type, 'unknown') as mime_type, COUNT(DISTINCT dv.document_id) as count
                    FROM document_versions dv
                    INNER JOIN (
-                       SELECT document_id, MAX(version) as max_version
+                       SELECT document_id, MAX(id) as max_id
                        FROM document_versions
                        GROUP BY document_id
-                   ) latest ON dv.document_id = latest.document_id AND dv.version = latest.max_version
+                   ) latest ON dv.document_id = latest.document_id AND dv.id = latest.max_id
                    GROUP BY dv.mime_type"#
             ),
             &mut conn,
@@ -174,7 +178,9 @@ impl DieselDocumentRepository {
     }
 
     /// Get category statistics - group MIME types into categories.
-    pub async fn get_category_stats(&self) -> Result<std::collections::HashMap<String, u64>, DieselError> {
+    pub async fn get_category_stats(
+        &self,
+    ) -> Result<std::collections::HashMap<String, u64>, DieselError> {
         let type_stats = self.get_type_stats().await?;
         let mut category_stats = std::collections::HashMap::new();
 
@@ -199,10 +205,13 @@ impl DieselDocumentRepository {
                    FROM documents, json_each(json_extract(metadata, '$.tags'))
                    WHERE LOWER(value) LIKE ?
                    ORDER BY value
-                   LIMIT 100"#
-            ).bind::<diesel::sql_types::Text, _>(&pattern),
+                   LIMIT 100"#,
+            )
+            .bind::<diesel::sql_types::Text, _>(&pattern),
             &mut conn,
-        ).await.unwrap_or_default();
+        )
+        .await
+        .unwrap_or_default();
 
         Ok(results.into_iter().map(|r| r.tag).collect())
     }
@@ -215,10 +224,12 @@ impl DieselDocumentRepository {
             diesel::sql_query(
                 r#"SELECT DISTINCT value as tag
                    FROM documents, json_each(json_extract(metadata, '$.tags'))
-                   ORDER BY value"#
+                   ORDER BY value"#,
             ),
             &mut conn,
-        ).await.unwrap_or_default();
+        )
+        .await
+        .unwrap_or_default();
 
         Ok(results.into_iter().map(|r| r.tag).collect())
     }
@@ -295,7 +306,7 @@ impl DieselDocumentRepository {
         use diesel::dsl::count_star;
 
         // Get previous document
-        let prev: Option<(String, Option<String>)> = documents::table
+        let prev: Option<(String, String)> = documents::table
             .select((documents::id, documents::title))
             .filter(documents::source_id.eq(source_id))
             .filter(documents::id.lt(document_id))
@@ -305,7 +316,7 @@ impl DieselDocumentRepository {
             .optional()?;
 
         // Get next document
-        let next: Option<(String, Option<String>)> = documents::table
+        let next: Option<(String, String)> = documents::table
             .select((documents::id, documents::title))
             .filter(documents::source_id.eq(source_id))
             .filter(documents::id.gt(document_id))
@@ -331,9 +342,9 @@ impl DieselDocumentRepository {
 
         Ok(DocumentNavigation {
             prev_id: prev.as_ref().map(|(id, _)| id.clone()),
-            prev_title: prev.and_then(|(_, title)| title),
+            prev_title: prev.map(|(_, title)| title),
             next_id: next.as_ref().map(|(id, _)| id.clone()),
-            next_title: next.and_then(|(_, title)| title),
+            next_title: next.map(|(_, title)| title),
             position: position as u64,
             total: total as u64,
         })
@@ -346,7 +357,7 @@ impl DieselDocumentRepository {
         use diesel::dsl::count_star;
         let count: i64 = document_pages::table
             .filter(document_pages::document_id.eq(document_id))
-            .filter(document_pages::version.eq(version))
+            .filter(document_pages::version_id.eq(version))
             .select(count_star())
             .first(&mut conn)
             .await?;
@@ -400,7 +411,7 @@ impl DieselDocumentRepository {
         let mut conn = self.pool.get().await?;
 
         let records: Vec<DocumentRecord> = documents::table
-            .filter(documents::url.eq(url))
+            .filter(documents::source_url.eq(url))
             .load(&mut conn)
             .await?;
 
@@ -439,7 +450,7 @@ impl DieselDocumentRepository {
             .values((
                 documents::id.eq(&doc.id),
                 documents::source_id.eq(&doc.source_id),
-                documents::url.eq(&doc.source_url),
+                documents::source_url.eq(&doc.source_url),
                 documents::title.eq(&doc.title),
                 documents::status.eq(&status),
                 documents::metadata.eq(&metadata),
@@ -458,9 +469,11 @@ impl DieselDocumentRepository {
 
         conn.transaction(|conn| {
             Box::pin(async move {
-                diesel::delete(document_versions::table.filter(document_versions::document_id.eq(id)))
-                    .execute(conn)
-                    .await?;
+                diesel::delete(
+                    document_versions::table.filter(document_versions::document_id.eq(id)),
+                )
+                .execute(conn)
+                .await?;
 
                 diesel::delete(document_pages::table.filter(document_pages::document_id.eq(id)))
                     .execute(conn)
@@ -508,30 +521,42 @@ impl DieselDocumentRepository {
 
         document_versions::table
             .filter(document_versions::document_id.eq(document_id))
-            .order(document_versions::version.desc())
+            .order(document_versions::id.desc())
             .load::<DocumentVersionRecord>(&mut conn)
             .await
-            .map(|records| records.into_iter().map(Self::version_record_to_model).collect())
+            .map(|records| {
+                records
+                    .into_iter()
+                    .map(Self::version_record_to_model)
+                    .collect()
+            })
     }
 
     /// Add a new version.
-    pub async fn add_version(&self, document_id: &str, version: &DocumentVersion) -> Result<i64, DieselError> {
+    pub async fn add_version(
+        &self,
+        document_id: &str,
+        version: &DocumentVersion,
+    ) -> Result<i64, DieselError> {
         let mut conn = self.pool.get().await?;
 
-        let version_num = version.id as i32;
         let file_path = version.file_path.to_string_lossy().to_string();
-        let fetched_at = version.acquired_at.to_rfc3339();
+        let acquired_at = version.acquired_at.to_rfc3339();
         let file_size = version.file_size as i32;
 
         diesel::insert_into(document_versions::table)
             .values((
                 document_versions::document_id.eq(document_id),
-                document_versions::version.eq(version_num),
-                document_versions::file_path.eq(Some(&file_path)),
-                document_versions::content_hash.eq(Some(&version.content_hash)),
-                document_versions::mime_type.eq(Some(&version.mime_type)),
-                document_versions::file_size.eq(Some(file_size)),
-                document_versions::fetched_at.eq(&fetched_at),
+                document_versions::content_hash.eq(&version.content_hash),
+                document_versions::file_path.eq(&file_path),
+                document_versions::file_size.eq(file_size),
+                document_versions::mime_type.eq(&version.mime_type),
+                document_versions::acquired_at.eq(&acquired_at),
+                document_versions::source_url.eq(version.source_url.as_deref()),
+                document_versions::original_filename.eq(version.original_filename.as_deref()),
+                document_versions::server_date
+                    .eq(version.server_date.map(|d| d.to_rfc3339()).as_deref()),
+                document_versions::page_count.eq(version.page_count.map(|c| c as i32)),
             ))
             .execute(&mut conn)
             .await?;
@@ -543,12 +568,15 @@ impl DieselDocumentRepository {
     }
 
     /// Get latest version.
-    pub async fn get_latest_version(&self, document_id: &str) -> Result<Option<DocumentVersion>, DieselError> {
+    pub async fn get_latest_version(
+        &self,
+        document_id: &str,
+    ) -> Result<Option<DocumentVersion>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         document_versions::table
             .filter(document_versions::document_id.eq(document_id))
-            .order(document_versions::version.desc())
+            .order(document_versions::id.desc())
             .first::<DocumentVersionRecord>(&mut conn)
             .await
             .optional()
@@ -574,7 +602,10 @@ impl DieselDocumentRepository {
     }
 
     /// Count documents by status.
-    pub async fn count_by_status(&self, source_id: Option<&str>) -> Result<std::collections::HashMap<String, u64>, DieselError> {
+    pub async fn count_by_status(
+        &self,
+        source_id: Option<&str>,
+    ) -> Result<std::collections::HashMap<String, u64>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         let query = if let Some(sid) = source_id {
@@ -586,10 +617,8 @@ impl DieselDocumentRepository {
             "SELECT status, COUNT(*) as count FROM documents GROUP BY status".to_string()
         };
 
-        let rows: Vec<StatusCount> = diesel_async::RunQueryDsl::load(
-            diesel::sql_query(&query),
-            &mut conn,
-        ).await?;
+        let rows: Vec<StatusCount> =
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
 
         let mut counts = std::collections::HashMap::new();
         for StatusCount { status, count } in rows {
@@ -599,7 +628,12 @@ impl DieselDocumentRepository {
     }
 
     /// Get document summaries.
-    pub async fn get_summaries(&self, source_id: &str, limit: u32, offset: u32) -> Result<Vec<DieselDocumentSummary>, DieselError> {
+    pub async fn get_summaries(
+        &self,
+        source_id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<DieselDocumentSummary>, DieselError> {
         let mut conn = self.pool.get().await?;
         let limit = limit as i64;
         let offset = offset as i64;
@@ -622,18 +656,17 @@ impl DieselDocumentRepository {
 
             let latest_size: Option<i32> = document_versions::table
                 .filter(document_versions::document_id.eq(&record.id))
-                .order(document_versions::version.desc())
+                .order(document_versions::id.desc())
                 .select(document_versions::file_size)
                 .first(&mut conn)
                 .await
-                .optional()?
-                .flatten();
+                .optional()?;
 
             summaries.push(DieselDocumentSummary {
                 id: record.id,
                 source_id: record.source_id,
-                url: record.url,
-                title: record.title,
+                url: record.source_url,
+                title: Some(record.title),
                 status: DocumentStatus::from_str(&record.status).unwrap_or(DocumentStatus::Pending),
                 created_at: parse_datetime(&record.created_at),
                 updated_at: parse_datetime(&record.updated_at),
@@ -646,15 +679,24 @@ impl DieselDocumentRepository {
     }
 
     /// Get virtual files.
-    pub async fn get_virtual_files(&self, document_id: &str, version: i32) -> Result<Vec<VirtualFile>, DieselError> {
+    pub async fn get_virtual_files(
+        &self,
+        document_id: &str,
+        version: i32,
+    ) -> Result<Vec<VirtualFile>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         virtual_files::table
             .filter(virtual_files::document_id.eq(document_id))
-            .filter(virtual_files::version.eq(version))
+            .filter(virtual_files::version_id.eq(version))
             .load::<VirtualFileRecord>(&mut conn)
             .await
-            .map(|records| records.into_iter().map(Self::virtual_file_record_to_model).collect())
+            .map(|records| {
+                records
+                    .into_iter()
+                    .map(Self::virtual_file_record_to_model)
+                    .collect()
+            })
     }
 
     // ========================================================================
@@ -683,7 +725,7 @@ impl DieselDocumentRepository {
         let mut conn = self.pool.get().await?;
 
         let urls: Vec<String> = documents::table
-            .select(documents::url)
+            .select(documents::source_url)
             .load(&mut conn)
             .await?;
 
@@ -692,7 +734,11 @@ impl DieselDocumentRepository {
 
     /// Get documents by tag.
     /// Tags are stored in metadata JSON.
-    pub async fn get_by_tag(&self, tag: &str, source_id: Option<&str>) -> Result<Vec<Document>, DieselError> {
+    pub async fn get_by_tag(
+        &self,
+        tag: &str,
+        source_id: Option<&str>,
+    ) -> Result<Vec<Document>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         // Use JSON function to find documents with matching tag
@@ -720,10 +766,10 @@ impl DieselDocumentRepository {
             )
         };
 
-        let ids: Vec<DocIdRow> = diesel_async::RunQueryDsl::load(
-            diesel::sql_query(&query),
-            &mut conn,
-        ).await.unwrap_or_default();
+        let ids: Vec<DocIdRow> =
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                .await
+                .unwrap_or_default();
 
         let mut docs = Vec::with_capacity(ids.len());
         for row in ids {
@@ -735,7 +781,12 @@ impl DieselDocumentRepository {
     }
 
     /// Get documents by MIME type category.
-    pub async fn get_by_type_category(&self, category: &str, source_id: Option<&str>, limit: usize) -> Result<Vec<Document>, DieselError> {
+    pub async fn get_by_type_category(
+        &self,
+        category: &str,
+        source_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Document>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         // Get MIME types for this category
@@ -767,10 +818,10 @@ impl DieselDocumentRepository {
             limit
         );
 
-        let ids: Vec<DocIdRow> = diesel_async::RunQueryDsl::load(
-            diesel::sql_query(&query),
-            &mut conn,
-        ).await.unwrap_or_default();
+        let ids: Vec<DocIdRow> =
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                .await
+                .unwrap_or_default();
 
         let mut docs = Vec::with_capacity(ids.len());
         for row in ids {
@@ -783,7 +834,10 @@ impl DieselDocumentRepository {
 
     /// Count documents needing date estimation.
     /// These are documents without an estimated_date in metadata.
-    pub async fn count_documents_needing_date_estimation(&self, source_id: Option<&str>) -> Result<u64, DieselError> {
+    pub async fn count_documents_needing_date_estimation(
+        &self,
+        source_id: Option<&str>,
+    ) -> Result<u64, DieselError> {
         let mut conn = self.pool.get().await?;
 
         let source_filter = source_id
@@ -797,16 +851,20 @@ impl DieselDocumentRepository {
             source_filter
         );
 
-        let result: Vec<CountRow> = diesel_async::RunQueryDsl::load(
-            diesel::sql_query(&query),
-            &mut conn,
-        ).await.unwrap_or_default();
+        let result: Vec<CountRow> =
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                .await
+                .unwrap_or_default();
 
         Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
     }
 
     /// Get documents needing date estimation.
-    pub async fn get_documents_needing_date_estimation(&self, source_id: Option<&str>, limit: usize) -> Result<Vec<Document>, DieselError> {
+    pub async fn get_documents_needing_date_estimation(
+        &self,
+        source_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Document>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         let source_filter = source_id
@@ -818,14 +876,13 @@ impl DieselDocumentRepository {
                WHERE json_extract(metadata, '$.estimated_date') IS NULL
                {}
                LIMIT {}"#,
-            source_filter,
-            limit
+            source_filter, limit
         );
 
-        let ids: Vec<DocIdRow> = diesel_async::RunQueryDsl::load(
-            diesel::sql_query(&query),
-            &mut conn,
-        ).await.unwrap_or_default();
+        let ids: Vec<DocIdRow> =
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                .await
+                .unwrap_or_default();
 
         let mut docs = Vec::with_capacity(ids.len());
         for row in ids {
@@ -837,7 +894,13 @@ impl DieselDocumentRepository {
     }
 
     /// Update estimated date in document metadata.
-    pub async fn update_estimated_date(&self, id: &str, date: DateTime<Utc>, confidence: &str, source: &str) -> Result<(), DieselError> {
+    pub async fn update_estimated_date(
+        &self,
+        id: &str,
+        date: DateTime<Utc>,
+        confidence: &str,
+        source: &str,
+    ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().await?;
 
         // Get current metadata, add estimated_date, update
@@ -848,8 +911,8 @@ impl DieselDocumentRepository {
             .optional()?;
 
         if let Some(record) = record {
-            let mut metadata: serde_json::Value = serde_json::from_str(&record.metadata)
-                .unwrap_or(serde_json::json!({}));
+            let mut metadata: serde_json::Value =
+                serde_json::from_str(&record.metadata).unwrap_or(serde_json::json!({}));
 
             metadata["estimated_date"] = serde_json::json!({
                 "date": date.to_rfc3339(),
@@ -871,7 +934,14 @@ impl DieselDocumentRepository {
     }
 
     /// Record an annotation result in document metadata.
-    pub async fn record_annotation(&self, id: &str, annotation_type: &str, version: i32, data: Option<&str>, error: Option<&str>) -> Result<(), DieselError> {
+    pub async fn record_annotation(
+        &self,
+        id: &str,
+        annotation_type: &str,
+        version: i32,
+        data: Option<&str>,
+        error: Option<&str>,
+    ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().await?;
 
         let record: Option<DocumentRecord> = documents::table
@@ -881,8 +951,8 @@ impl DieselDocumentRepository {
             .optional()?;
 
         if let Some(record) = record {
-            let mut metadata: serde_json::Value = serde_json::from_str(&record.metadata)
-                .unwrap_or(serde_json::json!({}));
+            let mut metadata: serde_json::Value =
+                serde_json::from_str(&record.metadata).unwrap_or(serde_json::json!({}));
 
             // Add annotation info
             let annotations = metadata
@@ -917,7 +987,7 @@ impl DieselDocumentRepository {
 
         let urls: Vec<String> = documents::table
             .filter(documents::source_id.eq(source_id))
-            .select(documents::url)
+            .select(documents::source_url)
             .load(&mut conn)
             .await?;
 
@@ -925,12 +995,15 @@ impl DieselDocumentRepository {
     }
 
     /// Get current version ID.
-    pub async fn get_current_version_id(&self, document_id: &str) -> Result<Option<i64>, DieselError> {
+    pub async fn get_current_version_id(
+        &self,
+        document_id: &str,
+    ) -> Result<Option<i64>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         let version: Option<i32> = document_versions::table
             .filter(document_versions::document_id.eq(document_id))
-            .order(document_versions::version.desc())
+            .order(document_versions::id.desc())
             .select(document_versions::id)
             .first(&mut conn)
             .await
@@ -943,15 +1016,23 @@ impl DieselDocumentRepository {
     pub async fn insert_virtual_file(&self, vf: &VirtualFile) -> Result<(), DieselError> {
         let mut conn = self.pool.get().await?;
 
+        let now = Utc::now().to_rfc3339();
+
         diesel::insert_into(virtual_files::table)
             .values((
+                virtual_files::id.eq(&vf.id),
                 virtual_files::document_id.eq(&vf.document_id),
-                virtual_files::version.eq(vf.version_id as i32),
-                virtual_files::path.eq(&vf.archive_path),
-                virtual_files::mime_type.eq(Some(&vf.mime_type)),
-                virtual_files::file_size.eq(Some(vf.file_size as i32)),
+                virtual_files::version_id.eq(vf.version_id as i32),
+                virtual_files::archive_path.eq(&vf.archive_path),
+                virtual_files::filename.eq(&vf.filename),
+                virtual_files::mime_type.eq(&vf.mime_type),
+                virtual_files::file_size.eq(vf.file_size as i32),
+                virtual_files::extracted_text.eq(&vf.extracted_text),
+                virtual_files::synopsis.eq(&vf.synopsis),
+                virtual_files::tags.eq(serde_json::to_string(&vf.tags).ok().as_deref()),
                 virtual_files::status.eq(vf.status.as_str()),
-                virtual_files::ocr_text.eq(&vf.extracted_text),
+                virtual_files::created_at.eq(&now),
+                virtual_files::updated_at.eq(&now),
             ))
             .execute(&mut conn)
             .await?;
@@ -960,7 +1041,10 @@ impl DieselDocumentRepository {
     }
 
     /// Count unprocessed archives.
-    pub async fn count_unprocessed_archives(&self, source_id: Option<&str>) -> Result<u64, DieselError> {
+    pub async fn count_unprocessed_archives(
+        &self,
+        source_id: Option<&str>,
+    ) -> Result<u64, DieselError> {
         let mut conn = self.pool.get().await?;
 
         let source_filter = source_id
@@ -983,15 +1067,16 @@ impl DieselDocumentRepository {
             source_filter
         );
 
-        let result: Vec<CountRow> = diesel_async::RunQueryDsl::load(
-            diesel::sql_query(&query),
-            &mut conn,
-        ).await?;
+        let result: Vec<CountRow> =
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
         Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
     }
 
     /// Count unprocessed emails.
-    pub async fn count_unprocessed_emails(&self, source_id: Option<&str>) -> Result<u64, DieselError> {
+    pub async fn count_unprocessed_emails(
+        &self,
+        source_id: Option<&str>,
+    ) -> Result<u64, DieselError> {
         let mut conn = self.pool.get().await?;
 
         let source_filter = source_id
@@ -1008,15 +1093,17 @@ impl DieselDocumentRepository {
             source_filter
         );
 
-        let result: Vec<CountRow> = diesel_async::RunQueryDsl::load(
-            diesel::sql_query(&query),
-            &mut conn,
-        ).await?;
+        let result: Vec<CountRow> =
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
         Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
     }
 
     /// Get unprocessed archives.
-    pub async fn get_unprocessed_archives(&self, source_id: Option<&str>, limit: usize) -> Result<Vec<Document>, DieselError> {
+    pub async fn get_unprocessed_archives(
+        &self,
+        source_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Document>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         let source_filter = source_id
@@ -1041,10 +1128,8 @@ impl DieselDocumentRepository {
             source_filter, limit
         );
 
-        let ids: Vec<DocIdRow> = diesel_async::RunQueryDsl::load(
-            diesel::sql_query(&query),
-            &mut conn,
-        ).await?;
+        let ids: Vec<DocIdRow> =
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
 
         let mut docs = Vec::with_capacity(ids.len());
         for row in ids {
@@ -1056,7 +1141,11 @@ impl DieselDocumentRepository {
     }
 
     /// Get unprocessed emails.
-    pub async fn get_unprocessed_emails(&self, source_id: Option<&str>, limit: usize) -> Result<Vec<Document>, DieselError> {
+    pub async fn get_unprocessed_emails(
+        &self,
+        source_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Document>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         let source_filter = source_id
@@ -1075,10 +1164,8 @@ impl DieselDocumentRepository {
             source_filter, limit
         );
 
-        let ids: Vec<DocIdRow> = diesel_async::RunQueryDsl::load(
-            diesel::sql_query(&query),
-            &mut conn,
-        ).await?;
+        let ids: Vec<DocIdRow> =
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
 
         let mut docs = Vec::with_capacity(ids.len());
         for row in ids {
@@ -1090,7 +1177,9 @@ impl DieselDocumentRepository {
     }
 
     /// Count all by status.
-    pub async fn count_all_by_status(&self) -> Result<std::collections::HashMap<String, u64>, DieselError> {
+    pub async fn count_all_by_status(
+        &self,
+    ) -> Result<std::collections::HashMap<String, u64>, DieselError> {
         self.count_by_status(None).await
     }
 
@@ -1098,16 +1187,20 @@ impl DieselDocumentRepository {
     pub async fn save_page(&self, page: &crate::models::DocumentPage) -> Result<i64, DieselError> {
         let mut conn = self.pool.get().await?;
 
+        let now = Utc::now().to_rfc3339();
+
         // Use replace_into for upsert
         diesel::replace_into(document_pages::table)
             .values((
                 document_pages::document_id.eq(&page.document_id),
-                document_pages::version.eq(page.version_id as i32),
+                document_pages::version_id.eq(page.version_id as i32),
                 document_pages::page_number.eq(page.page_number as i32),
-                document_pages::text_content.eq(&page.pdf_text),
+                document_pages::pdf_text.eq(&page.pdf_text),
                 document_pages::ocr_text.eq(&page.ocr_text),
-                document_pages::has_images.eq(0),
-                document_pages::status.eq(page.ocr_status.as_str()),
+                document_pages::final_text.eq(&page.final_text),
+                document_pages::ocr_status.eq(page.ocr_status.as_str()),
+                document_pages::created_at.eq(&now),
+                document_pages::updated_at.eq(&now),
             ))
             .execute(&mut conn)
             .await?;
@@ -1122,7 +1215,11 @@ impl DieselDocumentRepository {
     /// Set version page count.
     /// Note: page_count is not stored in the database schema, so this is a no-op.
     /// The count can be derived from document_pages table.
-    pub async fn set_version_page_count(&self, _version_id: i64, _count: u32) -> Result<(), DieselError> {
+    pub async fn set_version_page_count(
+        &self,
+        _version_id: i64,
+        _count: u32,
+    ) -> Result<(), DieselError> {
         // Page count is derived from document_pages, not stored directly
         Ok(())
     }
@@ -1138,7 +1235,11 @@ impl DieselDocumentRepository {
 
         use diesel::dsl::count_star;
         let count: i64 = document_pages::table
-            .filter(document_pages::status.eq("pending").or(document_pages::status.eq("text_extracted")))
+            .filter(
+                document_pages::ocr_status
+                    .eq("pending")
+                    .or(document_pages::ocr_status.eq("text_extracted")),
+            )
             .select(count_star())
             .first(&mut conn)
             .await?;
@@ -1148,7 +1249,9 @@ impl DieselDocumentRepository {
 
     /// Get all content hashes for duplicate detection.
     /// Returns (doc_id, source_id, content_hash, title) tuples
-    pub async fn get_content_hashes(&self) -> Result<Vec<(String, String, String, String)>, DieselError> {
+    pub async fn get_content_hashes(
+        &self,
+    ) -> Result<Vec<(String, String, String, String)>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         #[derive(diesel::QueryableByName)]
@@ -1168,18 +1271,29 @@ impl DieselDocumentRepository {
                FROM document_versions dv
                JOIN documents d ON dv.document_id = d.id
                WHERE dv.content_hash IS NOT NULL
-               AND dv.version = (SELECT MAX(version) FROM document_versions WHERE document_id = dv.document_id)"#
+               AND dv.id = (SELECT MAX(id) FROM document_versions WHERE document_id = dv.document_id)"#
         ).load(&mut conn).await?;
 
         Ok(results
             .into_iter()
-            .map(|r| (r.document_id, r.source_id, r.content_hash, r.title.unwrap_or_default()))
+            .map(|r| {
+                (
+                    r.document_id,
+                    r.source_id,
+                    r.content_hash,
+                    r.title.unwrap_or_default(),
+                )
+            })
             .collect())
     }
 
     /// Find documents by content hash.
     /// Returns (source_id, document_id, title) tuples
-    pub async fn find_sources_by_hash(&self, content_hash: &str, exclude_source: Option<&str>) -> Result<Vec<(String, String, String)>, DieselError> {
+    pub async fn find_sources_by_hash(
+        &self,
+        content_hash: &str,
+        exclude_source: Option<&str>,
+    ) -> Result<Vec<(String, String, String)>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         #[derive(diesel::QueryableByName)]
@@ -1212,10 +1326,8 @@ impl DieselDocumentRepository {
             )
         };
 
-        let results: Vec<SourceRow> = diesel_async::RunQueryDsl::load(
-            diesel::sql_query(&query),
-            &mut conn,
-        ).await?;
+        let results: Vec<SourceRow> =
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
 
         Ok(results
             .into_iter()
@@ -1242,18 +1354,17 @@ impl DieselDocumentRepository {
 
             let latest_size: Option<i32> = document_versions::table
                 .filter(document_versions::document_id.eq(&record.id))
-                .order(document_versions::version.desc())
+                .order(document_versions::id.desc())
                 .select(document_versions::file_size)
                 .first(&mut conn)
                 .await
-                .optional()?
-                .flatten();
+                .optional()?;
 
             summaries.push(DieselDocumentSummary {
                 id: record.id,
                 source_id: record.source_id,
-                url: record.url,
-                title: record.title,
+                url: record.source_url,
+                title: Some(record.title),
                 status: DocumentStatus::from_str(&record.status).unwrap_or(DocumentStatus::Pending),
                 created_at: parse_datetime(&record.created_at),
                 updated_at: parse_datetime(&record.updated_at),
@@ -1266,12 +1377,19 @@ impl DieselDocumentRepository {
     }
 
     /// Get summaries for a specific source.
-    pub async fn get_summaries_by_source(&self, source_id: &str) -> Result<Vec<DieselDocumentSummary>, DieselError> {
+    pub async fn get_summaries_by_source(
+        &self,
+        source_id: &str,
+    ) -> Result<Vec<DieselDocumentSummary>, DieselError> {
         self.get_summaries(source_id, 1000, 0).await
     }
 
     /// Get document pages.
-    pub async fn get_pages(&self, document_id: &str, version: i32) -> Result<Vec<crate::models::DocumentPage>, DieselError> {
+    pub async fn get_pages(
+        &self,
+        document_id: &str,
+        version: i32,
+    ) -> Result<Vec<crate::models::DocumentPage>, DieselError> {
         use super::diesel_models::DocumentPageRecord;
         use crate::models::PageOcrStatus;
 
@@ -1279,7 +1397,7 @@ impl DieselDocumentRepository {
 
         let records: Vec<DocumentPageRecord> = document_pages::table
             .filter(document_pages::document_id.eq(document_id))
-            .filter(document_pages::version.eq(version))
+            .filter(document_pages::version_id.eq(version))
             .order(document_pages::page_number.asc())
             .load(&mut conn)
             .await?;
@@ -1289,12 +1407,13 @@ impl DieselDocumentRepository {
             .map(|r| crate::models::DocumentPage {
                 id: r.id as i64,
                 document_id: r.document_id,
-                version_id: r.version as i64,
+                version_id: r.version_id as i64,
                 page_number: r.page_number as u32,
-                pdf_text: r.text_content,
+                pdf_text: r.pdf_text,
                 ocr_text: r.ocr_text,
                 final_text: None,
-                ocr_status: PageOcrStatus::from_str(&r.status).unwrap_or(PageOcrStatus::Pending),
+                ocr_status: PageOcrStatus::from_str(&r.ocr_status)
+                    .unwrap_or(PageOcrStatus::Pending),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             })
@@ -1302,12 +1421,19 @@ impl DieselDocumentRepository {
     }
 
     /// Get OCR results for pages in bulk (stub).
-    pub async fn get_pages_ocr_results_bulk(&self, _page_ids: &[i64]) -> Result<std::collections::HashMap<i64, Vec<OcrResult>>, DieselError> {
+    pub async fn get_pages_ocr_results_bulk(
+        &self,
+        _page_ids: &[i64],
+    ) -> Result<std::collections::HashMap<i64, Vec<OcrResult>>, DieselError> {
         Ok(std::collections::HashMap::new())
     }
 
     /// Get pages without a specific OCR backend (stub).
-    pub async fn get_pages_without_backend(&self, _document_id: &str, _backend: &str) -> Result<Vec<crate::models::DocumentPage>, DieselError> {
+    pub async fn get_pages_without_backend(
+        &self,
+        _document_id: &str,
+        _backend: &str,
+    ) -> Result<Vec<crate::models::DocumentPage>, DieselError> {
         Ok(vec![])
     }
 
@@ -1323,12 +1449,16 @@ impl DieselDocumentRepository {
     ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().await?;
 
-        let status = if error.is_some() { "failed" } else { "ocr_complete" };
+        let status = if error.is_some() {
+            "failed"
+        } else {
+            "ocr_complete"
+        };
 
         diesel::update(document_pages::table.find(page_id as i32))
             .set((
                 document_pages::ocr_text.eq(text),
-                document_pages::status.eq(status),
+                document_pages::ocr_status.eq(status),
             ))
             .execute(&mut conn)
             .await?;
@@ -1337,7 +1467,10 @@ impl DieselDocumentRepository {
     }
 
     /// Get documents needing summarization.
-    pub async fn get_needing_summarization(&self, limit: usize) -> Result<Vec<Document>, DieselError> {
+    pub async fn get_needing_summarization(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<Document>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         let records: Vec<DocumentRecord> = documents::table
@@ -1356,22 +1489,22 @@ impl DieselDocumentRepository {
     }
 
     /// Get combined page text for a document.
-    pub async fn get_combined_page_text(&self, document_id: &str, version: i32) -> Result<Option<String>, DieselError> {
+    pub async fn get_combined_page_text(
+        &self,
+        document_id: &str,
+        version: i32,
+    ) -> Result<Option<String>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         let texts: Vec<Option<String>> = document_pages::table
             .filter(document_pages::document_id.eq(document_id))
-            .filter(document_pages::version.eq(version))
+            .filter(document_pages::version_id.eq(version))
             .order(document_pages::page_number.asc())
             .select(document_pages::ocr_text)
             .load(&mut conn)
             .await?;
 
-        let combined: String = texts
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        let combined: String = texts.into_iter().flatten().collect::<Vec<_>>().join("\n\n");
 
         if combined.is_empty() {
             Ok(None)
@@ -1420,11 +1553,15 @@ impl DieselDocumentRepository {
     }
 
     /// Update version mime type.
-    pub async fn update_version_mime_type(&self, version_id: i64, mime_type: &str) -> Result<(), DieselError> {
+    pub async fn update_version_mime_type(
+        &self,
+        version_id: i64,
+        mime_type: &str,
+    ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().await?;
 
         diesel::update(document_versions::table.find(version_id as i32))
-            .set(document_versions::mime_type.eq(Some(mime_type)))
+            .set(document_versions::mime_type.eq(mime_type))
             .execute(&mut conn)
             .await?;
 
@@ -1432,7 +1569,12 @@ impl DieselDocumentRepository {
     }
 
     /// Get pages needing OCR.
-    pub async fn get_pages_needing_ocr(&self, document_id: &str, version_id: i32, limit: usize) -> Result<Vec<crate::models::DocumentPage>, DieselError> {
+    pub async fn get_pages_needing_ocr(
+        &self,
+        document_id: &str,
+        version_id: i32,
+        limit: usize,
+    ) -> Result<Vec<crate::models::DocumentPage>, DieselError> {
         use super::diesel_models::DocumentPageRecord;
         use crate::models::PageOcrStatus;
 
@@ -1440,8 +1582,12 @@ impl DieselDocumentRepository {
 
         let records: Vec<DocumentPageRecord> = document_pages::table
             .filter(document_pages::document_id.eq(document_id))
-            .filter(document_pages::version.eq(version_id))
-            .filter(document_pages::status.eq("pending").or(document_pages::status.eq("text_extracted")))
+            .filter(document_pages::version_id.eq(version_id))
+            .filter(
+                document_pages::ocr_status
+                    .eq("pending")
+                    .or(document_pages::ocr_status.eq("text_extracted")),
+            )
             .order(document_pages::page_number.asc())
             .limit(limit as i64)
             .load(&mut conn)
@@ -1452,12 +1598,13 @@ impl DieselDocumentRepository {
             .map(|r| crate::models::DocumentPage {
                 id: r.id as i64,
                 document_id: r.document_id,
-                version_id: r.version as i64,
+                version_id: r.version_id as i64,
                 page_number: r.page_number as u32,
-                pdf_text: r.text_content,
+                pdf_text: r.pdf_text,
                 ocr_text: r.ocr_text,
                 final_text: None,
-                ocr_status: PageOcrStatus::from_str(&r.status).unwrap_or(PageOcrStatus::Pending),
+                ocr_status: PageOcrStatus::from_str(&r.ocr_status)
+                    .unwrap_or(PageOcrStatus::Pending),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             })
@@ -1465,13 +1612,17 @@ impl DieselDocumentRepository {
     }
 
     /// Delete pages for a document version.
-    pub async fn delete_pages(&self, document_id: &str, version_id: i32) -> Result<(), DieselError> {
+    pub async fn delete_pages(
+        &self,
+        document_id: &str,
+        version_id: i32,
+    ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().await?;
 
         diesel::delete(
             document_pages::table
                 .filter(document_pages::document_id.eq(document_id))
-                .filter(document_pages::version.eq(version_id)),
+                .filter(document_pages::version_id.eq(version_id)),
         )
         .execute(&mut conn)
         .await?;
@@ -1480,14 +1631,22 @@ impl DieselDocumentRepository {
     }
 
     /// Check if all pages are complete.
-    pub async fn are_all_pages_complete(&self, document_id: &str, version_id: i32) -> Result<bool, DieselError> {
+    pub async fn are_all_pages_complete(
+        &self,
+        document_id: &str,
+        version_id: i32,
+    ) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().await?;
 
         use diesel::dsl::count_star;
         let pending_count: i64 = document_pages::table
             .filter(document_pages::document_id.eq(document_id))
-            .filter(document_pages::version.eq(version_id))
-            .filter(document_pages::status.eq("pending").or(document_pages::status.eq("text_extracted")))
+            .filter(document_pages::version_id.eq(version_id))
+            .filter(
+                document_pages::ocr_status
+                    .eq("pending")
+                    .or(document_pages::ocr_status.eq("text_extracted")),
+            )
             .select(count_star())
             .first(&mut conn)
             .await?;
@@ -1503,17 +1662,20 @@ impl DieselDocumentRepository {
         Document {
             id: record.id,
             source_id: record.source_id,
-            title: record.title.unwrap_or_default(),
-            source_url: record.url,
-            extracted_text: None,
-            synopsis: None,
-            tags: vec![],
+            title: record.title,
+            source_url: record.source_url,
+            extracted_text: record.extracted_text,
+            synopsis: record.synopsis,
+            tags: record
+                .tags
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default(),
             status: DocumentStatus::from_str(&record.status).unwrap_or(DocumentStatus::Pending),
             metadata: serde_json::from_str(&record.metadata)
                 .unwrap_or(serde_json::Value::Object(Default::default())),
             created_at: parse_datetime(&record.created_at),
             updated_at: parse_datetime(&record.updated_at),
-            discovery_method: "unknown".to_string(),
+            discovery_method: record.discovery_method,
             versions,
         }
     }
@@ -1521,33 +1683,37 @@ impl DieselDocumentRepository {
     fn version_record_to_model(record: DocumentVersionRecord) -> DocumentVersion {
         DocumentVersion {
             id: record.id as i64,
-            content_hash: record.content_hash.unwrap_or_default(),
-            file_path: PathBuf::from(record.file_path.unwrap_or_default()),
-            file_size: record.file_size.unwrap_or(0) as u64,
-            mime_type: record.mime_type.unwrap_or_default(),
-            acquired_at: parse_datetime(&record.fetched_at),
-            source_url: None,
-            original_filename: None,
-            server_date: None,
-            page_count: None,
+            content_hash: record.content_hash,
+            file_path: PathBuf::from(record.file_path),
+            file_size: record.file_size as u64,
+            mime_type: record.mime_type,
+            acquired_at: parse_datetime(&record.acquired_at),
+            source_url: record.source_url,
+            original_filename: record.original_filename,
+            server_date: parse_datetime_opt(record.server_date),
+            page_count: record.page_count.map(|c| c as u32),
         }
     }
 
     fn virtual_file_record_to_model(record: VirtualFileRecord) -> VirtualFile {
         VirtualFile {
-            id: record.id.to_string(),
+            id: record.id,
             document_id: record.document_id,
-            version_id: record.version as i64,
-            archive_path: record.path,
-            filename: String::new(),
-            file_size: record.file_size.unwrap_or(0) as u64,
-            mime_type: record.mime_type.unwrap_or_default(),
-            extracted_text: record.ocr_text,
-            synopsis: None,
-            tags: vec![],
-            status: VirtualFileStatus::from_str(&record.status).unwrap_or(VirtualFileStatus::Pending),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            version_id: record.version_id as i64,
+            archive_path: record.archive_path,
+            filename: record.filename,
+            file_size: record.file_size as u64,
+            mime_type: record.mime_type,
+            extracted_text: record.extracted_text,
+            synopsis: record.synopsis,
+            tags: record
+                .tags
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default(),
+            status: VirtualFileStatus::from_str(&record.status)
+                .unwrap_or(VirtualFileStatus::Pending),
+            created_at: parse_datetime(&record.created_at),
+            updated_at: parse_datetime(&record.updated_at),
         }
     }
 }
@@ -1620,48 +1786,65 @@ mod tests {
             CREATE TABLE IF NOT EXISTS documents (
                 id TEXT PRIMARY KEY,
                 source_id TEXT NOT NULL,
-                url TEXT NOT NULL,
-                title TEXT,
+                title TEXT NOT NULL,
+                source_url TEXT NOT NULL,
+                extracted_text TEXT,
                 status TEXT NOT NULL DEFAULT 'pending',
                 metadata TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                synopsis TEXT,
+                tags TEXT,
+                estimated_date TEXT,
+                date_confidence TEXT,
+                date_source TEXT,
+                manual_date TEXT,
+                discovery_method TEXT NOT NULL DEFAULT 'import',
+                category_id TEXT
             );
 
             CREATE TABLE IF NOT EXISTS document_versions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 document_id TEXT NOT NULL,
-                version INTEGER NOT NULL,
-                file_path TEXT,
-                content_hash TEXT,
-                mime_type TEXT,
-                file_size INTEGER,
-                fetched_at TEXT NOT NULL,
-                UNIQUE(document_id, version)
+                content_hash TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                mime_type TEXT NOT NULL,
+                acquired_at TEXT NOT NULL,
+                source_url TEXT,
+                original_filename TEXT,
+                server_date TEXT,
+                page_count INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS document_pages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 document_id TEXT NOT NULL,
-                version INTEGER NOT NULL,
+                version_id INTEGER NOT NULL,
                 page_number INTEGER NOT NULL,
-                text_content TEXT,
+                pdf_text TEXT,
                 ocr_text TEXT,
-                has_images INTEGER NOT NULL DEFAULT 0,
-                status TEXT NOT NULL DEFAULT 'pending',
-                UNIQUE(document_id, version, page_number)
+                final_text TEXT,
+                ocr_status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(document_id, version_id, page_number)
             );
 
             CREATE TABLE IF NOT EXISTS virtual_files (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT PRIMARY KEY,
                 document_id TEXT NOT NULL,
-                version INTEGER NOT NULL,
-                path TEXT NOT NULL,
-                mime_type TEXT,
-                file_size INTEGER,
+                version_id INTEGER NOT NULL,
+                archive_path TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                extracted_text TEXT,
+                synopsis TEXT,
+                tags TEXT,
                 status TEXT NOT NULL DEFAULT 'pending',
-                ocr_text TEXT,
-                UNIQUE(document_id, version, path)
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             );
             "#,
         )
@@ -1698,7 +1881,9 @@ mod tests {
         let fetched = repo.get("doc-1").await.unwrap().unwrap();
         assert_eq!(fetched.title, "Test Document");
 
-        repo.update_status("doc-1", DocumentStatus::Downloaded).await.unwrap();
+        repo.update_status("doc-1", DocumentStatus::Downloaded)
+            .await
+            .unwrap();
         let updated = repo.get("doc-1").await.unwrap().unwrap();
         assert_eq!(updated.status, DocumentStatus::Downloaded);
 

@@ -77,18 +77,10 @@ pub async fn cmd_crawl_status(
         println!("{:<20} {}", "Status:", status_str);
 
         if let Some(ref started) = state.last_crawl_started {
-            println!(
-                "{:<20} {}",
-                "Last Started:",
-                started
-            );
+            println!("{:<20} {}", "Last Started:", started);
         }
         if let Some(ref completed) = state.last_crawl_completed {
-            println!(
-                "{:<20} {}",
-                "Last Completed:",
-                completed
-            );
+            println!("{:<20} {}", "Last Completed:", completed);
         }
 
         println!("{:<20} {}", "URLs Discovered:", state.urls_discovered);

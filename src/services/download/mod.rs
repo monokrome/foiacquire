@@ -296,7 +296,11 @@ impl DownloadService {
                     );
 
                     // Check for existing document
-                    let existing = doc_repo.get_by_url(&url).await.ok().and_then(|v| v.into_iter().next());
+                    let existing = doc_repo
+                        .get_by_url(&url)
+                        .await
+                        .ok()
+                        .and_then(|v| v.into_iter().next());
                     let new_document = existing.is_none();
 
                     if let Some(mut doc) = existing {

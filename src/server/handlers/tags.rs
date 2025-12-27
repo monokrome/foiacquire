@@ -68,7 +68,8 @@ pub async fn api_tags(State(state): State<AppState>) -> impl IntoResponse {
         Some(cached) => cached,
         None => {
             let raw_tags = state.doc_repo.get_all_tags().await.unwrap_or_default();
-            let tags_with_counts: Vec<(String, usize)> = raw_tags.into_iter().map(|t| (t, 0)).collect();
+            let tags_with_counts: Vec<(String, usize)> =
+                raw_tags.into_iter().map(|t| (t, 0)).collect();
             state.stats_cache.set_all_tags(tags_with_counts.clone());
             tags_with_counts
         }

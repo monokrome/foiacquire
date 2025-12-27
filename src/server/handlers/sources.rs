@@ -27,7 +27,11 @@ pub async fn list_sources(State(state): State<AppState>) -> impl IntoResponse {
         }
     };
 
-    let counts = state.doc_repo.get_all_source_counts().await.unwrap_or_default();
+    let counts = state
+        .doc_repo
+        .get_all_source_counts()
+        .await
+        .unwrap_or_default();
 
     let source_data: Vec<_> = sources
         .into_iter()
