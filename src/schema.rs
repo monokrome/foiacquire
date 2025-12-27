@@ -1,13 +1,13 @@
 // @generated automatically by Diesel CLI.
-// Manually corrected: PRIMARY KEY columns are not nullable
+// Manually corrected to match actual database schema.
 
 diesel::table! {
-    config_history (id) {
-        id -> Integer,
+    configuration_history (uuid) {
+        uuid -> Text,
+        created_at -> Text,
         data -> Text,
         format -> Text,
         hash -> Text,
-        created_at -> Text,
     }
 }
 
@@ -64,12 +64,14 @@ diesel::table! {
     document_pages (id) {
         id -> Integer,
         document_id -> Text,
-        version -> Integer,
+        version_id -> Integer,
         page_number -> Integer,
-        text_content -> Nullable<Text>,
+        pdf_text -> Nullable<Text>,
         ocr_text -> Nullable<Text>,
-        has_images -> Integer,
-        status -> Text,
+        final_text -> Nullable<Text>,
+        ocr_status -> Text,
+        created_at -> Text,
+        updated_at -> Text,
     }
 }
 
@@ -77,12 +79,15 @@ diesel::table! {
     document_versions (id) {
         id -> Integer,
         document_id -> Text,
-        version -> Integer,
-        file_path -> Nullable<Text>,
-        content_hash -> Nullable<Text>,
-        mime_type -> Nullable<Text>,
-        file_size -> Nullable<Integer>,
-        fetched_at -> Text,
+        content_hash -> Text,
+        file_path -> Text,
+        file_size -> Integer,
+        mime_type -> Text,
+        acquired_at -> Text,
+        source_url -> Nullable<Text>,
+        original_filename -> Nullable<Text>,
+        server_date -> Nullable<Text>,
+        page_count -> Nullable<Integer>,
     }
 }
 
@@ -90,12 +95,21 @@ diesel::table! {
     documents (id) {
         id -> Text,
         source_id -> Text,
-        url -> Text,
-        title -> Nullable<Text>,
+        title -> Text,
+        source_url -> Text,
+        extracted_text -> Nullable<Text>,
         status -> Text,
         metadata -> Text,
         created_at -> Text,
         updated_at -> Text,
+        synopsis -> Nullable<Text>,
+        tags -> Nullable<Text>,
+        estimated_date -> Nullable<Text>,
+        date_confidence -> Nullable<Text>,
+        date_source -> Nullable<Text>,
+        manual_date -> Nullable<Text>,
+        discovery_method -> Text,
+        category_id -> Nullable<Text>,
     }
 }
 
@@ -124,14 +138,19 @@ diesel::table! {
 
 diesel::table! {
     virtual_files (id) {
-        id -> Integer,
+        id -> Text,
         document_id -> Text,
-        version -> Integer,
-        path -> Text,
-        mime_type -> Nullable<Text>,
-        file_size -> Nullable<Integer>,
+        version_id -> Integer,
+        archive_path -> Text,
+        filename -> Text,
+        mime_type -> Text,
+        file_size -> Integer,
+        extracted_text -> Nullable<Text>,
+        synopsis -> Nullable<Text>,
+        tags -> Nullable<Text>,
         status -> Text,
-        ocr_text -> Nullable<Text>,
+        created_at -> Text,
+        updated_at -> Text,
     }
 }
 
@@ -141,7 +160,7 @@ diesel::joinable!(documents -> sources (source_id));
 diesel::joinable!(virtual_files -> documents (document_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
-    config_history,
+    configuration_history,
     crawl_config,
     crawl_requests,
     crawl_urls,

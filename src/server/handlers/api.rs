@@ -34,7 +34,11 @@ pub async fn api_sources(State(state): State<AppState>) -> impl IntoResponse {
     let source_counts = match state.stats_cache.get_source_counts() {
         Some(counts) => counts,
         None => {
-            let counts = state.doc_repo.get_all_source_counts().await.unwrap_or_default();
+            let counts = state
+                .doc_repo
+                .get_all_source_counts()
+                .await
+                .unwrap_or_default();
             state.stats_cache.set_source_counts(counts.clone());
             counts
         }
@@ -159,7 +163,11 @@ pub async fn api_source_status(
     State(state): State<AppState>,
     Path(source_id): Path<String>,
 ) -> impl IntoResponse {
-    let doc_count = state.doc_repo.count_by_source(&source_id).await.unwrap_or(0);
+    let doc_count = state
+        .doc_repo
+        .count_by_source(&source_id)
+        .await
+        .unwrap_or(0);
     let needing_ocr = state
         .doc_repo
         .count_needing_ocr(Some(&source_id))

@@ -9,7 +9,7 @@ use diesel_async::RunQueryDsl;
 use super::diesel_models::{ConfigHistoryRecord, NewConfigHistory};
 use super::diesel_pool::{AsyncSqlitePool, DieselError};
 use super::parse_datetime;
-use crate::schema::config_history;
+use crate::schema::configuration_history;
 
 /// Maximum number of configuration history entries to retain.
 const MAX_HISTORY_ENTRIES: i64 = 16;
@@ -17,7 +17,6 @@ const MAX_HISTORY_ENTRIES: i64 = 16;
 /// Represents a stored configuration entry.
 #[derive(Debug, Clone)]
 pub struct DieselConfigHistoryEntry {
-    pub id: i32,
     pub uuid: String,
     pub created_at: DateTime<Utc>,
     pub data: String,
@@ -28,8 +27,7 @@ pub struct DieselConfigHistoryEntry {
 impl From<ConfigHistoryRecord> for DieselConfigHistoryEntry {
     fn from(record: ConfigHistoryRecord) -> Self {
         DieselConfigHistoryEntry {
-            id: record.id,
-            uuid: record.hash.clone(), // Use hash as uuid for display
+            uuid: record.uuid,
             created_at: parse_datetime(&record.created_at),
             data: record.data,
             format: record.format,
@@ -55,8 +53,8 @@ impl DieselConfigHistoryRepository {
         let mut conn = self.pool.get().await?;
 
         use diesel::dsl::count_star;
-        let count: i64 = config_history::table
-            .filter(config_history::hash.eq(hash))
+        let count: i64 = configuration_history::table
+            .filter(configuration_history::hash.eq(hash))
             .select(count_star())
             .first(&mut conn)
             .await?;
@@ -78,15 +76,17 @@ impl DieselConfigHistoryRepository {
 
         let mut conn = self.pool.get().await?;
         let now = Utc::now().to_rfc3339();
+        let uuid = uuid::Uuid::new_v4().to_string();
 
         let new_entry = NewConfigHistory {
+            uuid: &uuid,
+            created_at: &now,
             data,
             format,
             hash,
-            created_at: &now,
         };
 
-        diesel::insert_into(config_history::table)
+        diesel::insert_into(configuration_history::table)
             .values(&new_entry)
             .execute(&mut conn)
             .await?;
@@ -101,8 +101,8 @@ impl DieselConfigHistoryRepository {
     pub async fn get_latest(&self) -> Result<Option<DieselConfigHistoryEntry>, DieselError> {
         let mut conn = self.pool.get().await?;
 
-        config_history::table
-            .order(config_history::created_at.desc())
+        configuration_history::table
+            .order(configuration_history::created_at.desc())
             .first::<ConfigHistoryRecord>(&mut conn)
             .await
             .optional()
@@ -113,20 +113,25 @@ impl DieselConfigHistoryRepository {
     pub async fn get_all(&self) -> Result<Vec<DieselConfigHistoryEntry>, DieselError> {
         let mut conn = self.pool.get().await?;
 
-        config_history::table
-            .order(config_history::created_at.desc())
+        configuration_history::table
+            .order(configuration_history::created_at.desc())
             .load::<ConfigHistoryRecord>(&mut conn)
             .await
-            .map(|records| records.into_iter().map(DieselConfigHistoryEntry::from).collect())
+            .map(|records| {
+                records
+                    .into_iter()
+                    .map(DieselConfigHistoryEntry::from)
+                    .collect()
+            })
     }
 
     /// Get just the hash of the most recent configuration entry.
     pub async fn get_latest_hash(&self) -> Result<Option<String>, DieselError> {
         let mut conn = self.pool.get().await?;
 
-        config_history::table
-            .select(config_history::hash)
-            .order(config_history::created_at.desc())
+        configuration_history::table
+            .select(configuration_history::hash)
+            .order(configuration_history::created_at.desc())
             .first::<String>(&mut conn)
             .await
             .optional()
@@ -136,19 +141,22 @@ impl DieselConfigHistoryRepository {
     async fn prune_old_entries(&self) -> Result<(), DieselError> {
         let mut conn = self.pool.get().await?;
 
-        // Get IDs to keep (most recent MAX_HISTORY_ENTRIES)
-        let ids_to_keep: Vec<i32> = config_history::table
-            .select(config_history::id)
-            .order(config_history::created_at.desc())
+        // Get UUIDs to keep (most recent MAX_HISTORY_ENTRIES)
+        let uuids_to_keep: Vec<String> = configuration_history::table
+            .select(configuration_history::uuid)
+            .order(configuration_history::created_at.desc())
             .limit(MAX_HISTORY_ENTRIES)
             .load(&mut conn)
             .await?;
 
-        if !ids_to_keep.is_empty() {
+        if !uuids_to_keep.is_empty() {
             // Delete entries not in the keep list
-            diesel::delete(config_history::table.filter(config_history::id.ne_all(&ids_to_keep)))
-                .execute(&mut conn)
-                .await?;
+            diesel::delete(
+                configuration_history::table
+                    .filter(configuration_history::uuid.ne_all(&uuids_to_keep)),
+            )
+            .execute(&mut conn)
+            .await?;
         }
 
         Ok(())
@@ -170,12 +178,12 @@ mod tests {
         let mut conn = pool.get().await.unwrap();
 
         conn.batch_execute(
-            r#"CREATE TABLE IF NOT EXISTS config_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+            r#"CREATE TABLE IF NOT EXISTS configuration_history (
+                uuid TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
                 data TEXT NOT NULL,
                 format TEXT NOT NULL DEFAULT 'json',
-                hash TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                hash TEXT NOT NULL
             )"#,
         )
         .await

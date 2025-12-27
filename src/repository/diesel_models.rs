@@ -128,12 +128,21 @@ pub struct NewCrawlRequest<'a> {
 pub struct DocumentRecord {
     pub id: String,
     pub source_id: String,
-    pub url: String,
-    pub title: Option<String>,
+    pub title: String,
+    pub source_url: String,
+    pub extracted_text: Option<String>,
     pub status: String,
     pub metadata: String,
     pub created_at: String,
     pub updated_at: String,
+    pub synopsis: Option<String>,
+    pub tags: Option<String>,
+    pub estimated_date: Option<String>,
+    pub date_confidence: Option<String>,
+    pub date_source: Option<String>,
+    pub manual_date: Option<String>,
+    pub discovery_method: String,
+    pub category_id: Option<String>,
 }
 
 /// New document for insertion.
@@ -142,12 +151,21 @@ pub struct DocumentRecord {
 pub struct NewDocument<'a> {
     pub id: &'a str,
     pub source_id: &'a str,
-    pub url: &'a str,
-    pub title: Option<&'a str>,
+    pub title: &'a str,
+    pub source_url: &'a str,
+    pub extracted_text: Option<&'a str>,
     pub status: &'a str,
     pub metadata: &'a str,
     pub created_at: &'a str,
     pub updated_at: &'a str,
+    pub synopsis: Option<&'a str>,
+    pub tags: Option<&'a str>,
+    pub estimated_date: Option<&'a str>,
+    pub date_confidence: Option<&'a str>,
+    pub date_source: Option<&'a str>,
+    pub manual_date: Option<&'a str>,
+    pub discovery_method: &'a str,
+    pub category_id: Option<&'a str>,
 }
 
 /// Document version record from the database.
@@ -157,12 +175,15 @@ pub struct NewDocument<'a> {
 pub struct DocumentVersionRecord {
     pub id: i32,
     pub document_id: String,
-    pub version: i32,
-    pub file_path: Option<String>,
-    pub content_hash: Option<String>,
-    pub mime_type: Option<String>,
-    pub file_size: Option<i32>,
-    pub fetched_at: String,
+    pub content_hash: String,
+    pub file_path: String,
+    pub file_size: i32,
+    pub mime_type: String,
+    pub acquired_at: String,
+    pub source_url: Option<String>,
+    pub original_filename: Option<String>,
+    pub server_date: Option<String>,
+    pub page_count: Option<i32>,
 }
 
 /// New document version for insertion.
@@ -170,12 +191,15 @@ pub struct DocumentVersionRecord {
 #[diesel(table_name = schema::document_versions)]
 pub struct NewDocumentVersion<'a> {
     pub document_id: &'a str,
-    pub version: i32,
-    pub file_path: Option<&'a str>,
-    pub content_hash: Option<&'a str>,
-    pub mime_type: Option<&'a str>,
-    pub file_size: Option<i32>,
-    pub fetched_at: &'a str,
+    pub content_hash: &'a str,
+    pub file_path: &'a str,
+    pub file_size: i32,
+    pub mime_type: &'a str,
+    pub acquired_at: &'a str,
+    pub source_url: Option<&'a str>,
+    pub original_filename: Option<&'a str>,
+    pub server_date: Option<&'a str>,
+    pub page_count: Option<i32>,
 }
 
 /// Document page record from the database.
@@ -185,34 +209,53 @@ pub struct NewDocumentVersion<'a> {
 pub struct DocumentPageRecord {
     pub id: i32,
     pub document_id: String,
-    pub version: i32,
+    pub version_id: i32,
     pub page_number: i32,
-    pub text_content: Option<String>,
+    pub pdf_text: Option<String>,
     pub ocr_text: Option<String>,
-    pub has_images: i32,
-    pub status: String,
+    pub final_text: Option<String>,
+    pub ocr_status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// New document page for insertion.
+#[derive(Insertable, Debug)]
+#[diesel(table_name = schema::document_pages)]
+pub struct NewDocumentPage<'a> {
+    pub document_id: &'a str,
+    pub version_id: i32,
+    pub page_number: i32,
+    pub pdf_text: Option<&'a str>,
+    pub ocr_text: Option<&'a str>,
+    pub final_text: Option<&'a str>,
+    pub ocr_status: &'a str,
+    pub created_at: &'a str,
+    pub updated_at: &'a str,
 }
 
 /// Config history record from the database.
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
-#[diesel(table_name = schema::config_history)]
+#[diesel(table_name = schema::configuration_history)]
+#[diesel(primary_key(uuid))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ConfigHistoryRecord {
-    pub id: i32,
+    pub uuid: String,
+    pub created_at: String,
     pub data: String,
     pub format: String,
     pub hash: String,
-    pub created_at: String,
 }
 
 /// New config history entry for insertion.
 #[derive(Insertable, Debug)]
-#[diesel(table_name = schema::config_history)]
+#[diesel(table_name = schema::configuration_history)]
 pub struct NewConfigHistory<'a> {
+    pub uuid: &'a str,
+    pub created_at: &'a str,
     pub data: &'a str,
     pub format: &'a str,
     pub hash: &'a str,
-    pub created_at: &'a str,
 }
 
 /// Crawl config record from the database.
@@ -231,14 +274,38 @@ pub struct CrawlConfigRecord {
 #[diesel(table_name = schema::virtual_files)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct VirtualFileRecord {
-    pub id: i32,
+    pub id: String,
     pub document_id: String,
-    pub version: i32,
-    pub path: String,
-    pub mime_type: Option<String>,
-    pub file_size: Option<i32>,
+    pub version_id: i32,
+    pub archive_path: String,
+    pub filename: String,
+    pub mime_type: String,
+    pub file_size: i32,
+    pub extracted_text: Option<String>,
+    pub synopsis: Option<String>,
+    pub tags: Option<String>,
     pub status: String,
-    pub ocr_text: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// New virtual file for insertion.
+#[derive(Insertable, Debug)]
+#[diesel(table_name = schema::virtual_files)]
+pub struct NewVirtualFile<'a> {
+    pub id: &'a str,
+    pub document_id: &'a str,
+    pub version_id: i32,
+    pub archive_path: &'a str,
+    pub filename: &'a str,
+    pub mime_type: &'a str,
+    pub file_size: i32,
+    pub extracted_text: Option<&'a str>,
+    pub synopsis: Option<&'a str>,
+    pub tags: Option<&'a str>,
+    pub status: &'a str,
+    pub created_at: &'a str,
+    pub updated_at: &'a str,
 }
 
 /// Rate limit state record from the database.

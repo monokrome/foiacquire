@@ -2,8 +2,8 @@
 //!
 //! Uses diesel-async's SyncConnectionWrapper for async SQLite support.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use chrono::Utc;
 use diesel::prelude::*;
@@ -86,8 +86,8 @@ impl DieselCrawlRepository {
 
         let status = crawl_url.status.as_str().to_string();
         let discovery_method = crawl_url.discovery_method.as_str().to_string();
-        let discovery_context =
-            serde_json::to_string(&crawl_url.discovery_context).unwrap_or_else(|_| "{}".to_string());
+        let discovery_context = serde_json::to_string(&crawl_url.discovery_context)
+            .unwrap_or_else(|_| "{}".to_string());
         let depth = crawl_url.depth as i32;
         let discovered_at = crawl_url.discovered_at.to_rfc3339();
         let retry_count = crawl_url.retry_count as i32;
@@ -493,10 +493,8 @@ impl DieselCrawlRepository {
             source_id.replace('\'', "''")
         );
 
-        let results: Vec<StatsRow> = diesel_async::RunQueryDsl::load(
-            diesel::sql_query(&query),
-            &mut conn,
-        ).await?;
+        let results: Vec<StatsRow> =
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
 
         if let Some(row) = results.get(0) {
             Ok(RequestStats {
@@ -513,7 +511,10 @@ impl DieselCrawlRepository {
     }
 
     /// Get all stats for a source.
-    pub async fn get_all_stats_for_source(&self, source_id: &str) -> Result<CrawlStats, DieselError> {
+    pub async fn get_all_stats_for_source(
+        &self,
+        source_id: &str,
+    ) -> Result<CrawlStats, DieselError> {
         let crawl_state = self.get_crawl_state(source_id).await?;
         let request_stats = self.get_request_stats(source_id).await?;
 
@@ -541,7 +542,8 @@ impl DieselCrawlRepository {
         let source_ids: Vec<SourceIdRow> = diesel_async::RunQueryDsl::load(
             diesel::sql_query("SELECT DISTINCT source_id FROM crawl_urls"),
             &mut conn,
-        ).await?;
+        )
+        .await?;
 
         let mut stats = HashMap::new();
         for row in source_ids {
@@ -673,7 +675,9 @@ impl DieselCrawlRepository {
     }
 
     /// Get all request stats for all sources.
-    pub async fn get_all_request_stats(&self) -> Result<HashMap<String, RequestStats>, DieselError> {
+    pub async fn get_all_request_stats(
+        &self,
+    ) -> Result<HashMap<String, RequestStats>, DieselError> {
         let mut conn = self.pool.get().await?;
 
         // Get all unique source IDs from crawl_requests
@@ -686,7 +690,8 @@ impl DieselCrawlRepository {
         let source_ids: Vec<SourceIdRow> = diesel_async::RunQueryDsl::load(
             diesel::sql_query("SELECT DISTINCT source_id FROM crawl_requests"),
             &mut conn,
-        ).await?;
+        )
+        .await?;
 
         let mut stats = HashMap::new();
         for row in source_ids {
@@ -721,7 +726,11 @@ impl DieselCrawlRepository {
     }
 
     /// Mark a URL for refresh by resetting its status to discovered.
-    pub async fn mark_url_for_refresh(&self, source_id: &str, url: &str) -> Result<(), DieselError> {
+    pub async fn mark_url_for_refresh(
+        &self,
+        source_id: &str,
+        url: &str,
+    ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().await?;
 
         diesel::update(
@@ -951,7 +960,10 @@ mod tests {
         assert!(added);
 
         // Check exists
-        assert!(repo.url_exists("test-source", "https://example.com/page").await.unwrap());
+        assert!(repo
+            .url_exists("test-source", "https://example.com/page")
+            .await
+            .unwrap());
 
         // Try to add duplicate
         let duplicate = repo.add_url(&crawl_url).await.unwrap();
@@ -1017,7 +1029,9 @@ mod tests {
         assert!(changed);
 
         // Store hash
-        repo.store_config_hash("test-source", "hash1").await.unwrap();
+        repo.store_config_hash("test-source", "hash1")
+            .await
+            .unwrap();
 
         // Now should not indicate change
         let changed = repo

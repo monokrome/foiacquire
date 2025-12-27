@@ -18,18 +18,16 @@ pub async fn timeline_aggregate(
             // Simple timeline: count by acquired_at date
             let total = summaries.len() as u64;
             axum::Json(TimelineResponse {
-                buckets: vec![],  // TODO: implement bucketing
+                buckets: vec![], // TODO: implement bucketing
                 total,
                 error: None,
             })
         }
-        Err(e) => {
-            axum::Json(TimelineResponse {
-                buckets: vec![],
-                total: 0,
-                error: Some(e.to_string()),
-            })
-        }
+        Err(e) => axum::Json(TimelineResponse {
+            buckets: vec![],
+            total: 0,
+            error: Some(e.to_string()),
+        }),
     }
 }
 
@@ -43,17 +41,15 @@ pub async fn timeline_source(
         Ok(summaries) => {
             let total = summaries.len() as u64;
             axum::Json(TimelineResponse {
-                buckets: vec![],  // TODO: implement bucketing
+                buckets: vec![], // TODO: implement bucketing
                 total,
                 error: None,
             })
         }
-        Err(e) => {
-            axum::Json(TimelineResponse {
-                buckets: vec![],
-                total: 0,
-                error: Some(e.to_string()),
-            })
-        }
+        Err(e) => axum::Json(TimelineResponse {
+            buckets: vec![],
+            total: 0,
+            error: Some(e.to_string()),
+        }),
     }
 }

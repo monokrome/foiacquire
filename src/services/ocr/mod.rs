@@ -30,7 +30,10 @@ impl OcrService {
     }
 
     /// Get count of documents needing OCR processing.
-    pub async fn count_needing_processing(&self, source_id: Option<&str>) -> anyhow::Result<(u64, u64)> {
+    pub async fn count_needing_processing(
+        &self,
+        source_id: Option<&str>,
+    ) -> anyhow::Result<(u64, u64)> {
         let docs = self.doc_repo.count_needing_ocr(source_id).await?;
         let pages = self.doc_repo.count_pages_needing_ocr().await?;
         Ok((docs, pages))
@@ -365,7 +368,10 @@ impl OcrService {
 
         while offset < effective_limit {
             let batch_limit = (effective_limit - offset).min(batch_size);
-            let pages = self.doc_repo.get_pages_needing_ocr("", 0, batch_limit).await?;
+            let pages = self
+                .doc_repo
+                .get_pages_needing_ocr("", 0, batch_limit)
+                .await?;
 
             if pages.is_empty() {
                 break;

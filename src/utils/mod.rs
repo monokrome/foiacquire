@@ -11,4 +11,6 @@ mod mime;
 
 pub use format::format_size;
 pub use html::html_escape;
-pub use mime::{category_to_mime_patterns, mime_icon, mime_to_category, mime_type_sql_condition, MimeCategory};
+pub use mime::{
+    category_to_mime_patterns, mime_icon, mime_to_category, mime_type_sql_condition, MimeCategory,
+};

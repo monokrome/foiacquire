@@ -232,7 +232,7 @@ pub async fn api_reocr_document(
                             "deepseek",
                             Some(&result.text),
                             result.confidence.map(|c| c as f32),
-                            None,  // error field
+                            None, // error field
                         )
                         .await
                     {

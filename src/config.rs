@@ -364,10 +364,7 @@ impl Config {
                 // Check for lock errors and warn
                 let msg = e.to_string();
                 if msg.contains("locked") || msg.contains("SQLITE_BUSY") {
-                    tracing::warn!(
-                        "Could not save config to history (database locked): {}",
-                        e
-                    );
+                    tracing::warn!("Could not save config to history (database locked): {}", e);
                 } else {
                     tracing::warn!("Could not save config to history: {}", e);
                 }
@@ -494,10 +491,12 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
                 "No config file found, trying database history: {}",
                 resolved.database_path.display()
             );
-            Config::load_from_db(&resolved.database_path).await.unwrap_or_else(|| {
-                tracing::debug!("No config in database history, using defaults");
-                Config::default()
-            })
+            Config::load_from_db(&resolved.database_path)
+                .await
+                .unwrap_or_else(|| {
+                    tracing::debug!("No config in database history, using defaults");
+                    Config::default()
+                })
         } else {
             // Database doesn't exist yet, use auto-discovery
             Config::load().await
