@@ -535,7 +535,10 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
 
     // Only resolve SQLite database paths when NOT using postgres
     let resolved_target = if !using_postgres {
-        options.target.as_ref().map(|t| ResolvedTarget::from_path(t))
+        options
+            .target
+            .as_ref()
+            .map(|t| ResolvedTarget::from_path(t))
     } else {
         None
     };
