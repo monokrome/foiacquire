@@ -1,25 +1,20 @@
 # FOIAcquire - FOIA document acquisition and research system
-FROM debian:bookworm-slim
+FROM alpine:latest
 
 ARG TARGETARCH
 ARG WITH_TESSERACT="false"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        libsqlite3-0 \
-        libpq5 \
-        gosu \
+RUN apk add --no-cache ca-certificates su-exec \
     && if [ "$WITH_TESSERACT" = "true" ]; then \
-         apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng; \
-       fi \
-    && rm -rf /var/lib/apt/lists/*
+         apk add --no-cache tesseract-ocr tesseract-ocr-data-eng; \
+       fi
 
 ENV TARGET_PATH=/opt/foiacquire
 ENV USER_ID=1000
 ENV GROUP_ID=1000
 
 # Create default non-root user (can be overridden with USER_ID env var)
-RUN useradd -m -u 1000 foiacquire \
+RUN adduser -D -u 1000 foiacquire \
     && mkdir -p /opt/foiacquire \
     && chown foiacquire:foiacquire /opt/foiacquire
 
