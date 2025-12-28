@@ -14,6 +14,7 @@ use super::diesel_pool::DieselError;
 use super::{parse_datetime, parse_datetime_opt};
 use crate::models::{Document, DocumentStatus, DocumentVersion, VirtualFile, VirtualFileStatus};
 use crate::schema::{document_pages, document_versions, documents, virtual_files};
+use crate::{with_diesel_conn, with_diesel_conn_split};
 
 /// OCR result for a page.
 #[derive(Debug, Clone)]
@@ -66,97 +67,48 @@ impl DieselDocumentRepository {
 
     /// Count all documents.
     pub async fn count(&self) -> Result<u64, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                use diesel::dsl::count_star;
-                let count: i64 = documents::table
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(count as u64)
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                use diesel::dsl::count_star;
-                let count: i64 = documents::table
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(count as u64)
-            }
-        }
+        use diesel::dsl::count_star;
+        with_diesel_conn!(self.pool, conn, {
+            let count: i64 = documents::table
+                .select(count_star())
+                .first(&mut conn)
+                .await?;
+            Ok(count as u64)
+        })
     }
 
     /// Get document counts per source.
     pub async fn get_all_source_counts(
         &self,
     ) -> Result<std::collections::HashMap<String, u64>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let rows: Vec<SourceCount> = diesel::sql_query(
-                    "SELECT source_id, COUNT(*) as count FROM documents GROUP BY source_id",
-                )
-                .load(&mut conn)
-                .await?;
+        with_diesel_conn!(self.pool, conn, {
+            let rows: Vec<SourceCount> = diesel::sql_query(
+                "SELECT source_id, COUNT(*) as count FROM documents GROUP BY source_id",
+            )
+            .load(&mut conn)
+            .await?;
 
-                let mut counts = std::collections::HashMap::new();
-                for SourceCount { source_id, count } in rows {
-                    counts.insert(source_id, count as u64);
-                }
-                Ok(counts)
+            let mut counts = std::collections::HashMap::new();
+            for SourceCount { source_id, count } in rows {
+                counts.insert(source_id, count as u64);
             }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let rows: Vec<SourceCount> = diesel::sql_query(
-                    "SELECT source_id, COUNT(*) as count FROM documents GROUP BY source_id",
-                )
-                .load(&mut conn)
-                .await?;
-
-                let mut counts = std::collections::HashMap::new();
-                for SourceCount { source_id, count } in rows {
-                    counts.insert(source_id, count as u64);
-                }
-                Ok(counts)
-            }
-        }
+            Ok(counts)
+        })
     }
 
     /// Count documents needing OCR.
     /// Documents need OCR if status is 'pending' or 'downloaded' and they have a PDF version.
     pub async fn count_needing_ocr(&self, source_id: Option<&str>) -> Result<u64, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let mut query = documents::table
-                    .filter(documents::status.eq_any(vec!["pending", "downloaded"]))
-                    .into_boxed();
-                if let Some(sid) = source_id {
-                    query = query.filter(documents::source_id.eq(sid));
-                }
-                let count: i64 = query.count().get_result(&mut conn).await?;
-                Ok(count as u64)
+        with_diesel_conn!(self.pool, conn, {
+            let mut query = documents::table
+                .filter(documents::status.eq_any(vec!["pending", "downloaded"]))
+                .into_boxed();
+            if let Some(sid) = source_id {
+                query = query.filter(documents::source_id.eq(sid));
             }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let mut query = documents::table
-                    .filter(documents::status.eq_any(vec!["pending", "downloaded"]))
-                    .into_boxed();
-                if let Some(sid) = source_id {
-                    query = query.filter(documents::source_id.eq(sid));
-                }
-                let count: i64 = query.count().get_result(&mut conn).await?;
-                Ok(count as u64)
-            }
-        }
+            let count: i64 = query.count().get_result(&mut conn).await?;
+            Ok(count as u64)
+        })
     }
 
     /// Count documents needing summarization.
@@ -165,109 +117,54 @@ impl DieselDocumentRepository {
         &self,
         source_id: Option<&str>,
     ) -> Result<u64, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let mut query = documents::table
-                    .filter(documents::status.eq("ocr_complete"))
-                    .into_boxed();
-                if let Some(sid) = source_id {
-                    query = query.filter(documents::source_id.eq(sid));
-                }
-                let count: i64 = query.count().get_result(&mut conn).await?;
-                Ok(count as u64)
+        with_diesel_conn!(self.pool, conn, {
+            let mut query = documents::table
+                .filter(documents::status.eq("ocr_complete"))
+                .into_boxed();
+            if let Some(sid) = source_id {
+                query = query.filter(documents::source_id.eq(sid));
             }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let mut query = documents::table
-                    .filter(documents::status.eq("ocr_complete"))
-                    .into_boxed();
-                if let Some(sid) = source_id {
-                    query = query.filter(documents::source_id.eq(sid));
-                }
-                let count: i64 = query.count().get_result(&mut conn).await?;
-                Ok(count as u64)
-            }
-        }
+            let count: i64 = query.count().get_result(&mut conn).await?;
+            Ok(count as u64)
+        })
     }
 
     /// Get type statistics - count documents by MIME type.
     pub async fn get_type_stats(
         &self,
     ) -> Result<std::collections::HashMap<String, u64>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let results: Vec<MimeCount> = diesel_async::RunQueryDsl::load(
-                    diesel::sql_query(
-                        r#"SELECT COALESCE(dv.mime_type, 'unknown') as mime_type, COUNT(DISTINCT dv.document_id) as count
-                           FROM document_versions dv
-                           INNER JOIN (
-                               SELECT document_id, MAX(id) as max_id
-                               FROM document_versions
-                               GROUP BY document_id
-                           ) latest ON dv.document_id = latest.document_id AND dv.id = latest.max_id
-                           GROUP BY dv.mime_type"#
-                    ),
-                    &mut conn,
-                ).await?;
-                let mut stats = std::collections::HashMap::new();
-                for row in results {
-                    stats.insert(row.mime_type, row.count as u64);
-                }
-                Ok(stats)
+        with_diesel_conn!(self.pool, conn, {
+            let results: Vec<MimeCount> = diesel_async::RunQueryDsl::load(
+                diesel::sql_query(
+                    r#"SELECT COALESCE(dv.mime_type, 'unknown') as mime_type, COUNT(DISTINCT dv.document_id) as count
+                       FROM document_versions dv
+                       INNER JOIN (
+                           SELECT document_id, MAX(id) as max_id
+                           FROM document_versions
+                           GROUP BY document_id
+                       ) latest ON dv.document_id = latest.document_id AND dv.id = latest.max_id
+                       GROUP BY dv.mime_type"#
+                ),
+                &mut conn,
+            ).await?;
+            let mut stats = std::collections::HashMap::new();
+            for row in results {
+                stats.insert(row.mime_type, row.count as u64);
             }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let results: Vec<MimeCount> = diesel_async::RunQueryDsl::load(
-                    diesel::sql_query(
-                        r#"SELECT COALESCE(dv.mime_type, 'unknown') as mime_type, COUNT(DISTINCT dv.document_id) as count
-                           FROM document_versions dv
-                           INNER JOIN (
-                               SELECT document_id, MAX(id) as max_id
-                               FROM document_versions
-                               GROUP BY document_id
-                           ) latest ON dv.document_id = latest.document_id AND dv.id = latest.max_id
-                           GROUP BY dv.mime_type"#
-                    ),
-                    &mut conn,
-                ).await?;
-                let mut stats = std::collections::HashMap::new();
-                for row in results {
-                    stats.insert(row.mime_type, row.count as u64);
-                }
-                Ok(stats)
-            }
-        }
+            Ok(stats)
+        })
     }
 
     /// Get recent documents.
     pub async fn get_recent(&self, limit: u32) -> Result<Vec<Document>, DieselError> {
         let limit = limit as i64;
-        let records: Vec<DocumentRecord> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                documents::table
-                    .order(documents::updated_at.desc())
-                    .limit(limit)
-                    .load(&mut conn)
-                    .await?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                documents::table
-                    .order(documents::updated_at.desc())
-                    .limit(limit)
-                    .load(&mut conn)
-                    .await?
-            }
-        };
+        let records: Vec<DocumentRecord> = with_diesel_conn!(self.pool, conn, {
+            documents::table
+                .order(documents::updated_at.desc())
+                .limit(limit)
+                .load(&mut conn)
+                .await
+        })?;
 
         let mut docs = Vec::with_capacity(records.len());
         for record in records {
@@ -296,9 +193,8 @@ impl DieselDocumentRepository {
     /// Tags are stored as JSON arrays in the metadata field.
     pub async fn search_tags(&self, query: &str) -> Result<Vec<String>, DieselError> {
         let pattern = format!("%{}%", query.to_lowercase());
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
+        with_diesel_conn_split!(self.pool,
+            sqlite: conn => {
                 let results: Vec<TagRow> = diesel_async::RunQueryDsl::load(
                     diesel::sql_query(
                         r#"SELECT DISTINCT value as tag
@@ -313,11 +209,8 @@ impl DieselDocumentRepository {
                 .await
                 .unwrap_or_default();
                 Ok(results.into_iter().map(|r| r.tag).collect())
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
+            },
+            postgres: conn => {
                 // PostgreSQL uses jsonb_array_elements_text for JSON array iteration
                 let results: Vec<TagRow> = diesel_async::RunQueryDsl::load(
                     diesel::sql_query(
@@ -334,14 +227,13 @@ impl DieselDocumentRepository {
                 .unwrap_or_default();
                 Ok(results.into_iter().map(|r| r.tag).collect())
             }
-        }
+        )
     }
 
     /// Get all unique tags from document metadata.
     pub async fn get_all_tags(&self) -> Result<Vec<String>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
+        with_diesel_conn_split!(self.pool,
+            sqlite: conn => {
                 let results: Vec<TagRow> = diesel_async::RunQueryDsl::load(
                     diesel::sql_query(
                         r#"SELECT DISTINCT value as tag
@@ -353,11 +245,8 @@ impl DieselDocumentRepository {
                 .await
                 .unwrap_or_default();
                 Ok(results.into_iter().map(|r| r.tag).collect())
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
+            },
+            postgres: conn => {
                 let results: Vec<TagRow> = diesel_async::RunQueryDsl::load(
                     diesel::sql_query(
                         r#"SELECT DISTINCT tag
@@ -370,7 +259,7 @@ impl DieselDocumentRepository {
                 .unwrap_or_default();
                 Ok(results.into_iter().map(|r| r.tag).collect())
             }
-        }
+        )
     }
 
     /// Browse documents.
@@ -385,40 +274,20 @@ impl DieselDocumentRepository {
         let limit = limit as i64;
         let offset = offset as i64;
 
-        let records: Vec<DocumentRecord> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let mut query = documents::table
-                    .order(documents::updated_at.desc())
-                    .limit(limit)
-                    .offset(offset)
-                    .into_boxed();
-                if let Some(sid) = source_id {
-                    query = query.filter(documents::source_id.eq(sid));
-                }
-                if let Some(st) = status {
-                    query = query.filter(documents::status.eq(st));
-                }
-                query.load(&mut conn).await?
+        let records: Vec<DocumentRecord> = with_diesel_conn!(self.pool, conn, {
+            let mut query = documents::table
+                .order(documents::updated_at.desc())
+                .limit(limit)
+                .offset(offset)
+                .into_boxed();
+            if let Some(sid) = source_id {
+                query = query.filter(documents::source_id.eq(sid));
             }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let mut query = documents::table
-                    .order(documents::updated_at.desc())
-                    .limit(limit)
-                    .offset(offset)
-                    .into_boxed();
-                if let Some(sid) = source_id {
-                    query = query.filter(documents::source_id.eq(sid));
-                }
-                if let Some(st) = status {
-                    query = query.filter(documents::status.eq(st));
-                }
-                query.load(&mut conn).await?
+            if let Some(st) = status {
+                query = query.filter(documents::status.eq(st));
             }
-        };
+            query.load(&mut conn).await
+        })?;
 
         let mut docs = Vec::with_capacity(records.len());
         for record in records {
@@ -435,36 +304,18 @@ impl DieselDocumentRepository {
         status: Option<&str>,
         _category: Option<&str>,
     ) -> Result<u64, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                use diesel::dsl::count_star;
-                let mut query = documents::table.select(count_star()).into_boxed();
-                if let Some(sid) = source_id {
-                    query = query.filter(documents::source_id.eq(sid));
-                }
-                if let Some(st) = status {
-                    query = query.filter(documents::status.eq(st));
-                }
-                let count: i64 = query.first(&mut conn).await?;
-                Ok(count as u64)
+        use diesel::dsl::count_star;
+        with_diesel_conn!(self.pool, conn, {
+            let mut query = documents::table.select(count_star()).into_boxed();
+            if let Some(sid) = source_id {
+                query = query.filter(documents::source_id.eq(sid));
             }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                use diesel::dsl::count_star;
-                let mut query = documents::table.select(count_star()).into_boxed();
-                if let Some(sid) = source_id {
-                    query = query.filter(documents::source_id.eq(sid));
-                }
-                if let Some(st) = status {
-                    query = query.filter(documents::status.eq(st));
-                }
-                let count: i64 = query.first(&mut conn).await?;
-                Ok(count as u64)
+            if let Some(st) = status {
+                query = query.filter(documents::status.eq(st));
             }
-        }
+            let count: i64 = query.first(&mut conn).await?;
+            Ok(count as u64)
+        })
     }
 
     /// Get document navigation.
@@ -476,116 +327,57 @@ impl DieselDocumentRepository {
         use super::document::DocumentNavigation;
         use diesel::dsl::count_star;
 
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let prev: Option<(String, String)> = documents::table
-                    .select((documents::id, documents::title))
-                    .filter(documents::source_id.eq(source_id))
-                    .filter(documents::id.lt(document_id))
-                    .order(documents::id.desc())
-                    .first(&mut conn)
-                    .await
-                    .optional()?;
-                let next: Option<(String, String)> = documents::table
-                    .select((documents::id, documents::title))
-                    .filter(documents::source_id.eq(source_id))
-                    .filter(documents::id.gt(document_id))
-                    .order(documents::id.asc())
-                    .first(&mut conn)
-                    .await
-                    .optional()?;
-                let position: i64 = documents::table
-                    .filter(documents::source_id.eq(source_id))
-                    .filter(documents::id.le(document_id))
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                let total: i64 = documents::table
-                    .filter(documents::source_id.eq(source_id))
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(DocumentNavigation {
-                    prev_id: prev.as_ref().map(|(id, _)| id.clone()),
-                    prev_title: prev.map(|(_, title)| title),
-                    next_id: next.as_ref().map(|(id, _)| id.clone()),
-                    next_title: next.map(|(_, title)| title),
-                    position: position as u64,
-                    total: total as u64,
-                })
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let prev: Option<(String, String)> = documents::table
-                    .select((documents::id, documents::title))
-                    .filter(documents::source_id.eq(source_id))
-                    .filter(documents::id.lt(document_id))
-                    .order(documents::id.desc())
-                    .first(&mut conn)
-                    .await
-                    .optional()?;
-                let next: Option<(String, String)> = documents::table
-                    .select((documents::id, documents::title))
-                    .filter(documents::source_id.eq(source_id))
-                    .filter(documents::id.gt(document_id))
-                    .order(documents::id.asc())
-                    .first(&mut conn)
-                    .await
-                    .optional()?;
-                let position: i64 = documents::table
-                    .filter(documents::source_id.eq(source_id))
-                    .filter(documents::id.le(document_id))
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                let total: i64 = documents::table
-                    .filter(documents::source_id.eq(source_id))
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(DocumentNavigation {
-                    prev_id: prev.as_ref().map(|(id, _)| id.clone()),
-                    prev_title: prev.map(|(_, title)| title),
-                    next_id: next.as_ref().map(|(id, _)| id.clone()),
-                    next_title: next.map(|(_, title)| title),
-                    position: position as u64,
-                    total: total as u64,
-                })
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            let prev: Option<(String, String)> = documents::table
+                .select((documents::id, documents::title))
+                .filter(documents::source_id.eq(source_id))
+                .filter(documents::id.lt(document_id))
+                .order(documents::id.desc())
+                .first(&mut conn)
+                .await
+                .optional()?;
+            let next: Option<(String, String)> = documents::table
+                .select((documents::id, documents::title))
+                .filter(documents::source_id.eq(source_id))
+                .filter(documents::id.gt(document_id))
+                .order(documents::id.asc())
+                .first(&mut conn)
+                .await
+                .optional()?;
+            let position: i64 = documents::table
+                .filter(documents::source_id.eq(source_id))
+                .filter(documents::id.le(document_id))
+                .select(count_star())
+                .first(&mut conn)
+                .await?;
+            let total: i64 = documents::table
+                .filter(documents::source_id.eq(source_id))
+                .select(count_star())
+                .first(&mut conn)
+                .await?;
+            Ok(DocumentNavigation {
+                prev_id: prev.as_ref().map(|(id, _)| id.clone()),
+                prev_title: prev.map(|(_, title)| title),
+                next_id: next.as_ref().map(|(id, _)| id.clone()),
+                next_title: next.map(|(_, title)| title),
+                position: position as u64,
+                total: total as u64,
+            })
+        })
     }
 
     /// Count pages for a document.
     pub async fn count_pages(&self, document_id: &str, version: i32) -> Result<u32, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                use diesel::dsl::count_star;
-                let count: i64 = document_pages::table
-                    .filter(document_pages::document_id.eq(document_id))
-                    .filter(document_pages::version_id.eq(version))
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(count as u32)
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                use diesel::dsl::count_star;
-                let count: i64 = document_pages::table
-                    .filter(document_pages::document_id.eq(document_id))
-                    .filter(document_pages::version_id.eq(version))
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(count as u32)
-            }
-        }
+        use diesel::dsl::count_star;
+        with_diesel_conn!(self.pool, conn, {
+            let count: i64 = document_pages::table
+                .filter(document_pages::document_id.eq(document_id))
+                .filter(document_pages::version_id.eq(version))
+                .select(count_star())
+                .first(&mut conn)
+                .await?;
+            Ok(count as u32)
+        })
     }
 
     // ========================================================================
@@ -594,26 +386,13 @@ impl DieselDocumentRepository {
 
     /// Get a document by ID.
     pub async fn get(&self, id: &str) -> Result<Option<Document>, DieselError> {
-        let record: Option<DocumentRecord> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                documents::table
-                    .find(id)
-                    .first(&mut conn)
-                    .await
-                    .optional()?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                documents::table
-                    .find(id)
-                    .first(&mut conn)
-                    .await
-                    .optional()?
-            }
-        };
+        let record: Option<DocumentRecord> = with_diesel_conn!(self.pool, conn, {
+            documents::table
+                .find(id)
+                .first(&mut conn)
+                .await
+                .optional()
+        })?;
 
         match record {
             Some(record) => {
@@ -626,26 +405,13 @@ impl DieselDocumentRepository {
 
     /// Get all documents for a source.
     pub async fn get_by_source(&self, source_id: &str) -> Result<Vec<Document>, DieselError> {
-        let records: Vec<DocumentRecord> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                documents::table
-                    .filter(documents::source_id.eq(source_id))
-                    .order(documents::created_at.desc())
-                    .load(&mut conn)
-                    .await?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                documents::table
-                    .filter(documents::source_id.eq(source_id))
-                    .order(documents::created_at.desc())
-                    .load(&mut conn)
-                    .await?
-            }
-        };
+        let records: Vec<DocumentRecord> = with_diesel_conn!(self.pool, conn, {
+            documents::table
+                .filter(documents::source_id.eq(source_id))
+                .order(documents::created_at.desc())
+                .load(&mut conn)
+                .await
+        })?;
 
         let mut docs = Vec::with_capacity(records.len());
         for record in records {
@@ -657,24 +423,12 @@ impl DieselDocumentRepository {
 
     /// Get documents by URL.
     pub async fn get_by_url(&self, url: &str) -> Result<Vec<Document>, DieselError> {
-        let records: Vec<DocumentRecord> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                documents::table
-                    .filter(documents::source_url.eq(url))
-                    .load(&mut conn)
-                    .await?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                documents::table
-                    .filter(documents::source_url.eq(url))
-                    .load(&mut conn)
-                    .await?
-            }
-        };
+        let records: Vec<DocumentRecord> = with_diesel_conn!(self.pool, conn, {
+            documents::table
+                .filter(documents::source_url.eq(url))
+                .load(&mut conn)
+                .await
+        })?;
 
         let mut docs = Vec::with_capacity(records.len());
         for record in records {
@@ -687,30 +441,15 @@ impl DieselDocumentRepository {
     /// Check if a document exists.
     #[allow(dead_code)]
     pub async fn exists(&self, id: &str) -> Result<bool, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                use diesel::dsl::count_star;
-                let count: i64 = documents::table
-                    .filter(documents::id.eq(id))
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(count > 0)
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                use diesel::dsl::count_star;
-                let count: i64 = documents::table
-                    .filter(documents::id.eq(id))
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(count > 0)
-            }
-        }
+        use diesel::dsl::count_star;
+        with_diesel_conn!(self.pool, conn, {
+            let count: i64 = documents::table
+                .filter(documents::id.eq(id))
+                .select(count_star())
+                .first(&mut conn)
+                .await?;
+            Ok(count > 0)
+        })
     }
 
     /// Save a document.
@@ -720,9 +459,8 @@ impl DieselDocumentRepository {
         let updated_at = doc.updated_at.to_rfc3339();
         let status = doc.status.as_str().to_string();
 
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
+        with_diesel_conn_split!(self.pool,
+            sqlite: conn => {
                 diesel::replace_into(documents::table)
                     .values((
                         documents::id.eq(&doc.id),
@@ -736,12 +474,10 @@ impl DieselDocumentRepository {
                     ))
                     .execute(&mut conn)
                     .await?;
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
+                Ok(())
+            },
+            postgres: conn => {
                 use diesel::upsert::excluded;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
                 diesel::insert_into(documents::table)
                     .values((
                         documents::id.eq(&doc.id),
@@ -765,72 +501,40 @@ impl DieselDocumentRepository {
                     ))
                     .execute(&mut conn)
                     .await?;
+                Ok(())
             }
-        }
-        Ok(())
+        )
     }
 
     /// Delete a document.
     #[allow(dead_code)]
     pub async fn delete(&self, id: &str) -> Result<bool, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                conn.transaction(|conn| {
-                    Box::pin(async move {
-                        diesel::delete(
-                            document_versions::table.filter(document_versions::document_id.eq(id)),
-                        )
+        with_diesel_conn!(self.pool, conn, {
+            conn.transaction(|conn| {
+                Box::pin(async move {
+                    diesel::delete(
+                        document_versions::table.filter(document_versions::document_id.eq(id)),
+                    )
+                    .execute(conn)
+                    .await?;
+                    diesel::delete(
+                        document_pages::table.filter(document_pages::document_id.eq(id)),
+                    )
+                    .execute(conn)
+                    .await?;
+                    diesel::delete(
+                        virtual_files::table.filter(virtual_files::document_id.eq(id)),
+                    )
+                    .execute(conn)
+                    .await?;
+                    let rows = diesel::delete(documents::table.find(id))
                         .execute(conn)
                         .await?;
-                        diesel::delete(
-                            document_pages::table.filter(document_pages::document_id.eq(id)),
-                        )
-                        .execute(conn)
-                        .await?;
-                        diesel::delete(
-                            virtual_files::table.filter(virtual_files::document_id.eq(id)),
-                        )
-                        .execute(conn)
-                        .await?;
-                        let rows = diesel::delete(documents::table.find(id))
-                            .execute(conn)
-                            .await?;
-                        Ok(rows > 0)
-                    })
+                    Ok(rows > 0)
                 })
-                .await
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                conn.transaction(|conn| {
-                    Box::pin(async move {
-                        diesel::delete(
-                            document_versions::table.filter(document_versions::document_id.eq(id)),
-                        )
-                        .execute(conn)
-                        .await?;
-                        diesel::delete(
-                            document_pages::table.filter(document_pages::document_id.eq(id)),
-                        )
-                        .execute(conn)
-                        .await?;
-                        diesel::delete(
-                            virtual_files::table.filter(virtual_files::document_id.eq(id)),
-                        )
-                        .execute(conn)
-                        .await?;
-                        let rows = diesel::delete(documents::table.find(id))
-                            .execute(conn)
-                            .await?;
-                        Ok(rows > 0)
-                    })
-                })
-                .await
-            }
-        }
+            })
+            .await
+        })
     }
 
     /// Update document status.
@@ -838,31 +542,16 @@ impl DieselDocumentRepository {
         let status_str = status.as_str().to_string();
         let updated_at = Utc::now().to_rfc3339();
 
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                diesel::update(documents::table.find(id))
-                    .set((
-                        documents::status.eq(&status_str),
-                        documents::updated_at.eq(&updated_at),
-                    ))
-                    .execute(&mut conn)
-                    .await?;
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                diesel::update(documents::table.find(id))
-                    .set((
-                        documents::status.eq(&status_str),
-                        documents::updated_at.eq(&updated_at),
-                    ))
-                    .execute(&mut conn)
-                    .await?;
-            }
-        }
-        Ok(())
+        with_diesel_conn!(self.pool, conn, {
+            diesel::update(documents::table.find(id))
+                .set((
+                    documents::status.eq(&status_str),
+                    documents::updated_at.eq(&updated_at),
+                ))
+                .execute(&mut conn)
+                .await?;
+            Ok(())
+        })
     }
 
     // ========================================================================
@@ -871,38 +560,19 @@ impl DieselDocumentRepository {
 
     /// Load versions for a document.
     async fn load_versions(&self, document_id: &str) -> Result<Vec<DocumentVersion>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                document_versions::table
-                    .filter(document_versions::document_id.eq(document_id))
-                    .order(document_versions::id.desc())
-                    .load::<DocumentVersionRecord>(&mut conn)
-                    .await
-                    .map(|records| {
-                        records
-                            .into_iter()
-                            .map(Self::version_record_to_model)
-                            .collect()
-                    })
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                document_versions::table
-                    .filter(document_versions::document_id.eq(document_id))
-                    .order(document_versions::id.desc())
-                    .load::<DocumentVersionRecord>(&mut conn)
-                    .await
-                    .map(|records| {
-                        records
-                            .into_iter()
-                            .map(Self::version_record_to_model)
-                            .collect()
-                    })
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            document_versions::table
+                .filter(document_versions::document_id.eq(document_id))
+                .order(document_versions::id.desc())
+                .load::<DocumentVersionRecord>(&mut conn)
+                .await
+                .map(|records| {
+                    records
+                        .into_iter()
+                        .map(Self::version_record_to_model)
+                        .collect()
+                })
+        })
     }
 
     /// Add a new version.
@@ -916,9 +586,8 @@ impl DieselDocumentRepository {
         let acquired_at = version.acquired_at.to_rfc3339();
         let file_size = version.file_size as i32;
 
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
+        with_diesel_conn_split!(self.pool,
+            sqlite: conn => {
                 diesel::insert_into(document_versions::table)
                     .values((
                         document_versions::document_id.eq(document_id),
@@ -942,11 +611,8 @@ impl DieselDocumentRepository {
                     .get_result::<LastInsertRowId>(&mut conn)
                     .await
                     .map(|r| r.id)
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
+            },
+            postgres: conn => {
                 let result: i32 = diesel::insert_into(document_versions::table)
                     .values((
                         document_versions::document_id.eq(document_id),
@@ -969,7 +635,7 @@ impl DieselDocumentRepository {
                     .await?;
                 Ok(result as i64)
             }
-        }
+        )
     }
 
     /// Get latest version.
@@ -978,30 +644,15 @@ impl DieselDocumentRepository {
         &self,
         document_id: &str,
     ) -> Result<Option<DocumentVersion>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                document_versions::table
-                    .filter(document_versions::document_id.eq(document_id))
-                    .order(document_versions::id.desc())
-                    .first::<DocumentVersionRecord>(&mut conn)
-                    .await
-                    .optional()
-                    .map(|opt| opt.map(Self::version_record_to_model))
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                document_versions::table
-                    .filter(document_versions::document_id.eq(document_id))
-                    .order(document_versions::id.desc())
-                    .first::<DocumentVersionRecord>(&mut conn)
-                    .await
-                    .optional()
-                    .map(|opt| opt.map(Self::version_record_to_model))
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            document_versions::table
+                .filter(document_versions::document_id.eq(document_id))
+                .order(document_versions::id.desc())
+                .first::<DocumentVersionRecord>(&mut conn)
+                .await
+                .optional()
+                .map(|opt| opt.map(Self::version_record_to_model))
+        })
     }
 
     // ========================================================================
@@ -1010,30 +661,15 @@ impl DieselDocumentRepository {
 
     /// Count documents by source.
     pub async fn count_by_source(&self, source_id: &str) -> Result<u64, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                use diesel::dsl::count_star;
-                let count: i64 = documents::table
-                    .filter(documents::source_id.eq(source_id))
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(count as u64)
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                use diesel::dsl::count_star;
-                let count: i64 = documents::table
-                    .filter(documents::source_id.eq(source_id))
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(count as u64)
-            }
-        }
+        use diesel::dsl::count_star;
+        with_diesel_conn!(self.pool, conn, {
+            let count: i64 = documents::table
+                .filter(documents::source_id.eq(source_id))
+                .select(count_star())
+                .first(&mut conn)
+                .await?;
+            Ok(count as u64)
+        })
     }
 
     /// Count documents by status.
@@ -1050,30 +686,15 @@ impl DieselDocumentRepository {
             "SELECT status, COUNT(*) as count FROM documents GROUP BY status".to_string()
         };
 
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let rows: Vec<StatusCount> =
-                    diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
-                let mut counts = std::collections::HashMap::new();
-                for StatusCount { status, count } in rows {
-                    counts.insert(status, count as u64);
-                }
-                Ok(counts)
+        with_diesel_conn!(self.pool, conn, {
+            let rows: Vec<StatusCount> =
+                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
+            let mut counts = std::collections::HashMap::new();
+            for StatusCount { status, count } in rows {
+                counts.insert(status, count as u64);
             }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let rows: Vec<StatusCount> =
-                    diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
-                let mut counts = std::collections::HashMap::new();
-                for StatusCount { status, count } in rows {
-                    counts.insert(status, count as u64);
-                }
-                Ok(counts)
-            }
-        }
+            Ok(counts)
+        })
     }
 
     /// Get document summaries.
@@ -1086,92 +707,46 @@ impl DieselDocumentRepository {
         let limit = limit as i64;
         let offset = offset as i64;
 
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let records: Vec<DocumentRecord> = documents::table
-                    .filter(documents::source_id.eq(source_id))
-                    .order(documents::updated_at.desc())
-                    .limit(limit)
-                    .offset(offset)
-                    .load(&mut conn)
+        with_diesel_conn!(self.pool, conn, {
+            let records: Vec<DocumentRecord> = documents::table
+                .filter(documents::source_id.eq(source_id))
+                .order(documents::updated_at.desc())
+                .limit(limit)
+                .offset(offset)
+                .load(&mut conn)
+                .await?;
+
+            let mut summaries = Vec::with_capacity(records.len());
+            for record in records {
+                let version_count: i64 = document_versions::table
+                    .filter(document_versions::document_id.eq(&record.id))
+                    .count()
+                    .get_result(&mut conn)
                     .await?;
 
-                let mut summaries = Vec::with_capacity(records.len());
-                for record in records {
-                    let version_count: i64 = document_versions::table
-                        .filter(document_versions::document_id.eq(&record.id))
-                        .count()
-                        .get_result(&mut conn)
-                        .await?;
+                let latest_size: Option<i32> = document_versions::table
+                    .filter(document_versions::document_id.eq(&record.id))
+                    .order(document_versions::id.desc())
+                    .select(document_versions::file_size)
+                    .first(&mut conn)
+                    .await
+                    .optional()?;
 
-                    let latest_size: Option<i32> = document_versions::table
-                        .filter(document_versions::document_id.eq(&record.id))
-                        .order(document_versions::id.desc())
-                        .select(document_versions::file_size)
-                        .first(&mut conn)
-                        .await
-                        .optional()?;
-
-                    summaries.push(DieselDocumentSummary {
-                        id: record.id,
-                        source_id: record.source_id,
-                        url: record.source_url,
-                        title: Some(record.title),
-                        status: DocumentStatus::from_str(&record.status)
-                            .unwrap_or(DocumentStatus::Pending),
-                        created_at: parse_datetime(&record.created_at),
-                        updated_at: parse_datetime(&record.updated_at),
-                        version_count: version_count as u32,
-                        latest_file_size: latest_size.map(|s| s as u64),
-                    });
-                }
-                Ok(summaries)
+                summaries.push(DieselDocumentSummary {
+                    id: record.id,
+                    source_id: record.source_id,
+                    url: record.source_url,
+                    title: Some(record.title),
+                    status: DocumentStatus::from_str(&record.status)
+                        .unwrap_or(DocumentStatus::Pending),
+                    created_at: parse_datetime(&record.created_at),
+                    updated_at: parse_datetime(&record.updated_at),
+                    version_count: version_count as u32,
+                    latest_file_size: latest_size.map(|s| s as u64),
+                });
             }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let records: Vec<DocumentRecord> = documents::table
-                    .filter(documents::source_id.eq(source_id))
-                    .order(documents::updated_at.desc())
-                    .limit(limit)
-                    .offset(offset)
-                    .load(&mut conn)
-                    .await?;
-
-                let mut summaries = Vec::with_capacity(records.len());
-                for record in records {
-                    let version_count: i64 = document_versions::table
-                        .filter(document_versions::document_id.eq(&record.id))
-                        .count()
-                        .get_result(&mut conn)
-                        .await?;
-
-                    let latest_size: Option<i32> = document_versions::table
-                        .filter(document_versions::document_id.eq(&record.id))
-                        .order(document_versions::id.desc())
-                        .select(document_versions::file_size)
-                        .first(&mut conn)
-                        .await
-                        .optional()?;
-
-                    summaries.push(DieselDocumentSummary {
-                        id: record.id,
-                        source_id: record.source_id,
-                        url: record.source_url,
-                        title: Some(record.title),
-                        status: DocumentStatus::from_str(&record.status)
-                            .unwrap_or(DocumentStatus::Pending),
-                        created_at: parse_datetime(&record.created_at),
-                        updated_at: parse_datetime(&record.updated_at),
-                        version_count: version_count as u32,
-                        latest_file_size: latest_size.map(|s| s as u64),
-                    });
-                }
-                Ok(summaries)
-            }
-        }
+            Ok(summaries)
+        })
     }
 
     /// Get virtual files.
@@ -1180,38 +755,19 @@ impl DieselDocumentRepository {
         document_id: &str,
         version: i32,
     ) -> Result<Vec<VirtualFile>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                virtual_files::table
-                    .filter(virtual_files::document_id.eq(document_id))
-                    .filter(virtual_files::version_id.eq(version))
-                    .load::<VirtualFileRecord>(&mut conn)
-                    .await
-                    .map(|records| {
-                        records
-                            .into_iter()
-                            .map(Self::virtual_file_record_to_model)
-                            .collect()
-                    })
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                virtual_files::table
-                    .filter(virtual_files::document_id.eq(document_id))
-                    .filter(virtual_files::version_id.eq(version))
-                    .load::<VirtualFileRecord>(&mut conn)
-                    .await
-                    .map(|records| {
-                        records
-                            .into_iter()
-                            .map(Self::virtual_file_record_to_model)
-                            .collect()
-                    })
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            virtual_files::table
+                .filter(virtual_files::document_id.eq(document_id))
+                .filter(virtual_files::version_id.eq(version))
+                .load::<VirtualFileRecord>(&mut conn)
+                .await
+                .map(|records| {
+                    records
+                        .into_iter()
+                        .map(Self::virtual_file_record_to_model)
+                        .collect()
+                })
+        })
     }
 
     // ========================================================================
@@ -1220,24 +776,12 @@ impl DieselDocumentRepository {
 
     /// Get all documents.
     pub async fn get_all(&self) -> Result<Vec<Document>, DieselError> {
-        let records: Vec<DocumentRecord> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                documents::table
-                    .order(documents::created_at.desc())
-                    .load(&mut conn)
-                    .await?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                documents::table
-                    .order(documents::created_at.desc())
-                    .load(&mut conn)
-                    .await?
-            }
-        };
+        let records: Vec<DocumentRecord> = with_diesel_conn!(self.pool, conn, {
+            documents::table
+                .order(documents::created_at.desc())
+                .load(&mut conn)
+                .await
+        })?;
 
         let mut docs = Vec::with_capacity(records.len());
         for record in records {
@@ -1249,26 +793,13 @@ impl DieselDocumentRepository {
 
     /// Get all document URLs as a HashSet.
     pub async fn get_all_urls_set(&self) -> Result<std::collections::HashSet<String>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let urls: Vec<String> = documents::table
-                    .select(documents::source_url)
-                    .load(&mut conn)
-                    .await?;
-                Ok(urls.into_iter().collect())
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let urls: Vec<String> = documents::table
-                    .select(documents::source_url)
-                    .load(&mut conn)
-                    .await?;
-                Ok(urls.into_iter().collect())
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            let urls: Vec<String> = documents::table
+                .select(documents::source_url)
+                .load(&mut conn)
+                .await?;
+            Ok(urls.into_iter().collect())
+        })
     }
 
     /// Get documents by tag.
@@ -1278,9 +809,8 @@ impl DieselDocumentRepository {
         tag: &str,
         source_id: Option<&str>,
     ) -> Result<Vec<Document>, DieselError> {
-        let ids: Vec<DocIdRow> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
+        let ids: Vec<DocIdRow> = with_diesel_conn_split!(self.pool,
+            sqlite: conn => {
                 let query = if let Some(sid) = source_id {
                     format!(
                         r#"SELECT id FROM documents
@@ -1307,11 +837,8 @@ impl DieselDocumentRepository {
                 diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
                     .await
                     .unwrap_or_default()
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
+            },
+            postgres: conn => {
                 let query = if let Some(sid) = source_id {
                     format!(
                         r#"SELECT id FROM documents
@@ -1333,7 +860,7 @@ impl DieselDocumentRepository {
                     .await
                     .unwrap_or_default()
             }
-        };
+        );
 
         let mut docs = Vec::with_capacity(ids.len());
         for row in ids {
@@ -1378,22 +905,11 @@ impl DieselDocumentRepository {
             limit
         );
 
-        let ids: Vec<DocIdRow> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
-                    .await
-                    .unwrap_or_default()
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
-                    .await
-                    .unwrap_or_default()
-            }
-        };
+        let ids: Vec<DocIdRow> = with_diesel_conn!(self.pool, conn, {
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                .await
+                .unwrap_or_default()
+        });
 
         let mut docs = Vec::with_capacity(ids.len());
         for row in ids {
@@ -1414,9 +930,8 @@ impl DieselDocumentRepository {
             .map(|s| format!("AND source_id = '{}'", s.replace('\'', "''")))
             .unwrap_or_default();
 
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
+        with_diesel_conn_split!(self.pool,
+            sqlite: conn => {
                 let query = format!(
                     r#"SELECT COUNT(*) as count FROM documents
                        WHERE json_extract(metadata, '$.estimated_date') IS NULL
@@ -1429,11 +944,8 @@ impl DieselDocumentRepository {
                         .unwrap_or_default();
                 #[allow(clippy::get_first)]
                 Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
+            },
+            postgres: conn => {
                 let query = format!(
                     r#"SELECT COUNT(*) as count FROM documents
                        WHERE metadata->>'estimated_date' IS NULL
@@ -1447,7 +959,7 @@ impl DieselDocumentRepository {
                 #[allow(clippy::get_first)]
                 Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
             }
-        }
+        )
     }
 
     /// Get documents needing date estimation.
@@ -1460,9 +972,8 @@ impl DieselDocumentRepository {
             .map(|s| format!("AND source_id = '{}'", s.replace('\'', "''")))
             .unwrap_or_default();
 
-        let ids: Vec<DocIdRow> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
+        let ids: Vec<DocIdRow> = with_diesel_conn_split!(self.pool,
+            sqlite: conn => {
                 let query = format!(
                     r#"SELECT id FROM documents
                        WHERE json_extract(metadata, '$.estimated_date') IS NULL
@@ -1473,11 +984,8 @@ impl DieselDocumentRepository {
                 diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
                     .await
                     .unwrap_or_default()
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
+            },
+            postgres: conn => {
                 let query = format!(
                     r#"SELECT id FROM documents
                        WHERE metadata->>'estimated_date' IS NULL
@@ -1489,7 +997,7 @@ impl DieselDocumentRepository {
                     .await
                     .unwrap_or_default()
             }
-        };
+        );
 
         let mut docs = Vec::with_capacity(ids.len());
         for row in ids {
@@ -1508,26 +1016,13 @@ impl DieselDocumentRepository {
         confidence: &str,
         source: &str,
     ) -> Result<(), DieselError> {
-        let record: Option<DocumentRecord> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                documents::table
-                    .find(id)
-                    .first(&mut conn)
-                    .await
-                    .optional()?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                documents::table
-                    .find(id)
-                    .first(&mut conn)
-                    .await
-                    .optional()?
-            }
-        };
+        let record: Option<DocumentRecord> = with_diesel_conn!(self.pool, conn, {
+            documents::table
+                .find(id)
+                .first(&mut conn)
+                .await
+                .optional()
+        })?;
 
         if let Some(record) = record {
             let mut metadata: serde_json::Value =
@@ -1540,30 +1035,16 @@ impl DieselDocumentRepository {
             });
 
             let now = Utc::now().to_rfc3339();
-            match &self.pool {
-                DbPool::Sqlite(pool) => {
-                    let mut conn = pool.get().await?;
-                    diesel::update(documents::table.find(id))
-                        .set((
-                            documents::metadata.eq(metadata.to_string()),
-                            documents::updated_at.eq(&now),
-                        ))
-                        .execute(&mut conn)
-                        .await?;
-                }
-                #[cfg(feature = "postgres")]
-                DbPool::Postgres(pool) => {
-                    use super::util::to_diesel_error;
-                    let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                    diesel::update(documents::table.find(id))
-                        .set((
-                            documents::metadata.eq(metadata.to_string()),
-                            documents::updated_at.eq(&now),
-                        ))
-                        .execute(&mut conn)
-                        .await?;
-                }
-            }
+            with_diesel_conn!(self.pool, conn, {
+                diesel::update(documents::table.find(id))
+                    .set((
+                        documents::metadata.eq(metadata.to_string()),
+                        documents::updated_at.eq(&now),
+                    ))
+                    .execute(&mut conn)
+                    .await?;
+                Ok::<(), DieselError>(())
+            })?;
         }
 
         Ok(())
@@ -1578,26 +1059,13 @@ impl DieselDocumentRepository {
         data: Option<&str>,
         error: Option<&str>,
     ) -> Result<(), DieselError> {
-        let record: Option<DocumentRecord> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                documents::table
-                    .find(id)
-                    .first(&mut conn)
-                    .await
-                    .optional()?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                documents::table
-                    .find(id)
-                    .first(&mut conn)
-                    .await
-                    .optional()?
-            }
-        };
+        let record: Option<DocumentRecord> = with_diesel_conn!(self.pool, conn, {
+            documents::table
+                .find(id)
+                .first(&mut conn)
+                .await
+                .optional()
+        })?;
 
         if let Some(record) = record {
             let mut metadata: serde_json::Value =
@@ -1617,30 +1085,16 @@ impl DieselDocumentRepository {
             });
 
             let now = Utc::now().to_rfc3339();
-            match &self.pool {
-                DbPool::Sqlite(pool) => {
-                    let mut conn = pool.get().await?;
-                    diesel::update(documents::table.find(id))
-                        .set((
-                            documents::metadata.eq(metadata.to_string()),
-                            documents::updated_at.eq(&now),
-                        ))
-                        .execute(&mut conn)
-                        .await?;
-                }
-                #[cfg(feature = "postgres")]
-                DbPool::Postgres(pool) => {
-                    use super::util::to_diesel_error;
-                    let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                    diesel::update(documents::table.find(id))
-                        .set((
-                            documents::metadata.eq(metadata.to_string()),
-                            documents::updated_at.eq(&now),
-                        ))
-                        .execute(&mut conn)
-                        .await?;
-                }
-            }
+            with_diesel_conn!(self.pool, conn, {
+                diesel::update(documents::table.find(id))
+                    .set((
+                        documents::metadata.eq(metadata.to_string()),
+                        documents::updated_at.eq(&now),
+                    ))
+                    .execute(&mut conn)
+                    .await?;
+                Ok::<(), DieselError>(())
+            })?;
         }
 
         Ok(())
@@ -1648,26 +1102,13 @@ impl DieselDocumentRepository {
 
     /// Get URLs by source.
     pub async fn get_urls_by_source(&self, source_id: &str) -> Result<Vec<String>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                documents::table
-                    .filter(documents::source_id.eq(source_id))
-                    .select(documents::source_url)
-                    .load(&mut conn)
-                    .await
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                documents::table
-                    .filter(documents::source_id.eq(source_id))
-                    .select(documents::source_url)
-                    .load(&mut conn)
-                    .await
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            documents::table
+                .filter(documents::source_id.eq(source_id))
+                .select(documents::source_url)
+                .load(&mut conn)
+                .await
+        })
     }
 
     /// Get current version ID.
@@ -1675,85 +1116,43 @@ impl DieselDocumentRepository {
         &self,
         document_id: &str,
     ) -> Result<Option<i64>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let version: Option<i32> = document_versions::table
-                    .filter(document_versions::document_id.eq(document_id))
-                    .order(document_versions::id.desc())
-                    .select(document_versions::id)
-                    .first(&mut conn)
-                    .await
-                    .optional()?;
-                Ok(version.map(|v| v as i64))
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let version: Option<i32> = document_versions::table
-                    .filter(document_versions::document_id.eq(document_id))
-                    .order(document_versions::id.desc())
-                    .select(document_versions::id)
-                    .first(&mut conn)
-                    .await
-                    .optional()?;
-                Ok(version.map(|v| v as i64))
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            let version: Option<i32> = document_versions::table
+                .filter(document_versions::document_id.eq(document_id))
+                .order(document_versions::id.desc())
+                .select(document_versions::id)
+                .first(&mut conn)
+                .await
+                .optional()?;
+            Ok(version.map(|v| v as i64))
+        })
     }
 
     /// Insert virtual file.
     pub async fn insert_virtual_file(&self, vf: &VirtualFile) -> Result<(), DieselError> {
         let now = Utc::now().to_rfc3339();
 
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                diesel::insert_into(virtual_files::table)
-                    .values((
-                        virtual_files::id.eq(&vf.id),
-                        virtual_files::document_id.eq(&vf.document_id),
-                        virtual_files::version_id.eq(vf.version_id as i32),
-                        virtual_files::archive_path.eq(&vf.archive_path),
-                        virtual_files::filename.eq(&vf.filename),
-                        virtual_files::mime_type.eq(&vf.mime_type),
-                        virtual_files::file_size.eq(vf.file_size as i32),
-                        virtual_files::extracted_text.eq(&vf.extracted_text),
-                        virtual_files::synopsis.eq(&vf.synopsis),
-                        virtual_files::tags.eq(serde_json::to_string(&vf.tags).ok().as_deref()),
-                        virtual_files::status.eq(vf.status.as_str()),
-                        virtual_files::created_at.eq(&now),
-                        virtual_files::updated_at.eq(&now),
-                    ))
-                    .execute(&mut conn)
-                    .await?;
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                diesel::insert_into(virtual_files::table)
-                    .values((
-                        virtual_files::id.eq(&vf.id),
-                        virtual_files::document_id.eq(&vf.document_id),
-                        virtual_files::version_id.eq(vf.version_id as i32),
-                        virtual_files::archive_path.eq(&vf.archive_path),
-                        virtual_files::filename.eq(&vf.filename),
-                        virtual_files::mime_type.eq(&vf.mime_type),
-                        virtual_files::file_size.eq(vf.file_size as i32),
-                        virtual_files::extracted_text.eq(&vf.extracted_text),
-                        virtual_files::synopsis.eq(&vf.synopsis),
-                        virtual_files::tags.eq(serde_json::to_string(&vf.tags).ok().as_deref()),
-                        virtual_files::status.eq(vf.status.as_str()),
-                        virtual_files::created_at.eq(&now),
-                        virtual_files::updated_at.eq(&now),
-                    ))
-                    .execute(&mut conn)
-                    .await?;
-            }
-        }
-        Ok(())
+        with_diesel_conn!(self.pool, conn, {
+            diesel::insert_into(virtual_files::table)
+                .values((
+                    virtual_files::id.eq(&vf.id),
+                    virtual_files::document_id.eq(&vf.document_id),
+                    virtual_files::version_id.eq(vf.version_id as i32),
+                    virtual_files::archive_path.eq(&vf.archive_path),
+                    virtual_files::filename.eq(&vf.filename),
+                    virtual_files::mime_type.eq(&vf.mime_type),
+                    virtual_files::file_size.eq(vf.file_size as i32),
+                    virtual_files::extracted_text.eq(&vf.extracted_text),
+                    virtual_files::synopsis.eq(&vf.synopsis),
+                    virtual_files::tags.eq(serde_json::to_string(&vf.tags).ok().as_deref()),
+                    virtual_files::status.eq(vf.status.as_str()),
+                    virtual_files::created_at.eq(&now),
+                    virtual_files::updated_at.eq(&now),
+                ))
+                .execute(&mut conn)
+                .await?;
+            Ok(())
+        })
     }
 
     /// Count unprocessed archives.
@@ -1781,24 +1180,12 @@ impl DieselDocumentRepository {
             source_filter
         );
 
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let result: Vec<CountRow> =
-                    diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
-                #[allow(clippy::get_first)]
-                Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let result: Vec<CountRow> =
-                    diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
-                #[allow(clippy::get_first)]
-                Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            let result: Vec<CountRow> =
+                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
+            #[allow(clippy::get_first)]
+            Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
+        })
     }
 
     /// Count unprocessed emails.
@@ -1820,24 +1207,12 @@ impl DieselDocumentRepository {
             source_filter
         );
 
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let result: Vec<CountRow> =
-                    diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
-                #[allow(clippy::get_first)]
-                Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let result: Vec<CountRow> =
-                    diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
-                #[allow(clippy::get_first)]
-                Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            let result: Vec<CountRow> =
+                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
+            #[allow(clippy::get_first)]
+            Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
+        })
     }
 
     /// Get unprocessed archives.
@@ -1868,18 +1243,9 @@ impl DieselDocumentRepository {
             source_filter, limit
         );
 
-        let ids: Vec<DocIdRow> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?
-            }
-        };
+        let ids: Vec<DocIdRow> = with_diesel_conn!(self.pool, conn, {
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await
+        })?;
 
         let mut docs = Vec::with_capacity(ids.len());
         for row in ids {
@@ -1912,18 +1278,9 @@ impl DieselDocumentRepository {
             source_filter, limit
         );
 
-        let ids: Vec<DocIdRow> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?
-            }
-        };
+        let ids: Vec<DocIdRow> = with_diesel_conn!(self.pool, conn, {
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await
+        })?;
 
         let mut docs = Vec::with_capacity(ids.len());
         for row in ids {
@@ -1945,9 +1302,8 @@ impl DieselDocumentRepository {
     pub async fn save_page(&self, page: &crate::models::DocumentPage) -> Result<i64, DieselError> {
         let now = Utc::now().to_rfc3339();
 
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
+        with_diesel_conn_split!(self.pool,
+            sqlite: conn => {
                 diesel::replace_into(document_pages::table)
                     .values((
                         document_pages::document_id.eq(&page.document_id),
@@ -1966,12 +1322,9 @@ impl DieselDocumentRepository {
                     .get_result(&mut conn)
                     .await?;
                 Ok(result.id)
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
+            },
+            postgres: conn => {
                 use diesel::upsert::excluded;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
                 let result: i32 = diesel::insert_into(document_pages::table)
                     .values((
                         document_pages::document_id.eq(&page.document_id),
@@ -2002,7 +1355,7 @@ impl DieselDocumentRepository {
                     .await?;
                 Ok(result as i64)
             }
-        }
+        )
     }
 
     /// Set version page count.
@@ -2024,38 +1377,19 @@ impl DieselDocumentRepository {
 
     /// Count pages needing OCR across all documents.
     pub async fn count_pages_needing_ocr(&self) -> Result<u64, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                use diesel::dsl::count_star;
-                let count: i64 = document_pages::table
-                    .filter(
-                        document_pages::ocr_status
-                            .eq("pending")
-                            .or(document_pages::ocr_status.eq("text_extracted")),
-                    )
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(count as u64)
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                use diesel::dsl::count_star;
-                let count: i64 = document_pages::table
-                    .filter(
-                        document_pages::ocr_status
-                            .eq("pending")
-                            .or(document_pages::ocr_status.eq("text_extracted")),
-                    )
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(count as u64)
-            }
-        }
+        use diesel::dsl::count_star;
+        with_diesel_conn!(self.pool, conn, {
+            let count: i64 = document_pages::table
+                .filter(
+                    document_pages::ocr_status
+                        .eq("pending")
+                        .or(document_pages::ocr_status.eq("text_extracted")),
+                )
+                .select(count_star())
+                .first(&mut conn)
+                .await?;
+            Ok(count as u64)
+        })
     }
 
     /// Get all content hashes for duplicate detection.
@@ -2075,30 +1409,15 @@ impl DieselDocumentRepository {
             title: Option<String>,
         }
 
-        let results: Vec<HashRow> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                diesel::sql_query(
-                    r#"SELECT dv.document_id, d.source_id, dv.content_hash, d.title
-                       FROM document_versions dv
-                       JOIN documents d ON dv.document_id = d.id
-                       WHERE dv.content_hash IS NOT NULL
-                       AND dv.id = (SELECT MAX(id) FROM document_versions WHERE document_id = dv.document_id)"#
-                ).load(&mut conn).await?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                diesel::sql_query(
-                    r#"SELECT dv.document_id, d.source_id, dv.content_hash, d.title
-                       FROM document_versions dv
-                       JOIN documents d ON dv.document_id = d.id
-                       WHERE dv.content_hash IS NOT NULL
-                       AND dv.id = (SELECT MAX(id) FROM document_versions WHERE document_id = dv.document_id)"#
-                ).load(&mut conn).await?
-            }
-        };
+        let results: Vec<HashRow> = with_diesel_conn!(self.pool, conn, {
+            diesel::sql_query(
+                r#"SELECT dv.document_id, d.source_id, dv.content_hash, d.title
+                   FROM document_versions dv
+                   JOIN documents d ON dv.document_id = d.id
+                   WHERE dv.content_hash IS NOT NULL
+                   AND dv.id = (SELECT MAX(id) FROM document_versions WHERE document_id = dv.document_id)"#
+            ).load(&mut conn).await
+        })?;
 
         Ok(results
             .into_iter()
@@ -2150,18 +1469,9 @@ impl DieselDocumentRepository {
             )
         };
 
-        let results: Vec<SourceRow> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?
-            }
-        };
+        let results: Vec<SourceRow> = with_diesel_conn!(self.pool, conn, {
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await
+        })?;
 
         Ok(results
             .into_iter()
@@ -2181,116 +1491,57 @@ impl DieselDocumentRepository {
         blake3_hash: &str,
         file_size: i64,
     ) -> Result<Option<String>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                document_versions::table
-                    .filter(document_versions::content_hash.eq(sha256_hash))
-                    .filter(document_versions::content_hash_blake3.eq(blake3_hash))
-                    .filter(document_versions::file_size.eq(file_size as i32))
-                    .select(document_versions::file_path)
-                    .first::<String>(&mut conn)
-                    .await
-                    .optional()
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                document_versions::table
-                    .filter(document_versions::content_hash.eq(sha256_hash))
-                    .filter(document_versions::content_hash_blake3.eq(blake3_hash))
-                    .filter(document_versions::file_size.eq(file_size as i32))
-                    .select(document_versions::file_path)
-                    .first::<String>(&mut conn)
-                    .await
-                    .optional()
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            document_versions::table
+                .filter(document_versions::content_hash.eq(sha256_hash))
+                .filter(document_versions::content_hash_blake3.eq(blake3_hash))
+                .filter(document_versions::file_size.eq(file_size as i32))
+                .select(document_versions::file_path)
+                .first::<String>(&mut conn)
+                .await
+                .optional()
+        })
     }
 
     /// Get all document summaries.
     pub async fn get_all_summaries(&self) -> Result<Vec<DieselDocumentSummary>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let records: Vec<DocumentRecord> = documents::table
-                    .order(documents::updated_at.desc())
-                    .load(&mut conn)
+        with_diesel_conn!(self.pool, conn, {
+            let records: Vec<DocumentRecord> = documents::table
+                .order(documents::updated_at.desc())
+                .load(&mut conn)
+                .await?;
+
+            let mut summaries = Vec::with_capacity(records.len());
+            for record in records {
+                let version_count: i64 = document_versions::table
+                    .filter(document_versions::document_id.eq(&record.id))
+                    .count()
+                    .get_result(&mut conn)
                     .await?;
 
-                let mut summaries = Vec::with_capacity(records.len());
-                for record in records {
-                    let version_count: i64 = document_versions::table
-                        .filter(document_versions::document_id.eq(&record.id))
-                        .count()
-                        .get_result(&mut conn)
-                        .await?;
+                let latest_size: Option<i32> = document_versions::table
+                    .filter(document_versions::document_id.eq(&record.id))
+                    .order(document_versions::id.desc())
+                    .select(document_versions::file_size)
+                    .first(&mut conn)
+                    .await
+                    .optional()?;
 
-                    let latest_size: Option<i32> = document_versions::table
-                        .filter(document_versions::document_id.eq(&record.id))
-                        .order(document_versions::id.desc())
-                        .select(document_versions::file_size)
-                        .first(&mut conn)
-                        .await
-                        .optional()?;
-
-                    summaries.push(DieselDocumentSummary {
-                        id: record.id,
-                        source_id: record.source_id,
-                        url: record.source_url,
-                        title: Some(record.title),
-                        status: DocumentStatus::from_str(&record.status)
-                            .unwrap_or(DocumentStatus::Pending),
-                        created_at: parse_datetime(&record.created_at),
-                        updated_at: parse_datetime(&record.updated_at),
-                        version_count: version_count as u32,
-                        latest_file_size: latest_size.map(|s| s as u64),
-                    });
-                }
-                Ok(summaries)
+                summaries.push(DieselDocumentSummary {
+                    id: record.id,
+                    source_id: record.source_id,
+                    url: record.source_url,
+                    title: Some(record.title),
+                    status: DocumentStatus::from_str(&record.status)
+                        .unwrap_or(DocumentStatus::Pending),
+                    created_at: parse_datetime(&record.created_at),
+                    updated_at: parse_datetime(&record.updated_at),
+                    version_count: version_count as u32,
+                    latest_file_size: latest_size.map(|s| s as u64),
+                });
             }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let records: Vec<DocumentRecord> = documents::table
-                    .order(documents::updated_at.desc())
-                    .load(&mut conn)
-                    .await?;
-
-                let mut summaries = Vec::with_capacity(records.len());
-                for record in records {
-                    let version_count: i64 = document_versions::table
-                        .filter(document_versions::document_id.eq(&record.id))
-                        .count()
-                        .get_result(&mut conn)
-                        .await?;
-
-                    let latest_size: Option<i32> = document_versions::table
-                        .filter(document_versions::document_id.eq(&record.id))
-                        .order(document_versions::id.desc())
-                        .select(document_versions::file_size)
-                        .first(&mut conn)
-                        .await
-                        .optional()?;
-
-                    summaries.push(DieselDocumentSummary {
-                        id: record.id,
-                        source_id: record.source_id,
-                        url: record.source_url,
-                        title: Some(record.title),
-                        status: DocumentStatus::from_str(&record.status)
-                            .unwrap_or(DocumentStatus::Pending),
-                        created_at: parse_datetime(&record.created_at),
-                        updated_at: parse_datetime(&record.updated_at),
-                        version_count: version_count as u32,
-                        latest_file_size: latest_size.map(|s| s as u64),
-                    });
-                }
-                Ok(summaries)
-            }
-        }
+            Ok(summaries)
+        })
     }
 
     /// Get summaries for a specific source.
@@ -2310,28 +1561,14 @@ impl DieselDocumentRepository {
         use super::diesel_models::DocumentPageRecord;
         use crate::models::PageOcrStatus;
 
-        let records: Vec<DocumentPageRecord> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                document_pages::table
-                    .filter(document_pages::document_id.eq(document_id))
-                    .filter(document_pages::version_id.eq(version))
-                    .order(document_pages::page_number.asc())
-                    .load(&mut conn)
-                    .await?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                document_pages::table
-                    .filter(document_pages::document_id.eq(document_id))
-                    .filter(document_pages::version_id.eq(version))
-                    .order(document_pages::page_number.asc())
-                    .load(&mut conn)
-                    .await?
-            }
-        };
+        let records: Vec<DocumentPageRecord> = with_diesel_conn!(self.pool, conn, {
+            document_pages::table
+                .filter(document_pages::document_id.eq(document_id))
+                .filter(document_pages::version_id.eq(version))
+                .order(document_pages::page_number.asc())
+                .load(&mut conn)
+                .await
+        })?;
 
         Ok(records
             .into_iter()
@@ -2384,31 +1621,16 @@ impl DieselDocumentRepository {
             "ocr_complete"
         };
 
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                diesel::update(document_pages::table.find(page_id as i32))
-                    .set((
-                        document_pages::ocr_text.eq(text),
-                        document_pages::ocr_status.eq(status),
-                    ))
-                    .execute(&mut conn)
-                    .await?;
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                diesel::update(document_pages::table.find(page_id as i32))
-                    .set((
-                        document_pages::ocr_text.eq(text),
-                        document_pages::ocr_status.eq(status),
-                    ))
-                    .execute(&mut conn)
-                    .await?;
-            }
-        }
-        Ok(())
+        with_diesel_conn!(self.pool, conn, {
+            diesel::update(document_pages::table.find(page_id as i32))
+                .set((
+                    document_pages::ocr_text.eq(text),
+                    document_pages::ocr_status.eq(status),
+                ))
+                .execute(&mut conn)
+                .await?;
+            Ok(())
+        })
     }
 
     /// Get documents needing summarization.
@@ -2416,28 +1638,14 @@ impl DieselDocumentRepository {
         &self,
         limit: usize,
     ) -> Result<Vec<Document>, DieselError> {
-        let records: Vec<DocumentRecord> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                documents::table
-                    .filter(documents::status.eq("ocr_complete"))
-                    .order(documents::updated_at.asc())
-                    .limit(limit as i64)
-                    .load(&mut conn)
-                    .await?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                documents::table
-                    .filter(documents::status.eq("ocr_complete"))
-                    .order(documents::updated_at.asc())
-                    .limit(limit as i64)
-                    .load(&mut conn)
-                    .await?
-            }
-        };
+        let records: Vec<DocumentRecord> = with_diesel_conn!(self.pool, conn, {
+            documents::table
+                .filter(documents::status.eq("ocr_complete"))
+                .order(documents::updated_at.asc())
+                .limit(limit as i64)
+                .load(&mut conn)
+                .await
+        })?;
 
         let mut docs = Vec::with_capacity(records.len());
         for record in records {
@@ -2453,30 +1661,15 @@ impl DieselDocumentRepository {
         document_id: &str,
         version: i32,
     ) -> Result<Option<String>, DieselError> {
-        let texts: Vec<Option<String>> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                document_pages::table
-                    .filter(document_pages::document_id.eq(document_id))
-                    .filter(document_pages::version_id.eq(version))
-                    .order(document_pages::page_number.asc())
-                    .select(document_pages::ocr_text)
-                    .load(&mut conn)
-                    .await?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                document_pages::table
-                    .filter(document_pages::document_id.eq(document_id))
-                    .filter(document_pages::version_id.eq(version))
-                    .order(document_pages::page_number.asc())
-                    .select(document_pages::ocr_text)
-                    .load(&mut conn)
-                    .await?
-            }
-        };
+        let texts: Vec<Option<String>> = with_diesel_conn!(self.pool, conn, {
+            document_pages::table
+                .filter(document_pages::document_id.eq(document_id))
+                .filter(document_pages::version_id.eq(version))
+                .order(document_pages::page_number.asc())
+                .select(document_pages::ocr_text)
+                .load(&mut conn)
+                .await
+        })?;
 
         let combined: String = texts.into_iter().flatten().collect::<Vec<_>>().join("\n\n");
 
@@ -2489,26 +1682,13 @@ impl DieselDocumentRepository {
 
     /// Finalize pending documents - mark documents with all pages complete as indexed.
     pub async fn finalize_pending_documents(&self) -> Result<u64, DieselError> {
-        let doc_ids: Vec<String> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                documents::table
-                    .filter(documents::status.eq("ocr_complete"))
-                    .select(documents::id)
-                    .load(&mut conn)
-                    .await?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                documents::table
-                    .filter(documents::status.eq("ocr_complete"))
-                    .select(documents::id)
-                    .load(&mut conn)
-                    .await?
-            }
-        };
+        let doc_ids: Vec<String> = with_diesel_conn!(self.pool, conn, {
+            documents::table
+                .filter(documents::status.eq("ocr_complete"))
+                .select(documents::id)
+                .load(&mut conn)
+                .await
+        })?;
 
         let mut count = 0u64;
         for doc_id in doc_ids {
@@ -2521,28 +1701,14 @@ impl DieselDocumentRepository {
 
     /// Get documents needing OCR.
     pub async fn get_needing_ocr(&self, limit: usize) -> Result<Vec<Document>, DieselError> {
-        let records: Vec<DocumentRecord> = match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                documents::table
-                    .filter(documents::status.eq_any(vec!["pending", "downloaded"]))
-                    .order(documents::updated_at.asc())
-                    .limit(limit as i64)
-                    .load(&mut conn)
-                    .await?
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                documents::table
-                    .filter(documents::status.eq_any(vec!["pending", "downloaded"]))
-                    .order(documents::updated_at.asc())
-                    .limit(limit as i64)
-                    .load(&mut conn)
-                    .await?
-            }
-        };
+        let records: Vec<DocumentRecord> = with_diesel_conn!(self.pool, conn, {
+            documents::table
+                .filter(documents::status.eq_any(vec!["pending", "downloaded"]))
+                .order(documents::updated_at.asc())
+                .limit(limit as i64)
+                .load(&mut conn)
+                .await
+        })?;
 
         let mut docs = Vec::with_capacity(records.len());
         for record in records {
