@@ -46,9 +46,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - features: browser
+          - features: browser,postgres
             artifact: foiacquire-browser-amd64
-          - features: browser,redis-backend
+          - features: browser,postgres,redis-backend
             artifact: foiacquire-redis-amd64
     steps:
       - uses: actions/checkout@v4
@@ -58,8 +58,8 @@ jobs:
         with:
           targets: x86_64-unknown-linux-musl
 
-      - name: Install musl tools
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y musl-tools cmake perl
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -82,11 +82,9 @@ jobs:
     strategy:
       matrix:
         include:
-          # Note: postgres feature excluded for arm64 due to cross-compilation complexity
-          # with libpq. arm64 users needing postgres can build from source.
-          - features: browser
+          - features: browser,postgres
             artifact: foiacquire-browser-arm64
-          - features: browser,redis-backend
+          - features: browser,postgres,redis-backend
             artifact: foiacquire-redis-arm64
     steps:
       - uses: actions/checkout@v4

@@ -22,8 +22,9 @@ WORKDIR /opt/foiacquire
 VOLUME /opt/foiacquire
 
 # Copy pre-built binary for the target architecture
-COPY --chmod=755 dist/${TARGETARCH}/foiacquire /usr/local/bin/foiacquire
-COPY --chmod=755 bin/foiacquire-entrypoint.sh /entrypoint.sh
+COPY dist/${TARGETARCH}/foiacquire /usr/local/bin/foiacquire
+COPY bin/foiacquire-entrypoint.sh /entrypoint.sh
+RUN chmod 755 /usr/local/bin/foiacquire /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["--help"]
