@@ -5,7 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::browser::{BrowserEngineConfig, BrowserEngineType};
+use super::browser::{
+    default_headless, default_timeout, BrowserEngineConfig, BrowserEngineType,
+};
 
 /// Scraper configuration from JSON.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -67,7 +69,7 @@ pub struct BrowserConfig {
 
     /// Run in headless mode (default: true).
     /// Set to false for debugging or if headless detection is an issue.
-    #[serde(default = "default_browser_headless")]
+    #[serde(default = "default_headless")]
     pub headless: bool,
 
     /// Proxy server URL (e.g., "socks5://127.0.0.1:1080").
@@ -79,7 +81,7 @@ pub struct BrowserConfig {
     pub cookies_file: Option<String>,
 
     /// Page load timeout in seconds.
-    #[serde(default = "default_browser_timeout")]
+    #[serde(default = "default_timeout")]
     pub timeout: u64,
 
     /// Wait for this CSS selector before considering page loaded.
@@ -90,14 +92,6 @@ pub struct BrowserConfig {
     /// If set, connects to existing browser instead of launching one.
     #[serde(default)]
     pub remote_url: Option<String>,
-}
-
-fn default_browser_headless() -> bool {
-    true
-}
-
-fn default_browser_timeout() -> u64 {
-    30
 }
 
 impl BrowserConfig {

@@ -15,6 +15,12 @@ use crate::scrapers::ScraperConfig;
 /// Default refresh TTL in days (14 days).
 pub const DEFAULT_REFRESH_TTL_DAYS: u64 = 14;
 
+/// Default database filename.
+pub const DEFAULT_DATABASE_FILENAME: &str = "foiacquire.db";
+
+/// Default documents subdirectory name.
+const DOCUMENTS_SUBDIR: &str = "documents";
+
 /// Application settings.
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -49,9 +55,9 @@ impl Default for Settings {
             .join("foia");
 
         Self {
-            documents_dir: data_dir.join("documents"),
+            documents_dir: data_dir.join(DOCUMENTS_SUBDIR),
             data_dir,
-            database_filename: "foiacquire.db".to_string(),
+            database_filename: DEFAULT_DATABASE_FILENAME.to_string(),
             database_url: None,
             user_agent: "FOIAcquire/0.1 (academic research)".to_string(),
             request_timeout: 30,
@@ -67,7 +73,7 @@ impl Settings {
     #[allow(dead_code)]
     pub fn with_data_dir(data_dir: PathBuf) -> Self {
         Self {
-            documents_dir: data_dir.join("documents"),
+            documents_dir: data_dir.join(DOCUMENTS_SUBDIR),
             data_dir,
             ..Default::default()
         }
@@ -268,7 +274,7 @@ impl Config {
     pub fn apply_to_settings(&self, settings: &mut Settings, base_dir: &Path) {
         if let Some(ref target) = self.target {
             settings.data_dir = self.resolve_path(target, base_dir);
-            settings.documents_dir = settings.data_dir.join("documents");
+            settings.documents_dir = settings.data_dir.join(DOCUMENTS_SUBDIR);
         }
         if let Some(ref database) = self.database {
             settings.database_filename = database.clone();
@@ -352,7 +358,7 @@ impl Config {
     /// Load configuration from database history.
     pub async fn load_from_db(db_path: &Path) -> Option<Self> {
         // Use a dummy documents dir since we only need config_history
-        let docs_dir = db_path.parent().unwrap_or(Path::new(".")).join("documents");
+        let docs_dir = db_path.parent().unwrap_or(Path::new(".")).join(DOCUMENTS_SUBDIR);
         let ctx = DieselDbContext::new(db_path, &docs_dir);
         let entry = ctx.config_history().get_latest().await.ok()??;
 
@@ -440,7 +446,7 @@ impl ResolvedTarget {
             let database_filename = target
                 .file_name()
                 .and_then(|n| n.to_str())
-                .unwrap_or("foiacquire.db")
+                .unwrap_or(DEFAULT_DATABASE_FILENAME)
                 .to_string();
             Self {
                 data_dir,
@@ -449,7 +455,7 @@ impl ResolvedTarget {
             }
         } else {
             // It's a directory
-            let database_filename = "foiacquire.db".to_string();
+            let database_filename = DEFAULT_DATABASE_FILENAME.to_string();
             let database_path = target.join(&database_filename);
             Self {
                 data_dir: target,

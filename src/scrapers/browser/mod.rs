@@ -12,7 +12,7 @@ mod fetch;
 mod stealth;
 mod types;
 
-pub use config::{BrowserEngineConfig, BrowserEngineType};
+pub use config::{default_headless, default_timeout, BrowserEngineConfig, BrowserEngineType};
 #[allow(unused_imports)]
 pub use types::{BinaryFetchResponse, BrowserCookie, BrowserFetchResponse};
 
