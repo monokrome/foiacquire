@@ -140,6 +140,19 @@ impl DbPool {
     pub fn is_postgres(&self) -> bool {
         matches!(self, DbPool::Postgres(_))
     }
+
+    /// Convert to a diesel_context::DbPool for use with diesel repositories.
+    pub fn to_diesel_pool(&self) -> super::diesel_context::DbPool {
+        match self {
+            DbPool::Sqlite(pool) => super::diesel_context::DbPool::Sqlite(
+                super::diesel_pool::AsyncSqlitePool::new(pool.database_url(), 10),
+            ),
+            #[cfg(feature = "postgres")]
+            DbPool::Postgres(pool) => {
+                super::diesel_context::DbPool::Postgres(pool.inner())
+            }
+        }
+    }
 }
 
 /// Macro for running database operations on either backend.

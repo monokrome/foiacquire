@@ -188,16 +188,17 @@ impl DieselDbContext {
     ///
     /// This creates the necessary tables if they don't exist.
     pub async fn init_schema(&self) -> Result<(), DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => self.init_sqlite_schema(pool).await,
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => self.init_postgres_schema(pool).await,
-        }
+        with_diesel_conn_split!(self.pool,
+            sqlite: conn => {
+                Self::init_sqlite_schema(&mut conn).await
+            },
+            postgres: conn => {
+                Self::init_postgres_schema(&mut conn).await
+            }
+        )
     }
 
-    async fn init_sqlite_schema(&self, pool: &AsyncSqlitePool) -> Result<(), DieselError> {
-        let mut conn = pool.get().await?;
-
+    async fn init_sqlite_schema(conn: &mut AsyncSqliteConnection) -> Result<(), DieselError> {
         conn.batch_execute(
             r#"
             -- Sources table
@@ -365,13 +366,8 @@ impl DieselDbContext {
     }
 
     #[cfg(feature = "postgres")]
-    async fn init_postgres_schema(
-        &self,
-        pool: &Pool<AsyncPgConnection>,
-    ) -> Result<(), DieselError> {
+    async fn init_postgres_schema(conn: &mut AsyncPgConnection) -> Result<(), DieselError> {
         use diesel_async::RunQueryDsl;
-
-        let mut conn = pool.get().await.map_err(to_diesel_error)?;
 
         // PostgreSQL requires separate statements
         let statements = [

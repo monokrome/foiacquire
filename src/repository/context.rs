@@ -72,68 +72,29 @@ impl DbContext {
 
     /// Get a crawl repository.
     pub fn crawl(&self) -> DieselCrawlRepository {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let diesel_pool = super::diesel_context::DbPool::Sqlite(
-                    super::diesel_pool::AsyncSqlitePool::new(pool.database_url(), 10),
-                );
-                DieselCrawlRepository::new(diesel_pool)
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                let diesel_pool = super::diesel_context::DbPool::Postgres(pool.inner());
-                DieselCrawlRepository::new(diesel_pool)
-            }
-        }
+        DieselCrawlRepository::new(self.pool.to_diesel_pool())
     }
 
     /// Get a document repository.
     pub fn documents(&self) -> DieselDocumentRepository {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let diesel_pool = super::diesel_context::DbPool::Sqlite(
-                    super::diesel_pool::AsyncSqlitePool::new(pool.database_url(), 10),
-                );
-                DieselDocumentRepository::new(diesel_pool, self.documents_dir.clone())
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                let diesel_pool = super::diesel_context::DbPool::Postgres(pool.inner());
-                DieselDocumentRepository::new(diesel_pool, self.documents_dir.clone())
-            }
-        }
+        DieselDocumentRepository::new(self.pool.to_diesel_pool(), self.documents_dir.clone())
     }
 
     /// Get a config history repository.
     pub fn config_history(&self) -> DieselConfigHistoryRepository {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let diesel_pool = super::diesel_context::DbPool::Sqlite(
-                    super::diesel_pool::AsyncSqlitePool::new(pool.database_url(), 10),
-                );
-                DieselConfigHistoryRepository::new(diesel_pool)
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                let diesel_pool = super::diesel_context::DbPool::Postgres(pool.inner());
-                DieselConfigHistoryRepository::new(diesel_pool)
-            }
-        }
+        DieselConfigHistoryRepository::new(self.pool.to_diesel_pool())
     }
 
     /// Initialize database schema.
     pub async fn init_schema(&self) -> Result<(), DbError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
+        crate::with_conn_split!(self.pool,
+            sqlite: conn => {
                 init_sqlite_schema(&mut conn).await
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                let mut conn = pool.get().await?;
+            },
+            postgres: conn => {
                 init_postgres_schema(&mut conn).await
             }
-        }
+        )
     }
 }
 
