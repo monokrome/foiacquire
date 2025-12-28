@@ -13,6 +13,7 @@ use super::diesel_pool::DieselError;
 use super::{parse_datetime, parse_datetime_opt};
 use crate::models::{Source, SourceType};
 use crate::schema::sources;
+use crate::with_diesel_conn;
 
 /// Convert a database record to a domain model.
 impl From<SourceRecord> for Source {
@@ -43,50 +44,24 @@ impl DieselSourceRepository {
 
     /// Get a source by ID.
     pub async fn get(&self, id: &str) -> Result<Option<Source>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                sources::table
-                    .find(id)
-                    .first::<SourceRecord>(&mut conn)
-                    .await
-                    .optional()
-                    .map(|opt| opt.map(Source::from))
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                sources::table
-                    .find(id)
-                    .first::<SourceRecord>(&mut conn)
-                    .await
-                    .optional()
-                    .map(|opt| opt.map(Source::from))
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            sources::table
+                .find(id)
+                .first::<SourceRecord>(&mut conn)
+                .await
+                .optional()
+                .map(|opt| opt.map(Source::from))
+        })
     }
 
     /// Get all sources.
     pub async fn get_all(&self) -> Result<Vec<Source>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                sources::table
-                    .load::<SourceRecord>(&mut conn)
-                    .await
-                    .map(|records| records.into_iter().map(Source::from).collect())
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                sources::table
-                    .load::<SourceRecord>(&mut conn)
-                    .await
-                    .map(|records| records.into_iter().map(Source::from).collect())
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            sources::table
+                .load::<SourceRecord>(&mut conn)
+                .await
+                .map(|records| records.into_iter().map(Source::from).collect())
+        })
     }
 
     /// Save a source (insert or update).
@@ -149,51 +124,25 @@ impl DieselSourceRepository {
     /// Delete a source.
     #[allow(dead_code)]
     pub async fn delete(&self, id: &str) -> Result<bool, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let rows = diesel::delete(sources::table.find(id))
-                    .execute(&mut conn)
-                    .await?;
-                Ok(rows > 0)
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let rows = diesel::delete(sources::table.find(id))
-                    .execute(&mut conn)
-                    .await?;
-                Ok(rows > 0)
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            let rows = diesel::delete(sources::table.find(id))
+                .execute(&mut conn)
+                .await?;
+            Ok(rows > 0)
+        })
     }
 
     /// Check if a source exists.
     pub async fn exists(&self, id: &str) -> Result<bool, DieselError> {
         use diesel::dsl::count_star;
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let count: i64 = sources::table
-                    .filter(sources::id.eq(id))
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(count > 0)
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let count: i64 = sources::table
-                    .filter(sources::id.eq(id))
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(count > 0)
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            let count: i64 = sources::table
+                .filter(sources::id.eq(id))
+                .select(count_star())
+                .first(&mut conn)
+                .await?;
+            Ok(count > 0)
+        })
     }
 
     /// Update last scraped timestamp.
@@ -204,25 +153,13 @@ impl DieselSourceRepository {
         timestamp: DateTime<Utc>,
     ) -> Result<(), DieselError> {
         let ts = timestamp.to_rfc3339();
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                diesel::update(sources::table.find(id))
-                    .set(sources::last_scraped.eq(Some(&ts)))
-                    .execute(&mut conn)
-                    .await?;
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                diesel::update(sources::table.find(id))
-                    .set(sources::last_scraped.eq(Some(&ts)))
-                    .execute(&mut conn)
-                    .await?;
-            }
-        }
-        Ok(())
+        with_diesel_conn!(self.pool, conn, {
+            diesel::update(sources::table.find(id))
+                .set(sources::last_scraped.eq(Some(&ts)))
+                .execute(&mut conn)
+                .await?;
+            Ok(())
+        })
     }
 
     /// Rename a source ID, updating all related tables.

@@ -4,6 +4,42 @@ use diesel::result::DatabaseErrorInformation;
 #[cfg(feature = "postgres")]
 use std::error::Error;
 
+/// Execute a database operation on a diesel_context::DbPool.
+///
+/// This macro eliminates the repetitive `match &self.pool { ... }` pattern found
+/// throughout the diesel_* repository code. It handles connection acquisition and
+/// error conversion for both database backends.
+///
+/// Note: This is for the legacy diesel_context::DbPool. For the newer pool::DbPool,
+/// use the `with_conn!` macro from pool.rs.
+///
+/// # Usage
+///
+/// ```ignore
+/// with_diesel_conn!(self.pool, conn, {
+///     diesel::select(count_star())
+///         .first::<i64>(&mut conn)
+///         .await
+/// })
+/// ```
+#[macro_export]
+macro_rules! with_diesel_conn {
+    ($pool:expr, $conn:ident, $body:expr) => {{
+        match &$pool {
+            $crate::repository::diesel_context::DbPool::Sqlite(pool) => {
+                let mut $conn = pool.get().await?;
+                $body
+            }
+            #[cfg(feature = "postgres")]
+            $crate::repository::diesel_context::DbPool::Postgres(pool) => {
+                use $crate::repository::util::to_diesel_error;
+                let mut $conn = pool.get().await.map_err(to_diesel_error)?;
+                $body
+            }
+        }
+    }};
+}
+
 /// Check if a database URL is a PostgreSQL URL.
 ///
 /// Returns true for URLs starting with `postgres://` or `postgresql://`.

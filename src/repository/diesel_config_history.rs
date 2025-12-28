@@ -11,6 +11,7 @@ use super::diesel_models::{ConfigHistoryRecord, NewConfigHistory};
 use super::diesel_pool::DieselError;
 use super::parse_datetime;
 use crate::schema::configuration_history;
+use crate::with_diesel_conn;
 
 /// Maximum number of configuration history entries to retain.
 const MAX_HISTORY_ENTRIES: i64 = 16;
@@ -53,28 +54,14 @@ impl DieselConfigHistoryRepository {
     /// Check if a config with the given hash already exists.
     pub async fn hash_exists(&self, hash: &str) -> Result<bool, DieselError> {
         use diesel::dsl::count_star;
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                let count: i64 = configuration_history::table
-                    .filter(configuration_history::hash.eq(hash))
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(count > 0)
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let count: i64 = configuration_history::table
-                    .filter(configuration_history::hash.eq(hash))
-                    .select(count_star())
-                    .first(&mut conn)
-                    .await?;
-                Ok(count > 0)
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            let count: i64 = configuration_history::table
+                .filter(configuration_history::hash.eq(hash))
+                .select(count_star())
+                .first(&mut conn)
+                .await?;
+            Ok(count > 0)
+        })
     }
 
     /// Insert a new configuration entry if the hash doesn't already exist.
@@ -100,24 +87,13 @@ impl DieselConfigHistoryRepository {
             hash,
         };
 
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                diesel::insert_into(configuration_history::table)
-                    .values(&new_entry)
-                    .execute(&mut conn)
-                    .await?;
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                diesel::insert_into(configuration_history::table)
-                    .values(&new_entry)
-                    .execute(&mut conn)
-                    .await?;
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            diesel::insert_into(configuration_history::table)
+                .values(&new_entry)
+                .execute(&mut conn)
+                .await?;
+            Ok::<(), DieselError>(())
+        })?;
 
         // Prune old entries
         self.prune_old_entries().await?;
@@ -127,135 +103,66 @@ impl DieselConfigHistoryRepository {
 
     /// Get the most recent configuration entry.
     pub async fn get_latest(&self) -> Result<Option<DieselConfigHistoryEntry>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                configuration_history::table
-                    .order(configuration_history::created_at.desc())
-                    .first::<ConfigHistoryRecord>(&mut conn)
-                    .await
-                    .optional()
-                    .map(|opt| opt.map(DieselConfigHistoryEntry::from))
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                configuration_history::table
-                    .order(configuration_history::created_at.desc())
-                    .first::<ConfigHistoryRecord>(&mut conn)
-                    .await
-                    .optional()
-                    .map(|opt| opt.map(DieselConfigHistoryEntry::from))
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            configuration_history::table
+                .order(configuration_history::created_at.desc())
+                .first::<ConfigHistoryRecord>(&mut conn)
+                .await
+                .optional()
+                .map(|opt| opt.map(DieselConfigHistoryEntry::from))
+        })
     }
 
     /// Get all configuration history entries (most recent first).
     pub async fn get_all(&self) -> Result<Vec<DieselConfigHistoryEntry>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                configuration_history::table
-                    .order(configuration_history::created_at.desc())
-                    .load::<ConfigHistoryRecord>(&mut conn)
-                    .await
-                    .map(|records| {
-                        records
-                            .into_iter()
-                            .map(DieselConfigHistoryEntry::from)
-                            .collect()
-                    })
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                configuration_history::table
-                    .order(configuration_history::created_at.desc())
-                    .load::<ConfigHistoryRecord>(&mut conn)
-                    .await
-                    .map(|records| {
-                        records
-                            .into_iter()
-                            .map(DieselConfigHistoryEntry::from)
-                            .collect()
-                    })
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            configuration_history::table
+                .order(configuration_history::created_at.desc())
+                .load::<ConfigHistoryRecord>(&mut conn)
+                .await
+                .map(|records| {
+                    records
+                        .into_iter()
+                        .map(DieselConfigHistoryEntry::from)
+                        .collect()
+                })
+        })
     }
 
     /// Get just the hash of the most recent configuration entry.
     pub async fn get_latest_hash(&self) -> Result<Option<String>, DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                configuration_history::table
-                    .select(configuration_history::hash)
-                    .order(configuration_history::created_at.desc())
-                    .first::<String>(&mut conn)
-                    .await
-                    .optional()
-            }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                configuration_history::table
-                    .select(configuration_history::hash)
-                    .order(configuration_history::created_at.desc())
-                    .first::<String>(&mut conn)
-                    .await
-                    .optional()
-            }
-        }
+        with_diesel_conn!(self.pool, conn, {
+            configuration_history::table
+                .select(configuration_history::hash)
+                .order(configuration_history::created_at.desc())
+                .first::<String>(&mut conn)
+                .await
+                .optional()
+        })
     }
 
     /// Prune old entries to keep only the last MAX_HISTORY_ENTRIES.
     async fn prune_old_entries(&self) -> Result<(), DieselError> {
-        match &self.pool {
-            DbPool::Sqlite(pool) => {
-                let mut conn = pool.get().await?;
-                // Get UUIDs to keep (most recent MAX_HISTORY_ENTRIES)
-                let uuids_to_keep: Vec<String> = configuration_history::table
-                    .select(configuration_history::uuid)
-                    .order(configuration_history::created_at.desc())
-                    .limit(MAX_HISTORY_ENTRIES)
-                    .load(&mut conn)
-                    .await?;
+        with_diesel_conn!(self.pool, conn, {
+            // Get UUIDs to keep (most recent MAX_HISTORY_ENTRIES)
+            let uuids_to_keep: Vec<String> = configuration_history::table
+                .select(configuration_history::uuid)
+                .order(configuration_history::created_at.desc())
+                .limit(MAX_HISTORY_ENTRIES)
+                .load(&mut conn)
+                .await?;
 
-                if !uuids_to_keep.is_empty() {
-                    // Delete entries not in the keep list
-                    diesel::delete(
-                        configuration_history::table
-                            .filter(configuration_history::uuid.ne_all(&uuids_to_keep)),
-                    )
-                    .execute(&mut conn)
-                    .await?;
-                }
+            if !uuids_to_keep.is_empty() {
+                // Delete entries not in the keep list
+                diesel::delete(
+                    configuration_history::table
+                        .filter(configuration_history::uuid.ne_all(&uuids_to_keep)),
+                )
+                .execute(&mut conn)
+                .await?;
             }
-            #[cfg(feature = "postgres")]
-            DbPool::Postgres(pool) => {
-                use super::util::to_diesel_error;
-                let mut conn = pool.get().await.map_err(to_diesel_error)?;
-                let uuids_to_keep: Vec<String> = configuration_history::table
-                    .select(configuration_history::uuid)
-                    .order(configuration_history::created_at.desc())
-                    .limit(MAX_HISTORY_ENTRIES)
-                    .load(&mut conn)
-                    .await?;
-
-                if !uuids_to_keep.is_empty() {
-                    diesel::delete(
-                        configuration_history::table
-                            .filter(configuration_history::uuid.ne_all(&uuids_to_keep)),
-                    )
-                    .execute(&mut conn)
-                    .await?;
-                }
-            }
-        }
-        Ok(())
+            Ok(())
+        })
     }
 }
 
