@@ -46,9 +46,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - features: browser
+          - features: browser,postgres
             artifact: foiacquire-browser-amd64
-          - features: browser,redis-backend
+          - features: browser,postgres,redis-backend
             artifact: foiacquire-redis-amd64
     steps:
       - uses: actions/checkout@v4
@@ -82,9 +82,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - features: browser
+          - features: browser,postgres
             artifact: foiacquire-browser-arm64
-          - features: browser,redis-backend
+          - features: browser,postgres,redis-backend
             artifact: foiacquire-redis-arm64
     steps:
       - uses: actions/checkout@v4
