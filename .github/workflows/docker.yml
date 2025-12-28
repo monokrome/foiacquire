@@ -55,11 +55,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-musl
 
-      - name: Install musl tools
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -67,13 +65,13 @@ jobs:
           key: ${{ matrix.artifact }}
 
       - name: Build
-        run: cargo build --release --features "${{ matrix.features }}" --target x86_64-unknown-linux-musl
+        run: cargo build --release --features "${{ matrix.features }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: target/x86_64-unknown-linux-musl/release/foiacquire
+          path: target/release/foiacquire
 
   build-arm64:
     name: Build arm64 Binaries
@@ -103,13 +101,13 @@ jobs:
       - name: Build
         run: |
           export CROSS_CONTAINER_OPTS="--volume $HOME/.cargo/registry:/usr/local/cargo/registry"
-          cross build --release --features "${{ matrix.features }}" --target aarch64-unknown-linux-musl
+          cross build --release --features "${{ matrix.features }}" --target aarch64-unknown-linux-gnu
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: target/aarch64-unknown-linux-musl/release/foiacquire
+          path: target/aarch64-unknown-linux-gnu/release/foiacquire
 
   chromium:
     name: Build Chromium Image
