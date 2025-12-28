@@ -101,9 +101,9 @@ jobs:
           key: ${{ matrix.artifact }}
 
       - name: Build
-        env:
-          CROSS_CONTAINER_OPTS: "--volume $HOME/.cargo/registry:/usr/local/cargo/registry --volume ${{ github.workspace }}/target:/target"
-        run: cross build --release --features "${{ matrix.features }}" --target aarch64-unknown-linux-musl
+        run: |
+          export CROSS_CONTAINER_OPTS="--volume $HOME/.cargo/registry:/usr/local/cargo/registry --volume ${{ github.workspace }}/target:/target"
+          cross build --release --features "${{ matrix.features }}" --target aarch64-unknown-linux-musl
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
