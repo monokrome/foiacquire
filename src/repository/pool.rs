@@ -16,9 +16,9 @@ use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 #[cfg(feature = "postgres")]
 use diesel_async::AsyncPgConnection;
 
-use super::util::{to_diesel_error, validate_database_url};
 #[cfg(feature = "postgres")]
 use super::util::is_postgres_url;
+use super::util::{to_diesel_error, validate_database_url};
 
 /// Diesel error type alias.
 pub type DbError = diesel::result::Error;

@@ -747,11 +747,9 @@ impl DieselCrawlRepository {
             .execute(&mut conn)
             .await?;
 
-            diesel::delete(
-                crawl_requests::table.filter(crawl_requests::source_id.eq(source_id)),
-            )
-            .execute(&mut conn)
-            .await?;
+            diesel::delete(crawl_requests::table.filter(crawl_requests::source_id.eq(source_id)))
+                .execute(&mut conn)
+                .await?;
 
             Ok(())
         })
@@ -764,11 +762,9 @@ impl DieselCrawlRepository {
                 .execute(&mut conn)
                 .await?;
 
-            diesel::delete(
-                crawl_requests::table.filter(crawl_requests::source_id.eq(source_id)),
-            )
-            .execute(&mut conn)
-            .await?;
+            diesel::delete(crawl_requests::table.filter(crawl_requests::source_id.eq(source_id)))
+                .execute(&mut conn)
+                .await?;
 
             diesel::delete(crawl_config::table.filter(crawl_config::source_id.eq(source_id)))
                 .execute(&mut conn)

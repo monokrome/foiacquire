@@ -51,7 +51,8 @@ pub async fn save_scraped_document_async(
         extract_filename_parts(&result.url, &result.title, &result.mime_type);
 
     // Store in subdirectory by first 2 chars of hash (for filesystem efficiency)
-    let content_path = content_storage_path_with_name(documents_dir, &content_hash, &basename, &extension);
+    let content_path =
+        content_storage_path_with_name(documents_dir, &content_hash, &basename, &extension);
     std::fs::create_dir_all(content_path.parent().unwrap())?;
     std::fs::write(&content_path, content)?;
 
@@ -128,7 +129,8 @@ pub fn save_version_content(
     documents_dir: &Path,
 ) -> anyhow::Result<PathBuf> {
     let content_hash = DocumentVersion::compute_hash(content);
-    let content_path = content_storage_path(documents_dir, &content_hash, mime_to_extension(mime_type));
+    let content_path =
+        content_storage_path(documents_dir, &content_hash, mime_to_extension(mime_type));
 
     if let Some(parent) = content_path.parent() {
         std::fs::create_dir_all(parent)?;

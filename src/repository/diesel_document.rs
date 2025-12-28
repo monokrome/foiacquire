@@ -386,11 +386,7 @@ impl DieselDocumentRepository {
     /// Get a document by ID.
     pub async fn get(&self, id: &str) -> Result<Option<Document>, DieselError> {
         let record: Option<DocumentRecord> = with_conn!(self.pool, conn, {
-            documents::table
-                .find(id)
-                .first(&mut conn)
-                .await
-                .optional()
+            documents::table.find(id).first(&mut conn).await.optional()
         })?;
 
         match record {
@@ -521,11 +517,9 @@ impl DieselDocumentRepository {
                     )
                     .execute(conn)
                     .await?;
-                    diesel::delete(
-                        virtual_files::table.filter(virtual_files::document_id.eq(id)),
-                    )
-                    .execute(conn)
-                    .await?;
+                    diesel::delete(virtual_files::table.filter(virtual_files::document_id.eq(id)))
+                        .execute(conn)
+                        .await?;
                     let rows = diesel::delete(documents::table.find(id))
                         .execute(conn)
                         .await?;
@@ -1016,11 +1010,7 @@ impl DieselDocumentRepository {
         source: &str,
     ) -> Result<(), DieselError> {
         let record: Option<DocumentRecord> = with_conn!(self.pool, conn, {
-            documents::table
-                .find(id)
-                .first(&mut conn)
-                .await
-                .optional()
+            documents::table.find(id).first(&mut conn).await.optional()
         })?;
 
         if let Some(record) = record {
@@ -1059,11 +1049,7 @@ impl DieselDocumentRepository {
         error: Option<&str>,
     ) -> Result<(), DieselError> {
         let record: Option<DocumentRecord> = with_conn!(self.pool, conn, {
-            documents::table
-                .find(id)
-                .first(&mut conn)
-                .await
-                .optional()
+            documents::table.find(id).first(&mut conn).await.optional()
         })?;
 
         if let Some(record) = record {

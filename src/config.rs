@@ -97,7 +97,9 @@ impl Settings {
     /// Check if using PostgreSQL (vs SQLite).
     #[allow(dead_code)]
     pub fn is_postgres(&self) -> bool {
-        self.database_url.as_ref().is_some_and(|url| is_postgres_url(url))
+        self.database_url
+            .as_ref()
+            .is_some_and(|url| is_postgres_url(url))
     }
 
     /// Get the full path to the database (for SQLite file-based databases).
@@ -358,7 +360,10 @@ impl Config {
     /// Load configuration from database history.
     pub async fn load_from_db(db_path: &Path) -> Option<Self> {
         // Use a dummy documents dir since we only need config_history
-        let docs_dir = db_path.parent().unwrap_or(Path::new(".")).join(DOCUMENTS_SUBDIR);
+        let docs_dir = db_path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join(DOCUMENTS_SUBDIR);
         let ctx = DieselDbContext::new(db_path, &docs_dir);
         let entry = ctx.config_history().get_latest().await.ok()??;
 
@@ -490,7 +495,9 @@ fn find_config_next_to_db(data_dir: &Path) -> Option<PathBuf> {
 pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Config) {
     // Check DATABASE_URL first - this affects whether we should touch SQLite files
     let database_url_override = std::env::var("DATABASE_URL").ok().filter(|s| !s.is_empty());
-    let using_postgres = database_url_override.as_ref().is_some_and(|url| is_postgres_url(url));
+    let using_postgres = database_url_override
+        .as_ref()
+        .is_some_and(|url| is_postgres_url(url));
 
     // Fail immediately if PostgreSQL URL is provided but postgres feature is not compiled in
     if let Some(ref url) = database_url_override {

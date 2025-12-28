@@ -39,7 +39,11 @@ pub async fn cmd_config_recover(database: &Path, output: Option<&Path>) -> anyho
             warn()
         );
     } else {
-        eprintln!("{} Found {} source(s) in database", success(), sources.len());
+        eprintln!(
+            "{} Found {} source(s) in database",
+            success(),
+            sources.len()
+        );
     }
 
     // Build scraper configs from sources

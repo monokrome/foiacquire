@@ -5,9 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::browser::{
-    default_headless, default_timeout, BrowserEngineConfig, BrowserEngineType,
-};
+use super::browser::{default_headless, default_timeout, BrowserEngineConfig, BrowserEngineType};
 
 /// Scraper configuration from JSON.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
