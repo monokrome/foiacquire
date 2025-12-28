@@ -80,9 +80,11 @@ jobs:
     strategy:
       matrix:
         include:
-          - features: browser,postgres
+          # Note: postgres feature excluded for arm64 due to cross-compilation complexity
+          # with libpq. arm64 users needing postgres can build from source.
+          - features: browser
             artifact: foiacquire-browser-arm64
-          - features: browser,postgres,redis-backend
+          - features: browser,redis-backend
             artifact: foiacquire-redis-arm64
     steps:
       - uses: actions/checkout@v4
@@ -100,14 +102,13 @@ jobs:
 
       - name: Build
         run: |
-          export CROSS_CONTAINER_OPTS="--volume $HOME/.cargo/registry:/usr/local/cargo/registry"
-          cross build --release --features "${{ matrix.features }}" --target aarch64-unknown-linux-gnu
+          cross build --release --features "${{ matrix.features }}" --target aarch64-unknown-linux-musl
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: target/aarch64-unknown-linux-gnu/release/foiacquire
+          path: target/aarch64-unknown-linux-musl/release/foiacquire
 
   chromium:
     name: Build Chromium Image
