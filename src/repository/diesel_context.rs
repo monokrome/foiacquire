@@ -425,7 +425,7 @@ impl DieselDbContext {
         ];
 
         for stmt in statements {
-            diesel::sql_query(stmt).execute(&mut conn).await?;
+            diesel::sql_query(stmt).execute(conn).await?;
         }
 
         Ok(())
