@@ -12,8 +12,9 @@ use super::diesel_crawl::DieselCrawlRepository;
 use super::diesel_document::DieselDocumentRepository;
 use super::diesel_pool::{AsyncSqliteConnection, AsyncSqlitePool, DieselError};
 use super::diesel_source::DieselSourceRepository;
-use super::util::to_diesel_error;
 
+#[cfg(feature = "postgres")]
+use super::util::to_diesel_error;
 #[cfg(feature = "postgres")]
 use diesel_async::pooled_connection::deadpool::Pool;
 #[cfg(feature = "postgres")]
@@ -230,6 +231,7 @@ impl DieselDbContext {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 document_id TEXT NOT NULL,
                 content_hash TEXT NOT NULL,
+                content_hash_blake3 TEXT,
                 file_path TEXT NOT NULL,
                 file_size INTEGER NOT NULL,
                 mime_type TEXT NOT NULL,
@@ -345,6 +347,7 @@ impl DieselDbContext {
             CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_id);
             CREATE INDEX IF NOT EXISTS idx_documents_url ON documents(source_url);
             CREATE INDEX IF NOT EXISTS idx_document_versions_doc ON document_versions(document_id);
+            CREATE INDEX IF NOT EXISTS idx_document_versions_hashes ON document_versions(content_hash, content_hash_blake3, file_size);
             CREATE INDEX IF NOT EXISTS idx_crawl_urls_source_status ON crawl_urls(source_id, status);
             CREATE INDEX IF NOT EXISTS idx_crawl_urls_parent ON crawl_urls(parent_url);
             CREATE INDEX IF NOT EXISTS idx_crawl_requests_source ON crawl_requests(source_id, request_at);
@@ -397,6 +400,7 @@ impl DieselDbContext {
                 id SERIAL PRIMARY KEY,
                 document_id TEXT NOT NULL REFERENCES documents(id),
                 content_hash TEXT NOT NULL,
+                content_hash_blake3 TEXT,
                 file_path TEXT NOT NULL,
                 file_size INTEGER NOT NULL,
                 mime_type TEXT NOT NULL,
@@ -492,6 +496,7 @@ impl DieselDbContext {
             "CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_id)",
             "CREATE INDEX IF NOT EXISTS idx_documents_url ON documents(source_url)",
             "CREATE INDEX IF NOT EXISTS idx_document_versions_doc ON document_versions(document_id)",
+            "CREATE INDEX IF NOT EXISTS idx_document_versions_hashes ON document_versions(content_hash, content_hash_blake3, file_size)",
             "CREATE INDEX IF NOT EXISTS idx_crawl_urls_source_status ON crawl_urls(source_id, status)",
             "CREATE INDEX IF NOT EXISTS idx_crawl_requests_source ON crawl_requests(source_id, request_at)",
             "CREATE INDEX IF NOT EXISTS idx_config_history_hash ON configuration_history(hash)",

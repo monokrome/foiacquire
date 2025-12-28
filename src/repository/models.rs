@@ -203,6 +203,7 @@ pub struct DocumentVersionRecord {
     pub id: i32,
     pub document_id: String,
     pub content_hash: String,
+    pub content_hash_blake3: Option<String>,
     pub file_path: String,
     pub file_size: i32,
     pub mime_type: String,
@@ -219,6 +220,7 @@ pub struct DocumentVersionRecord {
 pub struct NewDocumentVersion<'a> {
     pub document_id: &'a str,
     pub content_hash: &'a str,
+    pub content_hash_blake3: Option<&'a str>,
     pub file_path: &'a str,
     pub file_size: i32,
     pub mime_type: &'a str,

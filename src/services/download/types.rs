@@ -25,6 +25,12 @@ pub enum DownloadEvent {
         url: String,
         new_document: bool,
     },
+    /// File deduplicated (identical content already exists)
+    Deduplicated {
+        worker_id: usize,
+        url: String,
+        existing_path: String,
+    },
     /// Document unchanged (304 Not Modified)
     Unchanged { worker_id: usize, url: String },
     /// Download failed
@@ -40,6 +46,7 @@ pub enum DownloadEvent {
 #[allow(dead_code)]
 pub struct DownloadResult {
     pub downloaded: usize,
+    pub deduplicated: usize,
     pub skipped: usize,
     pub failed: usize,
     pub remaining: u64,

@@ -6,12 +6,13 @@
 use std::path::Path;
 
 use diesel::sqlite::SqliteConnection;
-use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 use diesel_async::sync_connection_wrapper::SyncConnectionWrapper;
 use diesel_async::AsyncConnection;
 
 #[cfg(feature = "postgres")]
 use diesel_async::pooled_connection::deadpool::Pool as DeadPool;
+#[cfg(feature = "postgres")]
+use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 #[cfg(feature = "postgres")]
 use diesel_async::AsyncPgConnection;
 

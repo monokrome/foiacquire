@@ -223,8 +223,9 @@ impl PostgresMigrator {
 
         let sink: CopyInSink<bytes::Bytes> = client
             .copy_in(
-                "COPY document_versions (id, document_id, content_hash, file_path, file_size,
-                    mime_type, acquired_at, source_url, original_filename, server_date, page_count)
+                "COPY document_versions (id, document_id, content_hash, content_hash_blake3,
+                    file_path, file_size, mime_type, acquired_at, source_url, original_filename,
+                    server_date, page_count)
                  FROM STDIN WITH (FORMAT text)",
             )
             .await
@@ -240,10 +241,11 @@ impl PostgresMigrator {
 
             for v in chunk {
                 let row = format!(
-                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
                     v.id,
                     Self::escape_copy_value(Some(&v.document_id)),
                     Self::escape_copy_value(Some(&v.content_hash)),
+                    Self::escape_copy_value(v.content_hash_blake3.as_deref()),
                     Self::escape_copy_value(Some(&v.file_path)),
                     v.file_size,
                     Self::escape_copy_value(Some(&v.mime_type)),
@@ -1314,13 +1316,15 @@ impl DatabaseImporter for PostgresMigrator {
             // For SERIAL columns, we need to handle ID insertion specially
             // Use OVERRIDING SYSTEM VALUE to insert specific IDs
             diesel::sql_query(
-                "INSERT INTO document_versions (id, document_id, content_hash, file_path, file_size,
-                    mime_type, acquired_at, source_url, original_filename, server_date, page_count)
+                "INSERT INTO document_versions (id, document_id, content_hash, content_hash_blake3,
+                    file_path, file_size, mime_type, acquired_at, source_url, original_filename,
+                    server_date, page_count)
                  OVERRIDING SYSTEM VALUE
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                  ON CONFLICT (id) DO UPDATE SET
                     document_id = EXCLUDED.document_id,
                     content_hash = EXCLUDED.content_hash,
+                    content_hash_blake3 = EXCLUDED.content_hash_blake3,
                     file_path = EXCLUDED.file_path,
                     file_size = EXCLUDED.file_size,
                     mime_type = EXCLUDED.mime_type,
@@ -1328,11 +1332,12 @@ impl DatabaseImporter for PostgresMigrator {
                     source_url = EXCLUDED.source_url,
                     original_filename = EXCLUDED.original_filename,
                     server_date = EXCLUDED.server_date,
-                    page_count = EXCLUDED.page_count"
+                    page_count = EXCLUDED.page_count",
             )
             .bind::<diesel::sql_types::Integer, _>(v.id)
             .bind::<diesel::sql_types::Text, _>(&v.document_id)
             .bind::<diesel::sql_types::Text, _>(&v.content_hash)
+            .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(&v.content_hash_blake3)
             .bind::<diesel::sql_types::Text, _>(&v.file_path)
             .bind::<diesel::sql_types::Integer, _>(v.file_size)
             .bind::<diesel::sql_types::Text, _>(&v.mime_type)

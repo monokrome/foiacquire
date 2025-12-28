@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS document_versions (
     id SERIAL PRIMARY KEY,
     document_id TEXT NOT NULL REFERENCES documents(id),
     content_hash TEXT NOT NULL,
+    content_hash_blake3 TEXT,
     file_path TEXT NOT NULL,
     file_size INTEGER NOT NULL,
     mime_type TEXT NOT NULL,
@@ -137,6 +138,7 @@ CREATE TABLE IF NOT EXISTS rate_limit_state (
 CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_id);
 CREATE INDEX IF NOT EXISTS idx_documents_url ON documents(source_url);
 CREATE INDEX IF NOT EXISTS idx_document_versions_doc ON document_versions(document_id);
+CREATE INDEX IF NOT EXISTS idx_document_versions_hashes ON document_versions(content_hash, content_hash_blake3, file_size);
 CREATE INDEX IF NOT EXISTS idx_crawl_urls_source_status ON crawl_urls(source_id, status);
 CREATE INDEX IF NOT EXISTS idx_crawl_requests_source ON crawl_requests(source_id, request_at);
 CREATE INDEX IF NOT EXISTS idx_config_history_hash ON configuration_history(hash)

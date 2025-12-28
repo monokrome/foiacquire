@@ -72,6 +72,7 @@ impl DownloadService {
         event_tx: mpsc::Sender<DownloadEvent>,
     ) -> anyhow::Result<DownloadResult> {
         let downloaded = Arc::new(AtomicUsize::new(0));
+        let deduplicated = Arc::new(AtomicUsize::new(0));
         let skipped = Arc::new(AtomicUsize::new(0));
         let failed = Arc::new(AtomicUsize::new(0));
 
@@ -85,6 +86,7 @@ impl DownloadService {
             let delay = self.config.request_delay;
             let source_id = source_id.map(|s| s.to_string());
             let downloaded = downloaded.clone();
+            let deduplicated = deduplicated.clone();
             let skipped = skipped.clone();
             let failed = failed.clone();
             let event_tx = event_tx.clone();
@@ -249,45 +251,111 @@ impl DownloadService {
                         })
                         .await;
 
-                    // Save document
-                    let content_hash = DocumentVersion::compute_hash(&content);
-                    let (basename, extension) = extract_filename_parts(&url, &title, &mime_type);
-                    let filename = format!(
-                        "{}-{}.{}",
-                        sanitize_filename(&basename),
-                        &content_hash[..8],
-                        extension
-                    );
+                    // Compute dual hashes for deduplication
+                    let hashes = DocumentVersion::compute_dual_hashes(&content);
+                    let file_size = content.len() as i64;
 
-                    let content_path = documents_dir.join(&content_hash[..2]).join(&filename);
-
-                    if let Err(e) = tokio::fs::create_dir_all(content_path.parent().unwrap()).await
+                    // Check for existing file with same content
+                    let (content_path, was_deduplicated) = match doc_repo
+                        .find_existing_file(&hashes.sha256, &hashes.blake3, file_size)
+                        .await
                     {
-                        failed.fetch_add(1, Ordering::Relaxed);
-                        let _ = event_tx
-                            .send(DownloadEvent::Failed {
-                                worker_id,
-                                url,
-                                error: e.to_string(),
-                            })
-                            .await;
-                        continue;
-                    }
+                        Ok(Some(existing_path)) => {
+                            // File already exists, reuse it
+                            deduplicated.fetch_add(1, Ordering::Relaxed);
+                            let _ = event_tx
+                                .send(DownloadEvent::Deduplicated {
+                                    worker_id,
+                                    url: url.clone(),
+                                    existing_path: existing_path.clone(),
+                                })
+                                .await;
+                            (std::path::PathBuf::from(existing_path), true)
+                        }
+                        Ok(None) => {
+                            // No duplicate, write new file
+                            let (basename, extension) =
+                                extract_filename_parts(&url, &title, &mime_type);
+                            let filename = format!(
+                                "{}-{}.{}",
+                                sanitize_filename(&basename),
+                                &hashes.sha256[..8],
+                                extension
+                            );
+                            let new_path = documents_dir.join(&hashes.sha256[..2]).join(&filename);
 
-                    if let Err(e) = tokio::fs::write(&content_path, &content).await {
-                        failed.fetch_add(1, Ordering::Relaxed);
-                        let _ = event_tx
-                            .send(DownloadEvent::Failed {
-                                worker_id,
-                                url,
-                                error: e.to_string(),
-                            })
-                            .await;
-                        continue;
-                    }
+                            if let Err(e) =
+                                tokio::fs::create_dir_all(new_path.parent().unwrap()).await
+                            {
+                                failed.fetch_add(1, Ordering::Relaxed);
+                                let _ = event_tx
+                                    .send(DownloadEvent::Failed {
+                                        worker_id,
+                                        url,
+                                        error: e.to_string(),
+                                    })
+                                    .await;
+                                continue;
+                            }
 
-                    let version = DocumentVersion::new_with_metadata(
-                        &content,
+                            if let Err(e) = tokio::fs::write(&new_path, &content).await {
+                                failed.fetch_add(1, Ordering::Relaxed);
+                                let _ = event_tx
+                                    .send(DownloadEvent::Failed {
+                                        worker_id,
+                                        url,
+                                        error: e.to_string(),
+                                    })
+                                    .await;
+                                continue;
+                            }
+                            (new_path, false)
+                        }
+                        Err(e) => {
+                            // Database error, log and continue with normal save
+                            eprintln!("Dedup check failed: {e}");
+                            let (basename, extension) =
+                                extract_filename_parts(&url, &title, &mime_type);
+                            let filename = format!(
+                                "{}-{}.{}",
+                                sanitize_filename(&basename),
+                                &hashes.sha256[..8],
+                                extension
+                            );
+                            let new_path = documents_dir.join(&hashes.sha256[..2]).join(&filename);
+
+                            if let Err(e) =
+                                tokio::fs::create_dir_all(new_path.parent().unwrap()).await
+                            {
+                                failed.fetch_add(1, Ordering::Relaxed);
+                                let _ = event_tx
+                                    .send(DownloadEvent::Failed {
+                                        worker_id,
+                                        url,
+                                        error: e.to_string(),
+                                    })
+                                    .await;
+                                continue;
+                            }
+
+                            if let Err(e) = tokio::fs::write(&new_path, &content).await {
+                                failed.fetch_add(1, Ordering::Relaxed);
+                                let _ = event_tx
+                                    .send(DownloadEvent::Failed {
+                                        worker_id,
+                                        url,
+                                        error: e.to_string(),
+                                    })
+                                    .await;
+                                continue;
+                            }
+                            (new_path, false)
+                        }
+                    };
+
+                    let version = DocumentVersion::with_precomputed_hashes(
+                        hashes.clone(),
+                        file_size as u64,
                         content_path,
                         mime_type.clone(),
                         Some(url.clone()),
@@ -326,17 +394,20 @@ impl DownloadService {
                     fetched_url.fetched_at = Some(chrono::Utc::now());
                     fetched_url.etag = etag;
                     fetched_url.last_modified = last_modified;
-                    fetched_url.content_hash = Some(content_hash);
+                    fetched_url.content_hash = Some(hashes.sha256.clone());
                     let _ = crawl_repo.update_url(&fetched_url).await;
 
-                    downloaded.fetch_add(1, Ordering::Relaxed);
-                    let _ = event_tx
-                        .send(DownloadEvent::Completed {
-                            worker_id,
-                            url,
-                            new_document,
-                        })
-                        .await;
+                    // Only count as downloaded if we actually wrote a new file
+                    if !was_deduplicated {
+                        downloaded.fetch_add(1, Ordering::Relaxed);
+                        let _ = event_tx
+                            .send(DownloadEvent::Completed {
+                                worker_id,
+                                url,
+                                new_document,
+                            })
+                            .await;
+                    }
                 }
             });
 
@@ -357,6 +428,7 @@ impl DownloadService {
 
         Ok(DownloadResult {
             downloaded: downloaded.load(Ordering::Relaxed),
+            deduplicated: deduplicated.load(Ordering::Relaxed),
             skipped: skipped.load(Ordering::Relaxed),
             failed: failed.load(Ordering::Relaxed),
             remaining,

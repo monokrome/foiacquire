@@ -80,6 +80,7 @@ diesel::table! {
         id -> Integer,
         document_id -> Text,
         content_hash -> Text,
+        content_hash_blake3 -> Nullable<Text>,
         file_path -> Text,
         file_size -> Integer,
         mime_type -> Text,

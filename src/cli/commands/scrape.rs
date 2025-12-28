@@ -693,6 +693,14 @@ pub async fn cmd_download(
                         progress.finish_download(worker_id, true).await;
                     }
                 }
+                DownloadEvent::Deduplicated { worker_id, .. } => {
+                    // Count deduplicated files as successful downloads
+                    downloaded += 1;
+                    if let Some(ref progress) = progress_clone {
+                        progress.set_summary(downloaded, skipped);
+                        progress.finish_download(worker_id, true).await;
+                    }
+                }
                 DownloadEvent::Unchanged { worker_id, .. } => {
                     skipped += 1;
                     if let Some(ref progress) = progress_clone {

@@ -923,6 +923,8 @@ impl DieselDocumentRepository {
                     .values((
                         document_versions::document_id.eq(document_id),
                         document_versions::content_hash.eq(&version.content_hash),
+                        document_versions::content_hash_blake3
+                            .eq(version.content_hash_blake3.as_deref()),
                         document_versions::file_path.eq(&file_path),
                         document_versions::file_size.eq(file_size),
                         document_versions::mime_type.eq(&version.mime_type),
@@ -949,6 +951,8 @@ impl DieselDocumentRepository {
                     .values((
                         document_versions::document_id.eq(document_id),
                         document_versions::content_hash.eq(&version.content_hash),
+                        document_versions::content_hash_blake3
+                            .eq(version.content_hash_blake3.as_deref()),
                         document_versions::file_path.eq(&file_path),
                         document_versions::file_size.eq(file_size),
                         document_versions::mime_type.eq(&version.mime_type),
@@ -2165,6 +2169,46 @@ impl DieselDocumentRepository {
             .collect())
     }
 
+    /// Find an existing file by dual hash and size for deduplication.
+    ///
+    /// Returns the file_path if a matching file already exists, allowing
+    /// the caller to skip writing a duplicate file to disk.
+    ///
+    /// Uses SHA-256 + BLAKE3 + file_size for collision-resistant matching.
+    pub async fn find_existing_file(
+        &self,
+        sha256_hash: &str,
+        blake3_hash: &str,
+        file_size: i64,
+    ) -> Result<Option<String>, DieselError> {
+        match &self.pool {
+            DbPool::Sqlite(pool) => {
+                let mut conn = pool.get().await?;
+                document_versions::table
+                    .filter(document_versions::content_hash.eq(sha256_hash))
+                    .filter(document_versions::content_hash_blake3.eq(blake3_hash))
+                    .filter(document_versions::file_size.eq(file_size as i32))
+                    .select(document_versions::file_path)
+                    .first::<String>(&mut conn)
+                    .await
+                    .optional()
+            }
+            #[cfg(feature = "postgres")]
+            DbPool::Postgres(pool) => {
+                use super::util::to_diesel_error;
+                let mut conn = pool.get().await.map_err(to_diesel_error)?;
+                document_versions::table
+                    .filter(document_versions::content_hash.eq(sha256_hash))
+                    .filter(document_versions::content_hash_blake3.eq(blake3_hash))
+                    .filter(document_versions::file_size.eq(file_size as i32))
+                    .select(document_versions::file_path)
+                    .first::<String>(&mut conn)
+                    .await
+                    .optional()
+            }
+        }
+    }
+
     /// Get all document summaries.
     pub async fn get_all_summaries(&self) -> Result<Vec<DieselDocumentSummary>, DieselError> {
         match &self.pool {
@@ -2705,6 +2749,7 @@ impl DieselDocumentRepository {
         DocumentVersion {
             id: record.id as i64,
             content_hash: record.content_hash,
+            content_hash_blake3: record.content_hash_blake3,
             file_path: PathBuf::from(record.file_path),
             file_size: record.file_size as u64,
             mime_type: record.mime_type,
@@ -2829,6 +2874,7 @@ mod tests {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 document_id TEXT NOT NULL,
                 content_hash TEXT NOT NULL,
+                content_hash_blake3 TEXT,
                 file_path TEXT NOT NULL,
                 file_size INTEGER NOT NULL,
                 mime_type TEXT NOT NULL,
@@ -2939,6 +2985,7 @@ mod tests {
         let version = DocumentVersion {
             id: 1,
             content_hash: "abc123".to_string(),
+            content_hash_blake3: Some("def456".to_string()),
             file_path: PathBuf::from("/tmp/test.pdf"),
             file_size: 1024,
             mime_type: "application/pdf".to_string(),

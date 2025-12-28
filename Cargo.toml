@@ -37,6 +37,7 @@ clap = { version = "4", features = ["derive"] }
 
 # Hashing
 sha2 = "0.10"
+blake3 = "1"
 hex = "0.4"
 
 # Base64 encoding/decoding

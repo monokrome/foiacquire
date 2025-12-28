@@ -224,6 +224,7 @@ impl DatabaseImporter for SqliteMigrator {
                     document_versions::id.eq(v.id),
                     document_versions::document_id.eq(&v.document_id),
                     document_versions::content_hash.eq(&v.content_hash),
+                    document_versions::content_hash_blake3.eq(&v.content_hash_blake3),
                     document_versions::file_path.eq(&v.file_path),
                     document_versions::file_size.eq(v.file_size),
                     document_versions::mime_type.eq(&v.mime_type),

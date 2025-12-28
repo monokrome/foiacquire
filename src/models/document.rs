@@ -10,6 +10,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 
+/// Dual content hashes for collision-resistant deduplication.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContentHashes {
+    pub sha256: String,
+    pub blake3: String,
+}
+
 /// Processing status of a document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -46,14 +53,16 @@ impl DocumentStatus {
 
 /// A specific version of a document's content.
 ///
-/// Content is identified by SHA-256 hash, enabling detection of
-/// changes when documents are re-downloaded from sources.
+/// Content is identified by dual hashes (SHA-256 + BLAKE3) for
+/// collision-resistant deduplication across crawls.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentVersion {
     /// Database row ID.
     pub id: i64,
     /// SHA-256 hash of the document content.
     pub content_hash: String,
+    /// BLAKE3 hash of the document content (for deduplication verification).
+    pub content_hash_blake3: Option<String>,
     /// Path to the stored file.
     pub file_path: PathBuf,
     /// Size in bytes.
@@ -80,6 +89,19 @@ impl DocumentVersion {
         hex::encode(hasher.finalize())
     }
 
+    /// Compute BLAKE3 hash of content.
+    pub fn compute_hash_blake3(content: &[u8]) -> String {
+        hex::encode(blake3::hash(content).as_bytes())
+    }
+
+    /// Compute both SHA-256 and BLAKE3 hashes for deduplication.
+    pub fn compute_dual_hashes(content: &[u8]) -> ContentHashes {
+        ContentHashes {
+            sha256: Self::compute_hash(content),
+            blake3: Self::compute_hash_blake3(content),
+        }
+    }
+
     /// Create a new document version.
     pub fn new(
         content: &[u8],
@@ -87,9 +109,11 @@ impl DocumentVersion {
         mime_type: String,
         source_url: Option<String>,
     ) -> Self {
+        let hashes = Self::compute_dual_hashes(content);
         Self {
             id: 0, // Set by database
-            content_hash: Self::compute_hash(content),
+            content_hash: hashes.sha256,
+            content_hash_blake3: Some(hashes.blake3),
             file_path,
             file_size: content.len() as u64,
             mime_type,
@@ -110,11 +134,41 @@ impl DocumentVersion {
         original_filename: Option<String>,
         server_date: Option<DateTime<Utc>>,
     ) -> Self {
+        let hashes = Self::compute_dual_hashes(content);
         Self {
             id: 0, // Set by database
-            content_hash: Self::compute_hash(content),
+            content_hash: hashes.sha256,
+            content_hash_blake3: Some(hashes.blake3),
             file_path,
             file_size: content.len() as u64,
+            mime_type,
+            acquired_at: Utc::now(),
+            source_url,
+            original_filename,
+            server_date,
+            page_count: None,
+        }
+    }
+
+    /// Create a new document version with pre-computed hashes.
+    ///
+    /// Use this when you've already computed hashes for deduplication to avoid
+    /// redundant hash computation.
+    pub fn with_precomputed_hashes(
+        hashes: ContentHashes,
+        file_size: u64,
+        file_path: PathBuf,
+        mime_type: String,
+        source_url: Option<String>,
+        original_filename: Option<String>,
+        server_date: Option<DateTime<Utc>>,
+    ) -> Self {
+        Self {
+            id: 0, // Set by database
+            content_hash: hashes.sha256,
+            content_hash_blake3: Some(hashes.blake3),
+            file_path,
+            file_size,
             mime_type,
             acquired_at: Utc::now(),
             source_url,
@@ -216,9 +270,16 @@ impl Document {
     /// Add a new version if content differs from current.
     ///
     /// Returns true if a new version was added, false if content unchanged.
+    /// Uses both SHA-256 and BLAKE3 hashes for collision-resistant comparison.
     pub fn add_version(&mut self, version: DocumentVersion) -> bool {
         if let Some(current) = self.current_version() {
-            if current.content_hash == version.content_hash {
+            // Check both hashes match (if blake3 available on both)
+            let sha_match = current.content_hash == version.content_hash;
+            let blake_match = match (&current.content_hash_blake3, &version.content_hash_blake3) {
+                (Some(a), Some(b)) => a == b,
+                _ => true, // If either missing, rely on SHA-256 alone
+            };
+            if sha_match && blake_match {
                 return false;
             }
         }
