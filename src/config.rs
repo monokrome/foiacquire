@@ -512,43 +512,69 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
         }
     }
 
-    // If target is specified, resolve it first
-    let resolved_target = options
-        .target
-        .as_ref()
-        .map(|t| ResolvedTarget::from_path(t));
+    // If target is specified, resolve the data directory
+    // When using postgres, we only need the data_dir for documents - skip SQLite path resolution
+    let target_data_dir = options.target.as_ref().map(|t| {
+        let target = if t.is_absolute() {
+            t.clone()
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(t)
+        };
+        // If it looks like a .db file, use its parent directory
+        if target
+            .extension()
+            .is_some_and(|ext| ext == "db" || ext == "sqlite" || ext == "sqlite3")
+        {
+            target.parent().unwrap_or(Path::new(".")).to_path_buf()
+        } else {
+            target
+        }
+    });
+
+    // Only resolve SQLite database paths when NOT using postgres
+    let resolved_target = if !using_postgres {
+        options.target.as_ref().map(|t| ResolvedTarget::from_path(t))
+    } else {
+        None
+    };
 
     // Determine config loading order when --target is specified:
     // 1. Explicit --config flag
-    // 2. Config file next to the database
-    // 3. Config from database history (skip SQLite if using PostgreSQL)
+    // 2. Config file next to the target directory
+    // 3. Config from database history (skip when using PostgreSQL)
     // 4. Auto-discover via prefer
     let config = if let Some(ref config_path) = options.config_path {
         // Explicit config path takes priority
         Config::load_from_path(config_path)
             .await
             .unwrap_or_default()
-    } else if let Some(ref resolved) = resolved_target {
-        // Check for config file next to database
-        if let Some(config_path) = find_config_next_to_db(&resolved.data_dir) {
-            tracing::debug!("Found config next to database: {}", config_path.display());
+    } else if let Some(ref data_dir) = target_data_dir {
+        // Check for config file next to target
+        if let Some(config_path) = find_config_next_to_db(data_dir) {
+            tracing::debug!("Found config next to target: {}", config_path.display());
             Config::load_from_path(&config_path)
                 .await
                 .unwrap_or_default()
-        } else if !using_postgres && resolved.database_path.exists() {
-            // Try to load from SQLite database history (only if not using PostgreSQL)
-            tracing::debug!(
-                "No config file found, trying database history: {}",
-                resolved.database_path.display()
-            );
-            Config::load_from_db(&resolved.database_path)
-                .await
-                .unwrap_or_else(|| {
-                    tracing::debug!("No config in database history, using defaults");
-                    Config::default()
-                })
+        } else if let Some(ref resolved) = resolved_target {
+            // Only try SQLite database history when NOT using postgres
+            if resolved.database_path.exists() {
+                tracing::debug!(
+                    "No config file found, trying database history: {}",
+                    resolved.database_path.display()
+                );
+                Config::load_from_db(&resolved.database_path)
+                    .await
+                    .unwrap_or_else(|| {
+                        tracing::debug!("No config in database history, using defaults");
+                        Config::default()
+                    })
+            } else {
+                Config::load().await
+            }
         } else {
-            // Database doesn't exist yet or using PostgreSQL, use auto-discovery
+            // Using PostgreSQL - skip SQLite database history, use auto-discovery
             Config::load().await
         }
     } else {
@@ -569,11 +595,14 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
 
     config.apply_to_settings(&mut settings, &base_dir);
 
-    // --target override takes precedence
-    if let Some(resolved) = resolved_target {
-        settings.data_dir = resolved.data_dir;
-        settings.database_filename = resolved.database_filename;
+    // --target override takes precedence for data_dir and documents_dir
+    if let Some(data_dir) = target_data_dir {
+        settings.data_dir = data_dir;
         settings.documents_dir = settings.data_dir.join("documents");
+    }
+    // Also apply SQLite-specific settings if resolved (not using postgres)
+    if let Some(resolved) = resolved_target {
+        settings.database_filename = resolved.database_filename;
     }
 
     // DATABASE_URL environment variable takes highest precedence
