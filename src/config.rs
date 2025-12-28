@@ -465,6 +465,12 @@ fn find_config_next_to_db(data_dir: &Path) -> Option<PathBuf> {
 /// Load settings with explicit options.
 /// Returns (Settings, Config) tuple.
 pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Config) {
+    // Check DATABASE_URL first - this affects whether we should touch SQLite files
+    let database_url_override = std::env::var("DATABASE_URL").ok().filter(|s| !s.is_empty());
+    let using_postgres = database_url_override
+        .as_ref()
+        .is_some_and(|url| url.starts_with("postgres://") || url.starts_with("postgresql://"));
+
     // If target is specified, resolve it first
     let resolved_target = options
         .target
@@ -474,7 +480,7 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
     // Determine config loading order when --target is specified:
     // 1. Explicit --config flag
     // 2. Config file next to the database
-    // 3. Config from database history
+    // 3. Config from database history (skip SQLite if using PostgreSQL)
     // 4. Auto-discover via prefer
     let config = if let Some(ref config_path) = options.config_path {
         // Explicit config path takes priority
@@ -488,8 +494,8 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
             Config::load_from_path(&config_path)
                 .await
                 .unwrap_or_default()
-        } else if resolved.database_path.exists() {
-            // Try to load from database history
+        } else if !using_postgres && resolved.database_path.exists() {
+            // Try to load from SQLite database history (only if not using PostgreSQL)
             tracing::debug!(
                 "No config file found, trying database history: {}",
                 resolved.database_path.display()
@@ -501,7 +507,7 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
                     Config::default()
                 })
         } else {
-            // Database doesn't exist yet, use auto-discovery
+            // Database doesn't exist yet or using PostgreSQL, use auto-discovery
             Config::load().await
         }
     } else {
@@ -530,11 +536,9 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
     }
 
     // DATABASE_URL environment variable takes highest precedence
-    if let Ok(database_url) = std::env::var("DATABASE_URL") {
-        if !database_url.is_empty() {
-            tracing::debug!("Using DATABASE_URL from environment: {}", database_url);
-            settings.database_url = Some(database_url);
-        }
+    if let Some(database_url) = database_url_override {
+        tracing::debug!("Using DATABASE_URL from environment: {}", database_url);
+        settings.database_url = Some(database_url);
     }
 
     // Save config to database history
