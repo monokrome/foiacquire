@@ -53,6 +53,9 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
 anyhow = "1"
 
+# Unix system calls (for UID/GID diagnostics)
+libc = "0.2"
+
 # Async traits
 async-trait = "0.1"
 

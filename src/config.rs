@@ -120,23 +120,78 @@ impl Settings {
 
     /// Ensure all directories exist.
     pub fn ensure_directories(&self) -> std::io::Result<()> {
+        // Log diagnostics for debugging permission issues in containers
+        Self::log_directory_diagnostics(&self.data_dir, "data_dir");
+        Self::log_directory_diagnostics(&self.documents_dir, "documents_dir");
+
         fs::create_dir_all(&self.data_dir).map_err(|e| {
             std::io::Error::new(
                 e.kind(),
-                format!("Failed to create data directory '{}': {}", self.data_dir.display(), e),
+                format!(
+                    "Failed to create data directory '{}': {} (uid={}, gid={})",
+                    self.data_dir.display(),
+                    e,
+                    unsafe { libc::getuid() },
+                    unsafe { libc::getgid() }
+                ),
             )
         })?;
         fs::create_dir_all(&self.documents_dir).map_err(|e| {
             std::io::Error::new(
                 e.kind(),
                 format!(
-                    "Failed to create documents directory '{}': {}",
+                    "Failed to create documents directory '{}': {} (uid={}, gid={})",
                     self.documents_dir.display(),
-                    e
+                    e,
+                    unsafe { libc::getuid() },
+                    unsafe { libc::getgid() }
                 ),
             )
         })?;
         Ok(())
+    }
+
+    /// Log diagnostic information about a directory for debugging.
+    fn log_directory_diagnostics(path: &Path, label: &str) {
+        let uid = unsafe { libc::getuid() };
+        let gid = unsafe { libc::getgid() };
+        tracing::debug!("{} check: path={}, running as uid={} gid={}", label, path.display(), uid, gid);
+
+        if path.exists() {
+            if let Ok(meta) = fs::metadata(path) {
+                use std::os::unix::fs::MetadataExt;
+                tracing::debug!(
+                    "{} exists: owner={}:{}, mode={:o}, is_dir={}",
+                    label,
+                    meta.uid(),
+                    meta.gid(),
+                    meta.mode() & 0o7777,
+                    meta.is_dir()
+                );
+            } else {
+                tracing::debug!("{} exists but metadata read failed", label);
+            }
+        } else {
+            tracing::debug!("{} does not exist, will attempt to create", label);
+            // Check parent
+            if let Some(parent) = path.parent() {
+                if parent.exists() {
+                    if let Ok(meta) = fs::metadata(parent) {
+                        use std::os::unix::fs::MetadataExt;
+                        tracing::debug!(
+                            "{} parent exists: path={}, owner={}:{}, mode={:o}",
+                            label,
+                            parent.display(),
+                            meta.uid(),
+                            meta.gid(),
+                            meta.mode() & 0o7777
+                        );
+                    }
+                } else {
+                    tracing::debug!("{} parent does not exist: {}", label, parent.display());
+                }
+            }
+        }
     }
 
     /// Create a database context using the configured database URL or path.
