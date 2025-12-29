@@ -138,6 +138,7 @@ impl Settings {
     /// This is useful for failing fast at startup if the database is unreachable.
     /// For PostgreSQL, this validates credentials and network connectivity.
     /// For SQLite, this creates the database file if it doesn't exist.
+    #[allow(dead_code)]
     pub async fn create_db_context_validated(&self) -> Result<DieselDbContext, String> {
         let ctx = self
             .create_db_context()
@@ -502,51 +503,106 @@ fn find_config_next_to_db(data_dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Load settings with explicit options.
-/// Returns (Settings, Config) tuple.
-pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Config) {
-    // Check DATABASE_URL first - this affects whether we should touch SQLite files
-    let database_url_override = std::env::var("DATABASE_URL").ok().filter(|s| !s.is_empty());
-    let using_postgres = database_url_override
-        .as_ref()
-        .is_some_and(|url| is_postgres_url(url));
+/// Database URL from environment, if set and valid.
+struct DatabaseUrlEnv {
+    url: Option<String>,
+    is_postgres: bool,
+}
 
-    // Fail immediately if PostgreSQL URL is provided but postgres feature is not compiled in
-    if let Some(ref url) = database_url_override {
-        if let Err(e) = validate_database_url(url) {
-            panic!(
-                "{}\n\nEither:\n  \
-                 - Use a build with the 'postgres' feature enabled\n  \
-                 - Use a sqlite:// URL instead\n  \
-                 - Remove DATABASE_URL to use the default SQLite database",
-                e
+impl DatabaseUrlEnv {
+    /// Check DATABASE_URL environment variable.
+    /// Panics if URL is postgres but feature not enabled.
+    fn from_env() -> Self {
+        let url = std::env::var("DATABASE_URL").ok().filter(|s| !s.is_empty());
+        let is_postgres = url.as_ref().is_some_and(|u| is_postgres_url(u));
+
+        if let Some(ref u) = url {
+            if let Err(e) = validate_database_url(u) {
+                panic!(
+                    "{}\n\nEither:\n  \
+                     - Use a build with the 'postgres' feature enabled\n  \
+                     - Use a sqlite:// URL instead\n  \
+                     - Remove DATABASE_URL to use the default SQLite database",
+                    e
+                );
+            }
+        }
+
+        Self { url, is_postgres }
+    }
+}
+
+/// Resolve target path to a data directory.
+/// If path points to a .db file, returns its parent directory.
+fn resolve_target_to_data_dir(target: &Path) -> PathBuf {
+    let target = if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(target)
+    };
+
+    if target
+        .extension()
+        .is_some_and(|ext| ext == "db" || ext == "sqlite" || ext == "sqlite3")
+    {
+        target.parent().unwrap_or(Path::new(".")).to_path_buf()
+    } else {
+        target
+    }
+}
+
+/// Load config from the appropriate source based on options.
+async fn load_config_from_sources(
+    options: &LoadOptions,
+    target_data_dir: Option<&PathBuf>,
+    resolved_target: Option<&ResolvedTarget>,
+) -> Config {
+    // Priority 1: Explicit --config flag
+    if let Some(ref config_path) = options.config_path {
+        return Config::load_from_path(config_path)
+            .await
+            .unwrap_or_default();
+    }
+
+    // Priority 2-3: Config next to target, or from database history
+    if let Some(data_dir) = target_data_dir {
+        if let Some(config_path) = find_config_next_to_db(data_dir) {
+            tracing::debug!("Found config next to target: {}", config_path.display());
+            return Config::load_from_path(&config_path)
+                .await
+                .unwrap_or_default();
+        }
+
+        if let Some(resolved) = resolved_target {
+            tracing::debug!(
+                "No config file found, trying database history: {}",
+                resolved.database_path.display()
             );
+            if let Some(config) = Config::load_from_db(&resolved.database_path).await {
+                return config;
+            }
+            tracing::debug!("No config in database history, using defaults");
         }
     }
 
-    // If target is specified, resolve the data directory
-    // When using postgres, we only need the data_dir for documents - skip SQLite path resolution
-    let target_data_dir = options.target.as_ref().map(|t| {
-        let target = if t.is_absolute() {
-            t.clone()
-        } else {
-            std::env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("."))
-                .join(t)
-        };
-        // If it looks like a .db file, use its parent directory
-        if target
-            .extension()
-            .is_some_and(|ext| ext == "db" || ext == "sqlite" || ext == "sqlite3")
-        {
-            target.parent().unwrap_or(Path::new(".")).to_path_buf()
-        } else {
-            target
-        }
-    });
+    // Priority 4: Auto-discover via prefer
+    Config::load().await
+}
+
+/// Load settings with explicit options.
+/// Returns (Settings, Config) tuple.
+pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Config) {
+    let db_env = DatabaseUrlEnv::from_env();
+
+    let target_data_dir = options
+        .target
+        .as_ref()
+        .map(|t| resolve_target_to_data_dir(t));
 
     // Only resolve SQLite database paths when NOT using postgres
-    let resolved_target = if !using_postgres {
+    let resolved_target = if !db_env.is_postgres {
         options
             .target
             .as_ref()
@@ -555,43 +611,9 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
         None
     };
 
-    // Determine config loading order when --target is specified:
-    // 1. Explicit --config flag
-    // 2. Config file next to the target directory
-    // 3. Config from database history (skip when using PostgreSQL)
-    // 4. Auto-discover via prefer
-    let config = if let Some(ref config_path) = options.config_path {
-        // Explicit config path takes priority
-        Config::load_from_path(config_path)
-            .await
-            .unwrap_or_default()
-    } else if let Some(ref data_dir) = target_data_dir {
-        // Check for config file next to target
-        if let Some(config_path) = find_config_next_to_db(data_dir) {
-            tracing::debug!("Found config next to target: {}", config_path.display());
-            Config::load_from_path(&config_path)
-                .await
-                .unwrap_or_default()
-        } else if let Some(ref resolved) = resolved_target {
-            // Try SQLite database history - just attempt it and handle failure
-            tracing::debug!(
-                "No config file found, trying database history: {}",
-                resolved.database_path.display()
-            );
-            Config::load_from_db(&resolved.database_path)
-                .await
-                .unwrap_or_else(|| {
-                    tracing::debug!("No config in database history, using defaults");
-                    Config::default()
-                })
-        } else {
-            // Using PostgreSQL - skip SQLite database history, use auto-discovery
-            Config::load().await
-        }
-    } else {
-        // No target specified, use auto-discovery
-        Config::load().await
-    };
+    let config =
+        load_config_from_sources(&options, target_data_dir.as_ref(), resolved_target.as_ref())
+            .await;
 
     let mut settings = Settings::default();
 
@@ -611,13 +633,14 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
         settings.data_dir = data_dir;
         settings.documents_dir = settings.data_dir.join("documents");
     }
-    // Also apply SQLite-specific settings if resolved (not using postgres)
+
+    // Apply SQLite-specific settings if resolved (not using postgres)
     if let Some(resolved) = resolved_target {
         settings.database_filename = resolved.database_filename;
     }
 
     // DATABASE_URL environment variable takes highest precedence
-    if let Some(database_url) = database_url_override {
+    if let Some(database_url) = db_env.url {
         tracing::debug!("Using DATABASE_URL from environment: {}", database_url);
         settings.database_url = Some(database_url);
     }
