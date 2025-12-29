@@ -1,6 +1,6 @@
 //! Database management commands.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
@@ -10,10 +10,12 @@ use std::time::Duration;
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 
+use crate::config::Settings;
 use crate::repository::migration::ProgressCallback;
 use crate::repository::pool::SqlitePool;
 use crate::repository::util::{is_postgres_url, redact_url_password, validate_database_url};
 use crate::repository::{DatabaseExporter, DatabaseImporter, SqliteMigrator};
+use crate::utils::mime_type_category;
 
 /// Options for database copy operations.
 #[derive(Clone)]
@@ -891,6 +893,138 @@ where
     target.reset_sequences().await?;
 
     println!("\n{} Copy complete!", style("✓").green());
+
+    Ok(())
+}
+
+/// Remap document categories based on MIME types.
+///
+/// This command updates the category_id column for all documents based on
+/// the MIME type of their current (latest) version.
+pub async fn cmd_db_remap_categories(
+    settings: &Settings,
+    dry_run: bool,
+    batch_size: usize,
+) -> anyhow::Result<()> {
+    use diesel_async::RunQueryDsl;
+
+    println!(
+        "{} Remapping document categories based on MIME types{}",
+        style("→").cyan(),
+        if dry_run { " (dry run)" } else { "" }
+    );
+
+    let ctx = settings.create_db_context()?;
+    let pool = ctx.pool();
+
+    // Get all documents with their current version's MIME type
+    println!("  Scanning documents...");
+
+    #[derive(diesel::QueryableByName)]
+    struct DocMime {
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        document_id: String,
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        mime_type: String,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        current_category: Option<String>,
+    }
+
+    let results: Vec<DocMime> = {
+        let query = r#"
+            SELECT d.id as document_id, dv.mime_type, d.category_id as current_category
+            FROM documents d
+            JOIN document_versions dv ON d.id = dv.document_id
+            WHERE dv.id = (SELECT MAX(id) FROM document_versions WHERE document_id = d.id)
+        "#;
+
+        crate::with_conn!(pool, conn, {
+            diesel::sql_query(query).load(&mut conn).await
+        })?
+    };
+
+    println!("  Found {} documents", results.len());
+
+    // Group by (current_category, new_category) for summary
+    let mut changes: HashMap<(Option<String>, String), Vec<String>> = HashMap::new();
+    let mut no_change_count = 0;
+
+    for doc in &results {
+        let new_category = mime_type_category(&doc.mime_type).id().to_string();
+        if doc.current_category.as_deref() == Some(&new_category) {
+            no_change_count += 1;
+        } else {
+            changes
+                .entry((doc.current_category.clone(), new_category))
+                .or_default()
+                .push(doc.document_id.clone());
+        }
+    }
+
+    // Print summary
+    println!("\n  Category changes:");
+    let mut total_changes = 0;
+    for ((from, to), doc_ids) in &changes {
+        let from_str = from.as_deref().unwrap_or("NULL");
+        println!("    {} -> {}: {} documents", from_str, to, doc_ids.len());
+        total_changes += doc_ids.len();
+    }
+    println!("    No change: {} documents", no_change_count);
+    println!("    Total to update: {} documents", total_changes);
+
+    if dry_run {
+        println!(
+            "\n{} Dry run complete. No changes made.",
+            style("✓").green()
+        );
+        return Ok(());
+    }
+
+    if total_changes == 0 {
+        println!(
+            "\n{} All documents already have correct categories.",
+            style("✓").green()
+        );
+        return Ok(());
+    }
+
+    // Apply updates in batches
+    println!("\n  Applying updates...");
+
+    let pb = ProgressBar::new(total_changes as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("  {bar:40.cyan/dim} {pos}/{len} ({per_sec})")
+            .unwrap()
+            .progress_chars("=>-"),
+    );
+    pb.enable_steady_tick(Duration::from_millis(100));
+
+    for ((_from, to), doc_ids) in changes {
+        for chunk in doc_ids.chunks(batch_size) {
+            // For now, use a simpler approach with individual updates
+            for doc_id in chunk {
+                crate::with_conn!(pool, conn, {
+                    diesel::sql_query(format!(
+                        "UPDATE documents SET category_id = '{}' WHERE id = '{}'",
+                        to.replace('\'', "''"),
+                        doc_id.replace('\'', "''")
+                    ))
+                    .execute(&mut conn)
+                    .await
+                })?;
+                pb.inc(1);
+            }
+        }
+    }
+
+    pb.finish();
+
+    println!(
+        "\n{} Updated {} documents!",
+        style("✓").green(),
+        total_changes
+    );
 
     Ok(())
 }

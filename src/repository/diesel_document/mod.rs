@@ -143,11 +143,21 @@ impl DieselDocumentRepository {
     }
 
     /// Save a document.
+    ///
+    /// This also computes and sets the category_id based on the document's
+    /// current version's MIME type.
     pub async fn save(&self, doc: &Document) -> Result<(), DieselError> {
+        use crate::utils::mime_type_category;
+
         let metadata = serde_json::to_string(&doc.metadata).unwrap_or_else(|_| "{}".to_string());
         let created_at = doc.created_at.to_rfc3339();
         let updated_at = doc.updated_at.to_rfc3339();
         let status = doc.status.as_str().to_string();
+
+        // Compute category from current version's MIME type
+        let category_id: Option<String> = doc
+            .current_version()
+            .map(|v| mime_type_category(&v.mime_type).id().to_string());
 
         with_conn_split!(self.pool,
             sqlite: conn => {
@@ -161,6 +171,7 @@ impl DieselDocumentRepository {
                         documents::metadata.eq(&metadata),
                         documents::created_at.eq(&created_at),
                         documents::updated_at.eq(&updated_at),
+                        documents::category_id.eq(&category_id),
                     ))
                     .execute(&mut conn)
                     .await?;
@@ -178,6 +189,7 @@ impl DieselDocumentRepository {
                         documents::metadata.eq(&metadata),
                         documents::created_at.eq(&created_at),
                         documents::updated_at.eq(&updated_at),
+                        documents::category_id.eq(&category_id),
                     ))
                     .on_conflict(documents::id)
                     .do_update()
@@ -188,6 +200,7 @@ impl DieselDocumentRepository {
                         documents::status.eq(excluded(documents::status)),
                         documents::metadata.eq(excluded(documents::metadata)),
                         documents::updated_at.eq(excluded(documents::updated_at)),
+                        documents::category_id.eq(excluded(documents::category_id)),
                     ))
                     .execute(&mut conn)
                     .await?;

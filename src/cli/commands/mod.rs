@@ -475,6 +475,16 @@ enum DbCommands {
         #[arg(long, value_name = "FILE")]
         skip_duplicates: Option<String>,
     },
+
+    /// Remap document categories based on MIME types
+    RemapCategories {
+        /// Only show what would be changed, don't actually update
+        #[arg(long)]
+        dry_run: bool,
+        /// Batch size for updates (default: 1000)
+        #[arg(long, default_value = "1000")]
+        batch_size: usize,
+    },
 }
 
 /// Run the CLI.
@@ -551,6 +561,10 @@ pub async fn run() -> anyhow::Result<()> {
                 )
                 .await
             }
+            DbCommands::RemapCategories {
+                dry_run,
+                batch_size,
+            } => db::cmd_db_remap_categories(&settings, dry_run, batch_size).await,
         },
         Commands::Scrape {
             source_ids,
