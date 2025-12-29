@@ -120,8 +120,22 @@ impl Settings {
 
     /// Ensure all directories exist.
     pub fn ensure_directories(&self) -> std::io::Result<()> {
-        fs::create_dir_all(&self.data_dir)?;
-        fs::create_dir_all(&self.documents_dir)?;
+        fs::create_dir_all(&self.data_dir).map_err(|e| {
+            std::io::Error::new(
+                e.kind(),
+                format!("Failed to create data directory '{}': {}", self.data_dir.display(), e),
+            )
+        })?;
+        fs::create_dir_all(&self.documents_dir).map_err(|e| {
+            std::io::Error::new(
+                e.kind(),
+                format!(
+                    "Failed to create documents directory '{}': {}",
+                    self.documents_dir.display(),
+                    e
+                ),
+            )
+        })?;
         Ok(())
     }
 
