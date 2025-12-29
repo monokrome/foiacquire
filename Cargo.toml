@@ -78,6 +78,9 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "cors"] }
 mime_guess = "2"
 
+# HTML templating
+askama = "0.12"
+
 # Temporary directories
 tempfile = "3"
 

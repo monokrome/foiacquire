@@ -1,0 +1,344 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="document-header">
+    <nav class="breadcrumb">
+        <a href="/">Browse</a> /
+        <a href="/?source={{ source_id }}">{{ source_id }}</a> /
+        <span class="current">{{ title }}</span>
+    </nav>
+    {% if total > 0 %}
+    <nav class="doc-navigation">
+        {% if has_prev %}
+        <a href="/documents/{{ prev_id_val }}{{ nav_query_string }}" class="doc-nav-link prev" title="{{ prev_title_val }}">&#171; {{ prev_title_truncated }}</a>
+        {% endif %}
+        {% if position > 0 %}
+        <span class="doc-position">{{ position }} of {{ total }}</span>
+        {% endif %}
+        {% if has_next %}
+        <a href="/documents/{{ next_id_val }}{{ nav_query_string }}" class="doc-nav-link next" title="{{ next_title_val }}">{{ next_title_truncated }} &#187;</a>
+        {% endif %}
+    </nav>
+    {% endif %}
+    <h1 class="document-title">{{ title }}</h1>
+    <div class="document-meta-compact">
+        <a href="{{ source_url }}" target="_blank" class="source-link">{{ source_url }}</a>
+        {% if has_other_sources %}
+        <div class="also-in-compact">Also in: {% for src in other_sources %}<a href="/sources/{{ src }}">{{ src }}</a>{% if !loop.last %}, {% endif %}{% endfor %}</div>
+        {% endif %}
+    </div>
+    {% if has_versions %}
+    <div class="version-timeline">
+        <span class="timeline-label">Versions:</span>
+        {% for v in versions %}
+        <a href="/files/{{ v.path }}" class="version-item{% if loop.first %} current{% endif %}" title="{{ v.filename }} ({{ v.size_str }})">
+            <span class="version-date">{{ v.date_str }}</span>
+            <span class="version-size">{{ v.size_str }}</span>
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+{% if has_pages %}
+<div id="pages-container"
+     class="page-viewer"
+     data-doc-id="{{ doc_id }}"
+     data-version-id="{{ version_id_val }}"
+     data-total-pages="{{ page_count_val }}"
+     data-loaded="0">
+    <div id="pages-list"></div>
+    <div id="pages-loading" class="loading-indicator">Loading pages...</div>
+    <div id="pages-end" class="pages-end" style="display:none">End of document ({{ page_count_val }} pages)</div>
+</div>
+
+<div class="reocr-section">
+    <button id="reocr-btn" class="btn-action" data-doc-id="{{ doc_id }}">
+        Run DeepSeek OCR
+    </button>
+    <span id="reocr-status"></span>
+</div>
+{% else %}
+{% if has_extracted_text %}
+<div class="page-viewer fallback-text">
+    <pre class="extracted-text-full">{{ extracted_text_val }}</pre>
+</div>
+{% endif %}
+{% endif %}
+
+{% if has_virtual_files %}
+<section class="archive-contents">
+    <h3>Archive Contents ({{ virtual_files_count }} files)</h3>
+    <table class="file-listing archive-listing">
+        <thead>
+            <tr><th>File</th><th>Type</th><th>Size</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+            {% for vf in virtual_files %}
+            <tr class="archive-file" data-vf-id="{{ vf.id }}">
+                <td><span class="vf-icon">{{ vf.icon }}</span> {{ vf.filename }}</td>
+                <td>{{ vf.mime_type }}</td>
+                <td>{{ vf.size_str }}</td>
+                <td>{{ vf.status_badge }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+
+{% if total > 0 %}
+<nav class="doc-navigation">
+    {% if has_prev %}
+    <a href="/documents/{{ prev_id_val }}{{ nav_query_string }}" class="doc-nav-link prev" title="{{ prev_title_val }}">&#171; {{ prev_title_truncated }}</a>
+    {% endif %}
+    {% if position > 0 %}
+    <span class="doc-position">{{ position }} of {{ total }}</span>
+    {% endif %}
+    {% if has_next %}
+    <a href="/documents/{{ next_id_val }}{{ nav_query_string }}" class="doc-nav-link next" title="{{ next_title_val }}">{{ next_title_truncated }} &#187;</a>
+    {% endif %}
+</nav>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if has_pages %}
+<script>
+(function() {
+    const container = document.getElementById('pages-container');
+    if (!container) return;
+
+    const pagesList = document.getElementById('pages-list');
+    const loadingIndicator = document.getElementById('pages-loading');
+    const endIndicator = document.getElementById('pages-end');
+
+    const docId = container.dataset.docId;
+    const versionId = container.dataset.versionId;
+    const totalPages = parseInt(container.dataset.totalPages);
+
+    let loadedPages = 0;
+    let isLoading = false;
+    let hasMore = true;
+    const PAGES_PER_LOAD = 3;
+
+    async function loadMorePages() {
+        if (isLoading || !hasMore) return;
+
+        isLoading = true;
+        loadingIndicator.style.display = 'block';
+
+        try {
+            const response = await fetch(
+                `/api/documents/${docId}/pages?version=${versionId}&offset=${loadedPages}&limit=${PAGES_PER_LOAD}`
+            );
+
+            if (!response.ok) throw new Error('Failed to load pages');
+
+            const data = await response.json();
+
+            for (const page of data.pages) {
+                const pageEl = createPageElement(page);
+                pagesList.appendChild(pageEl);
+            }
+
+            loadedPages += data.pages.length;
+            hasMore = data.has_more;
+
+            if (!hasMore) {
+                loadingIndicator.style.display = 'none';
+                endIndicator.style.display = 'block';
+            }
+        } catch (err) {
+            console.error('Error loading pages:', err);
+            loadingIndicator.textContent = 'Error loading pages. Click to retry.';
+            loadingIndicator.onclick = () => {
+                loadingIndicator.textContent = 'Loading pages...';
+                loadingIndicator.onclick = null;
+                isLoading = false;
+                loadMorePages();
+            };
+        } finally {
+            isLoading = false;
+        }
+    }
+
+    function createPageElement(page) {
+        const div = document.createElement('div');
+        div.className = 'page-item';
+        div.id = `page-${page.page_number}`;
+
+        const content = document.createElement('div');
+        content.className = 'page-content';
+
+        const imageCol = document.createElement('div');
+        imageCol.className = 'page-image-col';
+        if (page.image_base64) {
+            const img = document.createElement('img');
+            img.src = page.image_base64;
+            img.alt = `Page ${page.page_number}`;
+            img.className = 'page-image';
+            img.loading = 'lazy';
+            imageCol.appendChild(img);
+        } else {
+            imageCol.innerHTML = '<div class="no-image">No preview</div>';
+        }
+
+        const textCol = document.createElement('div');
+        textCol.className = 'page-text-col';
+
+        const header = document.createElement('div');
+        header.className = 'page-text-header';
+
+        const originalText = page.final_text || page.ocr_text || page.pdf_text || '';
+        const deepseekText = page.deepseek_text || '';
+        const hasComparison = !!deepseekText;
+
+        if (hasComparison) {
+            header.innerHTML = `
+                <span class="page-num">Page ${page.page_number}</span>
+                <div class="ocr-tabs">
+                    <button class="ocr-tab active" data-tab="original">Original</button>
+                    <button class="ocr-tab" data-tab="deepseek">DeepSeek</button>
+                </div>
+            `;
+
+            const originalPre = document.createElement('pre');
+            originalPre.className = 'page-text ocr-panel active';
+            originalPre.dataset.panel = 'original';
+            originalPre.textContent = originalText || '(No text extracted)';
+
+            const deepseekPre = document.createElement('pre');
+            deepseekPre.className = 'page-text ocr-panel';
+            deepseekPre.dataset.panel = 'deepseek';
+            deepseekPre.textContent = deepseekText;
+
+            textCol.appendChild(header);
+            textCol.appendChild(originalPre);
+            textCol.appendChild(deepseekPre);
+
+            header.querySelectorAll('.ocr-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const target = tab.dataset.tab;
+                    header.querySelectorAll('.ocr-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    textCol.querySelectorAll('.ocr-panel').forEach(p => {
+                        p.classList.toggle('active', p.dataset.panel === target);
+                    });
+                });
+            });
+        } else {
+            header.innerHTML = `<span class="page-num">Page ${page.page_number}</span>`;
+            const pre = document.createElement('pre');
+            pre.className = 'page-text';
+            pre.textContent = originalText || '(No text extracted)';
+            textCol.appendChild(header);
+            textCol.appendChild(pre);
+        }
+
+        content.appendChild(imageCol);
+        content.appendChild(textCol);
+        div.appendChild(content);
+
+        return div;
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+            if (entry.isIntersecting && hasMore) {
+                loadMorePages();
+            }
+        }
+    }, {
+        rootMargin: '400px'
+    });
+
+    observer.observe(loadingIndicator);
+    loadMorePages();
+})();
+
+(function() {
+    const btn = document.getElementById('reocr-btn');
+    const status = document.getElementById('reocr-status');
+    if (!btn) return;
+
+    let pollInterval = null;
+
+    async function pollStatus() {
+        try {
+            const resp = await fetch('/api/documents/reocr/status');
+            const data = await resp.json();
+
+            if (data.status === 'running') {
+                status.textContent = `Processing: ${data.pages_processed}/${data.pages_total} pages...`;
+                status.className = 'reocr-progress';
+            } else if (data.status === 'complete') {
+                clearInterval(pollInterval);
+                pollInterval = null;
+                status.textContent = `Completed: ${data.pages_processed}/${data.pages_total} pages`;
+                status.className = 'reocr-success';
+                btn.disabled = false;
+                btn.textContent = 'Re-run DeepSeek OCR';
+                if (data.pages_processed > 0) {
+                    setTimeout(() => location.reload(), 1500);
+                }
+            } else if (data.status === 'idle') {
+                clearInterval(pollInterval);
+                pollInterval = null;
+                btn.disabled = false;
+                btn.textContent = 'Run DeepSeek OCR';
+            }
+        } catch (err) {
+            console.error('Poll error:', err);
+        }
+    }
+
+    btn.addEventListener('click', async function() {
+        const docId = btn.dataset.docId;
+        btn.disabled = true;
+        btn.textContent = 'Starting...';
+        status.textContent = 'Initializing DeepSeek OCR...';
+        status.className = 'reocr-progress';
+
+        try {
+            const response = await fetch(`/api/documents/${docId}/reocr`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ backend: 'deepseek' })
+            });
+
+            const data = await response.json();
+
+            if (data.status === 'started') {
+                btn.textContent = 'Running...';
+                status.textContent = `Processing: 0/${data.pages_total} pages...`;
+                pollInterval = setInterval(pollStatus, 2000);
+            } else if (data.status === 'busy') {
+                status.textContent = data.message || 'Another OCR job is running';
+                status.className = 'reocr-error';
+                btn.disabled = false;
+                btn.textContent = 'Run DeepSeek OCR';
+            } else if (data.status === 'complete') {
+                status.textContent = 'All pages already have DeepSeek OCR results';
+                status.className = 'reocr-success';
+                btn.disabled = false;
+                btn.textContent = 'Re-run DeepSeek OCR';
+            } else if (data.status === 'error') {
+                status.textContent = data.message || 'OCR failed';
+                status.className = 'reocr-error';
+                btn.disabled = false;
+                btn.textContent = 'Retry DeepSeek OCR';
+            }
+        } catch (err) {
+            status.textContent = `Error: ${err.message}`;
+            status.className = 'reocr-error';
+            btn.disabled = false;
+            btn.textContent = 'Retry DeepSeek OCR';
+        }
+    });
+
+    pollStatus();
+})();
+</script>
+{% endif %}
+{% endblock %}

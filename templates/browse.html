@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="browse-filters">
+    <div class="filter-row">
+        <div class="filter-section source-filter">
+            <span class="filter-label">Source:</span>
+            <select id="source-select">
+                {% if sources_empty %}
+                <option value="">Loading sources...</option>
+                {% if has_active_source %}
+                <option value="{{ active_source_val }}" selected>{{ active_source_val }}</option>
+                {% endif %}
+                {% else %}
+                <option value="">All Sources</option>
+                {% for s in sources %}
+                <option value="{{ s.id }}"{% if s.selected %} selected{% endif %}>{{ s.name }}  ({{ s.count }})</option>
+                {% endfor %}
+                {% endif %}
+            </select>
+        </div>
+        <div class="filter-section tag-filter">
+            <span class="filter-label">Tags:</span>
+            <div class="tag-input-wrapper">
+                <input type="text" id="tag-search" list="tag-list" placeholder="Add tag..." autocomplete="off">
+                <datalist id="tag-list">
+                    {% for tag in all_tags %}
+                    <option value="{{ tag.name }}" data-count="{{ tag.count }}">
+                    {% endfor %}
+                </datalist>
+                <div class="active-tags">
+                    {% for tag in active_tags_display %}
+                    <span class="active-tag">{{ tag.name }} <button type="button" class="clear-tag" onclick="removeTag({{ tag.index }})">x</button></span>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="filter-row type-row">
+        <div class="filter-section type-filters">
+            <span class="filter-label">Types:</span>
+            <div class="type-toggles">
+                {% if type_stats_empty %}
+                <span class="loading-placeholder" id="types-loading">Loading types...</span>
+                {% else %}
+                {% for cat in categories %}
+                {% if cat.count > 0 %}
+                <label class="type-toggle">
+                    <input type="checkbox" name="type" value="{{ cat.id }}" {% if cat.checked %}checked{% endif %} data-count="{{ cat.count }}">
+                    <span class="toggle-label">{{ cat.name }}</span>
+                    <span class="toggle-count">{{ cat.count }}</span>
+                </label>
+                {% endif %}
+                {% endfor %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+<div class="result-info">
+    <span class="result-count">{{ total_count }} documents</span>
+</div>
+{% if has_pagination %}
+<div class="pagination">
+    {% if has_prev_cursor %}
+    <a href="javascript:void(0)" onclick="goToPage('{{ prev_cursor_val }}')" class="page-link">&laquo; Previous</a>
+    {% endif %}
+    {% if start_position > 0 %}
+    <span class="page-position">{{ start_position }}-{{ end_position }} of {{ total_count }}</span>
+    {% endif %}
+    {% if has_next_cursor %}
+    <a href="javascript:void(0)" onclick="goToPage('{{ next_cursor_val }}')" class="page-link">Next &raquo;</a>
+    {% endif %}
+</div>
+{% endif %}
+<table class="file-listing" id="document-table">
+    <thead>
+        <tr>
+            <th>Document</th>
+            <th>Source</th>
+            <th>Type</th>
+            <th>Size</th>
+            <th>Acquired</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for doc in documents %}
+        <tr data-date="{{ doc.timestamp }}">
+            <td>
+                <a href="/documents/{{ doc.id }}{{ nav_query_string }}">{{ doc.icon }} {{ doc.title }}</a>
+                {% if doc.has_synopsis %}
+                <div class="synopsis">{{ doc.synopsis_preview }}</div>
+                {% endif %}
+                <div class="doc-tags">
+                    {% for t in doc.tags %}
+                    <a href="/browse?tag={{ t.encoded }}" class="tag-small">{{ t.name }}</a>
+                    {% endfor %}
+                </div>
+            </td>
+            <td><a href="/sources/{{ doc.source_id }}">{{ doc.source_id }}</a></td>
+            <td>{{ doc.mime_type }}</td>
+            <td>{{ doc.size_str }}</td>
+            <td>{{ doc.date_str }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% if has_pagination %}
+<div class="pagination">
+    {% if has_prev_cursor %}
+    <a href="javascript:void(0)" onclick="goToPage('{{ prev_cursor_val }}')" class="page-link">&laquo; Previous</a>
+    {% endif %}
+    {% if start_position > 0 %}
+    <span class="page-position">{{ start_position }}-{{ end_position }} of {{ total_count }}</span>
+    {% endif %}
+    {% if has_next_cursor %}
+    <a href="javascript:void(0)" onclick="goToPage('{{ next_cursor_val }}')" class="page-link">Next &raquo;</a>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const typeToggles = document.querySelectorAll('.type-toggle input');
+    const tagInput = document.getElementById('tag-search');
+    const sourceSelect = document.getElementById('source-select');
+    let activeTags = {{ active_tags_json }};
+    const perPage = {{ per_page }};
+    const prevCursor = {{ prev_cursor_js }};
+    const nextCursor = {{ next_cursor_js }};
+
+    function buildParams(cursor) {
+        const params = new URLSearchParams();
+
+        const types = [];
+        typeToggles.forEach(t => {
+            if (t.checked) types.push(t.value);
+        });
+        if (types.length > 0 && types.length < typeToggles.length) {
+            params.set('types', types.join(','));
+        }
+
+        if (activeTags.length > 0) {
+            params.set('tags', activeTags.join(','));
+        }
+
+        const source = sourceSelect.value;
+        if (source) params.set('source', source);
+
+        if (cursor) params.set('page', cursor);
+        if (perPage !== 50) params.set('per_page', perPage);
+
+        return params;
+    }
+
+    function updateFilters() {
+        const params = buildParams(null);
+        const qs = params.toString();
+        window.location.href = '/' + (qs ? '?' + qs : '');
+    }
+
+    window.goToPage = function(cursor) {
+        const params = buildParams(cursor);
+        const qs = params.toString();
+        window.location.href = '/' + (qs ? '?' + qs : '');
+    };
+
+    typeToggles.forEach(t => {
+        t.addEventListener('change', updateFilters);
+    });
+
+    sourceSelect.addEventListener('change', updateFilters);
+
+    tagInput.addEventListener('change', function() {
+        const tag = tagInput.value.trim();
+        if (tag && !activeTags.includes(tag)) {
+            activeTags.push(tag);
+            tagInput.value = '';
+            updateFilters();
+        }
+    });
+
+    tagInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const tag = tagInput.value.trim();
+            if (tag && !activeTags.includes(tag)) {
+                activeTags.push(tag);
+                tagInput.value = '';
+                updateFilters();
+            }
+        }
+    });
+
+    window.removeTag = function(index) {
+        activeTags.splice(index, 1);
+        updateFilters();
+    };
+
+    const activeTypes = {{ active_types_json }};
+    const activeSource = {{ active_source_js }};
+
+    const TYPE_CATEGORIES = {
+        'pdf': 'Documents',
+        'image': 'Images',
+        'word': 'Word Documents',
+        'excel': 'Spreadsheets',
+        'email': 'Email',
+        'html': 'Web Pages',
+        'text': 'Text Files',
+        'archive': 'Archives',
+        'other': 'Other'
+    };
+
+    async function loadTypes() {
+        const container = document.querySelector('.type-toggles');
+        const loading = document.getElementById('types-loading');
+        if (!loading) return;
+
+        try {
+            const res = await fetch('/api/types');
+            const data = await res.json();
+
+            const catCounts = {};
+            data.forEach(item => {
+                const cat = item.category;
+                catCounts[cat] = (catCounts[cat] || 0) + item.count;
+            });
+
+            let html = '';
+            for (const [catId, catName] of Object.entries(TYPE_CATEGORIES)) {
+                const count = catCounts[catId] || 0;
+                if (count > 0) {
+                    const checked = activeTypes.length === 0 || activeTypes.includes(catId) ? 'checked' : '';
+                    html += `<label class="type-toggle">
+                        <input type="checkbox" name="type" value="${catId}" ${checked} data-count="${count}">
+                        <span class="toggle-label">${catName}</span>
+                        <span class="toggle-count">${count}</span>
+                    </label>`;
+                }
+            }
+            container.innerHTML = html;
+
+            document.querySelectorAll('.type-toggle input').forEach(t => {
+                t.addEventListener('change', updateFilters);
+            });
+        } catch (e) {
+            console.error('Failed to load types:', e);
+            container.innerHTML = '<span class="error">Failed to load types</span>';
+        }
+    }
+
+    async function loadSources() {
+        const select = document.getElementById('source-select');
+        if (select.options.length > 2) return;
+
+        try {
+            const res = await fetch('/api/sources');
+            const data = await res.json();
+
+            let html = '<option value="">All Sources</option>';
+            data.forEach(s => {
+                const selected = activeSource === s.id ? ' selected' : '';
+                html += `<option value="${s.id}"${selected}>${s.name}  (${s.count})</option>`;
+            });
+            select.innerHTML = html;
+        } catch (e) {
+            console.error('Failed to load sources:', e);
+        }
+    }
+
+    async function loadTags() {
+        const datalist = document.getElementById('tag-list');
+        if (datalist.options.length > 0) return;
+
+        try {
+            const res = await fetch('/api/tags');
+            const data = await res.json();
+
+            let html = '';
+            data.forEach(t => {
+                html += `<option value="${t.tag}" data-count="${t.count}">`;
+            });
+            datalist.innerHTML = html;
+        } catch (e) {
+            console.error('Failed to load tags:', e);
+        }
+    }
+
+    loadTypes();
+    loadSources();
+    loadTags();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block content %}
+<nav class="breadcrumb">
+    <a href="/tags">Tags</a> / {{ tag }}
+</nav>
+<p>{{ document_count }} documents with tag "{{ tag }}"</p>
+<table class="file-listing" id="document-table">
+    <thead>
+        <tr>
+            <th>Document</th>
+            <th>Source</th>
+            <th>Type</th>
+            <th>Size</th>
+            <th>Acquired</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for doc in documents %}
+        <tr data-date="{{ doc.timestamp }}">
+            <td>
+                <a href="/documents/{{ doc.id }}">{{ doc.icon }} {{ doc.title }}</a>
+                {% if doc.has_synopsis %}
+                <div class="synopsis">{{ doc.synopsis_preview }}</div>
+                {% endif %}
+                <div class="doc-tags">
+                    {% for t in doc.other_tags %}
+                    <a href="/tags/{{ t.encoded }}" class="tag-small">{{ t.name }}</a>
+                    {% endfor %}
+                </div>
+            </td>
+            <td><a href="/sources/{{ doc.source_id }}">{{ doc.source_id }}</a></td>
+            <td>{{ doc.mime_type }}</td>
+            <td>{{ doc.size_str }}</td>
+            <td>{{ doc.date_str }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% if has_duplicates %}
+<p>Documents with identical content found in multiple sources:</p>
+{% for group in duplicates %}
+<div class="duplicate-group">
+    <h3>Hash: <code>{{ group.hash_prefix }}</code></h3>
+    <ul>
+        {% for doc in group.docs %}
+        <li>
+            <a href="/documents/{{ doc.id }}">{{ doc.title }}</a>
+            from <a href="/sources/{{ doc.source_id }}">{{ doc.source_id }}</a>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endfor %}
+{% else %}
+<p>No duplicate documents found across sources.</p>
+{% endif %}
+{% endblock %}

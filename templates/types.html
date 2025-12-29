@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block content %}
+<nav class="breadcrumb">
+    <a href="/types">Types</a>
+</nav>
+<div class="type-tabs">
+    {% for cat in categories %}
+    {% if cat.count > 0 %}
+    <a href="/types/{{ cat.id }}" class="type-tab">{{ cat.name }} <span class="count">{{ cat.count }}</span></a>
+    {% endif %}
+    {% endfor %}
+</div>
+<h2>MIME Type Breakdown</h2>
+<table class="file-listing">
+    <thead>
+        <tr>
+            <th>Category</th>
+            <th>MIME Type</th>
+            <th>Count</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for stat in type_stats %}
+        <tr>
+            <td><a href="/types/{{ stat.category }}">{{ stat.category }}</a></td>
+            <td><code>{{ stat.mime_type }}</code></td>
+            <td>{{ stat.count }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

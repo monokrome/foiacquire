@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block content %}
+<table class="file-listing">
+    <thead>
+        <tr>
+            <th>Source</th>
+            <th>Documents</th>
+            <th>Last Scraped</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for source in sources %}
+        <tr>
+            <td><a href="/sources/{{ source.id }}">{{ source.name }}/</a></td>
+            <td>{{ source.doc_count }}</td>
+            <td>{{ source.last_scraped_str }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

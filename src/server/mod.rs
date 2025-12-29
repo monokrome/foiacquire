@@ -9,6 +9,7 @@
 mod cache;
 mod handlers;
 mod routes;
+mod template_structs;
 mod templates;
 
 pub use routes::create_router;
