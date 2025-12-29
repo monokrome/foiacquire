@@ -32,6 +32,9 @@ toml = "0.8"
 # Configuration management
 prefer = "0.2"
 
+# Environment file loading
+dotenvy = "0.15"
+
 # CLI
 clap = { version = "4", features = ["derive"] }
 

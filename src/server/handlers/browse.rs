@@ -118,16 +118,35 @@ pub async fn browse_documents(
         .into_iter()
         .collect();
 
-    // Get tags and sources if no filters are active
+    // Get tags and sources if no filters are active (use cache for expensive queries)
     let (all_tags, sources) = if has_filters {
         (Vec::new(), Vec::new())
     } else {
-        let tags_result = state.doc_repo.get_all_tags().await.unwrap_or_default();
-        let counts = state
-            .doc_repo
-            .get_all_source_counts()
-            .await
-            .unwrap_or_default();
+        // Use cached tags if available
+        let tags_result = if let Some(cached_tags) = state.stats_cache.get_all_tags() {
+            cached_tags.into_iter().map(|(t, _)| t).collect()
+        } else {
+            let tags = state.doc_repo.get_all_tags().await.unwrap_or_default();
+            // Cache with zero counts (we don't use counts in browse)
+            state
+                .stats_cache
+                .set_all_tags(tags.iter().map(|t| (t.clone(), 0)).collect());
+            tags
+        };
+
+        // Use cached source counts if available
+        let counts = if let Some(cached_counts) = state.stats_cache.get_source_counts() {
+            cached_counts
+        } else {
+            let counts = state
+                .doc_repo
+                .get_all_source_counts()
+                .await
+                .unwrap_or_default();
+            state.stats_cache.set_source_counts(counts.clone());
+            counts
+        };
+
         let source_list = state.source_repo.get_all().await.unwrap_or_default();
         let sources_result: Vec<_> = source_list
             .into_iter()

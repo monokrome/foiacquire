@@ -19,6 +19,9 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load .env file if present (before anything else)
+    let _ = dotenvy::dotenv();
+
     // Initialize logging based on verbosity
     let default_filter = if cli::is_verbose() {
         "foiacquire=info"

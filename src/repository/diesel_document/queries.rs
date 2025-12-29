@@ -197,17 +197,32 @@ impl DieselDocumentRepository {
         })
     }
 
-    /// Get category statistics - group MIME types into categories.
+    /// Get category statistics - count documents by category_id.
     pub async fn get_category_stats(&self) -> Result<HashMap<String, u64>, DieselError> {
-        let type_stats = self.get_type_stats().await?;
-        let mut category_stats = HashMap::new();
-
-        for (mime, count) in type_stats {
-            let category = crate::utils::mime_to_category(&mime).to_string();
-            *category_stats.entry(category).or_insert(0) += count;
+        #[derive(diesel::QueryableByName)]
+        struct CategoryCount {
+            #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+            category_id: Option<String>,
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            count: i64,
         }
 
-        Ok(category_stats)
+        with_conn!(self.pool, conn, {
+            let results: Vec<CategoryCount> = diesel_async::RunQueryDsl::load(
+                diesel::sql_query(
+                    "SELECT category_id, COUNT(*) as count FROM documents GROUP BY category_id",
+                ),
+                &mut conn,
+            )
+            .await?;
+
+            let mut stats = HashMap::new();
+            for row in results {
+                let category = row.category_id.unwrap_or_else(|| "unknown".to_string());
+                stats.insert(category, row.count as u64);
+            }
+            Ok(stats)
+        })
     }
 
     // ========================================================================
@@ -260,11 +275,17 @@ impl DieselDocumentRepository {
             query.load(&mut conn).await
         })?;
 
-        let mut docs = Vec::with_capacity(records.len());
-        for record in records {
-            let versions = self.load_versions(&record.id).await?;
-            docs.push(Self::record_to_document(record, versions));
-        }
+        // Batch load all versions in a single query
+        let doc_ids: Vec<String> = records.iter().map(|r| r.id.clone()).collect();
+        let mut versions_map = self.load_versions_batch(&doc_ids).await?;
+
+        let docs = records
+            .into_iter()
+            .map(|record| {
+                let versions = versions_map.remove(&record.id).unwrap_or_default();
+                Self::record_to_document(record, versions)
+            })
+            .collect();
         Ok(docs)
     }
 

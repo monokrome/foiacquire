@@ -31,6 +31,34 @@ impl DieselDocumentRepository {
         })
     }
 
+    /// Load versions for multiple documents in a single query.
+    /// Returns a map of document_id -> versions.
+    pub(crate) async fn load_versions_batch(
+        &self,
+        document_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<DocumentVersion>>, DieselError> {
+        if document_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let records: Vec<DocumentVersionRecord> = with_conn!(self.pool, conn, {
+            document_versions::table
+                .filter(document_versions::document_id.eq_any(document_ids))
+                .order((document_versions::document_id, document_versions::id.desc()))
+                .load(&mut conn)
+                .await
+        })?;
+
+        let mut result: std::collections::HashMap<String, Vec<DocumentVersion>> =
+            std::collections::HashMap::new();
+        for record in records {
+            let doc_id = record.document_id.clone();
+            let version = Self::version_record_to_model(record);
+            result.entry(doc_id).or_default().push(version);
+        }
+        Ok(result)
+    }
+
     /// Add a new version.
     #[allow(dead_code)]
     pub async fn add_version(
