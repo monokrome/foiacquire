@@ -276,14 +276,16 @@ fn report_crawl_results(
     docs_found: u64,
     total_browser_failures: u64,
     initial_frontier_size: usize,
+    browser_url: Option<&str>,
 ) {
     if pages_crawled == 0 && total_browser_failures > 0 {
         if total_browser_failures == initial_frontier_size as u64 {
+            let url_hint = browser_url.unwrap_or("(not configured - set BROWSER_URL)");
             tracing::error!(
                 "Crawl failed: all {} URLs failed with browser errors. \
-                 Check if the remote browser is running (ws://localhost:9222). \
-                 Try: ./bin/stealth restart",
-                total_browser_failures
+                 Check if the remote browser is running at: {}",
+                total_browser_failures,
+                url_hint
             );
         } else {
             tracing::error!(
@@ -457,11 +459,15 @@ impl ConfigurableScraper {
             }
         }
 
+        let browser_url = browser_config
+            .as_ref()
+            .and_then(|c| c.remote_url.as_deref());
         report_crawl_results(
             pages_crawled,
             docs_found,
             failure_stats.1,
             initial_frontier_size,
+            browser_url,
         );
         close_browser(&mut browser_fetcher).await;
     }
