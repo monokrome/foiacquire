@@ -319,13 +319,22 @@ impl Config {
     }
 
     /// Load configuration from a specific file path.
+    /// Supports JSON, TOML, YAML, and other formats based on file extension.
     pub async fn load_from_path(path: &Path) -> Result<Self, String> {
         let contents = tokio::fs::read_to_string(path)
             .await
             .map_err(|e| format!("Failed to read config file: {}", e))?;
 
-        let mut config: Config = serde_json::from_str(&contents)
-            .map_err(|e| format!("Failed to parse config file: {}", e))?;
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("json");
+
+        let mut config: Config = match ext {
+            "toml" => toml::from_str(&contents)
+                .map_err(|e| format!("Failed to parse TOML config: {}", e))?,
+            "yaml" | "yml" => serde_yaml::from_str(&contents)
+                .map_err(|e| format!("Failed to parse YAML config: {}", e))?,
+            _ => serde_json::from_str(&contents)
+                .map_err(|e| format!("Failed to parse JSON config: {}", e))?,
+        };
 
         config.source_path = Some(path.to_path_buf());
         config.llm = config.llm.with_env_overrides();
@@ -558,19 +567,18 @@ impl ResolvedTarget {
 }
 
 /// Look for a config file next to the database.
-/// Checks for foiacquire.json, foiacquire.toml, config.json, config.toml.
+/// Checks for foiacquire.{ext} and config.{ext} for all formats prefer supports.
 fn find_config_next_to_db(data_dir: &Path) -> Option<PathBuf> {
-    let candidates = [
-        "foiacquire.json",
-        "foiacquire.toml",
-        "config.json",
-        "config.toml",
-    ];
+    // All extensions supported by prefer
+    let extensions = ["json", "json5", "yaml", "yml", "toml", "ini", "xml"];
+    let basenames = ["foiacquire", "config"];
 
-    for name in candidates {
-        let path = data_dir.join(name);
-        if path.exists() {
-            return Some(path);
+    for basename in basenames {
+        for ext in extensions {
+            let path = data_dir.join(format!("{}.{}", basename, ext));
+            if path.exists() {
+                return Some(path);
+            }
         }
     }
     None

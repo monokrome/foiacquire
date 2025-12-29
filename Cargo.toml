@@ -133,6 +133,7 @@ tokio-postgres = { version = "0.7", optional = true }
 futures-util = { version = "0.3", optional = true }
 bytes = { version = "1", optional = true }
 ratatui = "0.30.0"
+serde_yaml = "0.9.34"
 
 [features]
 default = ["browser"]
