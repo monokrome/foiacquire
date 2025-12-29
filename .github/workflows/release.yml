@@ -58,11 +58,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
-      - name: Install musl tools and OpenSSL build deps
+      - name: Install musl tools
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools musl-dev cmake perl
+          sudo apt-get install -y musl-tools musl-dev
 
       - name: Cache cargo registry
         uses: actions/cache@v4

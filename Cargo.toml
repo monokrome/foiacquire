@@ -132,15 +132,12 @@ lapin = { version = "2", optional = true }
 tokio-postgres = { version = "0.7", optional = true }
 futures-util = { version = "0.3", optional = true }
 bytes = { version = "1", optional = true }
-# Bundle libpq for static musl builds
-pq-sys = { version = "0.6", features = ["bundled"], optional = true }
-# Vendor OpenSSL for static musl builds (required by bundled libpq)
-openssl = { version = "0.10", features = ["vendored"], optional = true }
 
 [features]
 default = ["browser"]
 browser = ["chromiumoxide"]
-postgres = ["diesel/postgres", "diesel-async/postgres", "dep:tokio-postgres", "dep:futures-util", "dep:bytes", "dep:pq-sys", "dep:openssl"]
+# Note: diesel-async/postgres enables diesel/postgres_backend (types only, no libpq/OpenSSL needed)
+postgres = ["diesel-async/postgres", "dep:tokio-postgres", "dep:futures-util", "dep:bytes"]
 redis-backend = ["redis"]
 amqp-broker = ["lapin"]
 ocr-ocrs = ["ocrs", "rten", "rten-imageproc", "image"]
