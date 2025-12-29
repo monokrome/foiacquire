@@ -29,7 +29,7 @@ pub async fn cmd_config_recover(database: &Path, output: Option<&Path>) -> anyho
         .ok_or_else(|| anyhow::anyhow!("Could not determine database filename"))?;
 
     // Open database and query sources
-    let ctx = DieselDbContext::new(database, target);
+    let ctx = DieselDbContext::from_sqlite_path(database, target)?;
     let source_repo = ctx.sources();
     let sources = source_repo.get_all().await?;
 

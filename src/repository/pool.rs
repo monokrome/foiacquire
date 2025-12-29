@@ -113,9 +113,11 @@ impl DbPool {
     ///
     /// Detects the backend from the URL:
     /// - `postgres://` or `postgresql://` → PostgreSQL
-    /// - Everything else → SQLite
+    /// - `sqlite:` prefix or file path → SQLite
     ///
-    /// Returns an error if a PostgreSQL URL is provided but the `postgres` feature is not enabled.
+    /// Returns an error if:
+    /// - A PostgreSQL URL is provided but the `postgres` feature is not enabled
+    /// - The URL format is not recognized
     pub fn from_url(url: &str) -> Result<Self, DbError> {
         // Validate the URL is supported by this build
         validate_database_url(url)?;
@@ -123,6 +125,16 @@ impl DbPool {
         #[cfg(feature = "postgres")]
         if is_postgres_url(url) {
             return Ok(DbPool::Postgres(PgPool::new(url, 10)?));
+        }
+
+        // Validate this looks like a SQLite URL/path, not a malformed postgres URL
+        if url.contains("://") && !url.starts_with("sqlite:") {
+            return Err(diesel::result::Error::QueryBuilderError(
+                format!(
+                    "Unrecognized database URL scheme: {}. Expected 'sqlite:', 'postgres://', or a file path.",
+                    url.split("://").next().unwrap_or("unknown")
+                ).into()
+            ));
         }
 
         Ok(DbPool::Sqlite(SqlitePool::new(url)))

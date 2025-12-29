@@ -29,14 +29,6 @@ pub struct DbContext {
 
 #[allow(dead_code)]
 impl DbContext {
-    /// Create a context from a database file path (SQLite only).
-    pub fn new(db_path: &Path, documents_dir: &Path) -> Self {
-        Self {
-            pool: DbPool::sqlite_from_path(db_path),
-            documents_dir: documents_dir.to_path_buf(),
-        }
-    }
-
     /// Create a context from a database URL.
     ///
     /// Supports:

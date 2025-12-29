@@ -130,12 +130,8 @@ impl Settings {
     /// This is the preferred way to get a DieselDbContext from settings.
     /// Panics if the database URL is invalid (e.g., invalid PostgreSQL URL).
     pub fn create_db_context(&self) -> DieselDbContext {
-        if self.database_url.is_some() {
-            DieselDbContext::from_url(&self.database_url(), &self.documents_dir)
-                .expect("Failed to create database context from DATABASE_URL")
-        } else {
-            DieselDbContext::new(&self.database_path(), &self.documents_dir)
-        }
+        DieselDbContext::from_url(&self.database_url(), &self.documents_dir)
+            .expect("Failed to create database context")
     }
 }
 
@@ -364,7 +360,7 @@ impl Config {
             .parent()
             .unwrap_or(Path::new("."))
             .join(DOCUMENTS_SUBDIR);
-        let ctx = DieselDbContext::new(db_path, &docs_dir);
+        let ctx = DieselDbContext::from_sqlite_path(db_path, &docs_dir).ok()?;
         let entry = ctx.config_history().get_latest().await.ok()??;
 
         match entry.format.to_lowercase().as_str() {

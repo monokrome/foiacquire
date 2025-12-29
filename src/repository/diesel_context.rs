@@ -24,7 +24,7 @@ use diesel_async::AsyncPgConnection;
 ///
 /// # Example
 /// ```ignore
-/// let ctx = DieselDbContext::new(&db_path, &documents_dir)?;
+/// let ctx = DieselDbContext::from_url("postgres://localhost/db", &documents_dir)?;
 /// let sources = ctx.sources().get_all().await?;
 /// let docs = ctx.documents().get_by_source("my-source").await?;
 /// ```
@@ -36,15 +36,6 @@ pub struct DieselDbContext {
 
 #[allow(dead_code)]
 impl DieselDbContext {
-    /// Create a new database context from a file path (SQLite only).
-    pub fn new(db_path: &Path, documents_dir: &Path) -> Self {
-        let pool = DbPool::sqlite_from_path(db_path);
-        Self {
-            pool,
-            documents_dir: documents_dir.to_path_buf(),
-        }
-    }
-
     /// Create a new database context from a database URL.
     ///
     /// Supports:
@@ -56,6 +47,15 @@ impl DieselDbContext {
             pool,
             documents_dir: documents_dir.to_path_buf(),
         })
+    }
+
+    /// Create a new database context from a SQLite file path.
+    ///
+    /// This is a convenience method that constructs a sqlite: URL from the path.
+    /// For PostgreSQL or explicit URLs, use `from_url()` instead.
+    pub fn from_sqlite_path(db_path: &Path, documents_dir: &Path) -> Result<Self, DieselError> {
+        let url = format!("sqlite:{}", db_path.display());
+        Self::from_url(&url, documents_dir)
     }
 
     /// Create a context with an existing pool.
@@ -476,7 +476,7 @@ mod tests {
         let db_path = dir.path().join("test.db");
         let docs_dir = dir.path().join("docs");
 
-        let ctx = DieselDbContext::new(&db_path, &docs_dir);
+        let ctx = DieselDbContext::from_sqlite_path(&db_path, &docs_dir).unwrap();
 
         // Initialize schema
         ctx.init_schema().await.unwrap();
