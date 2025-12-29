@@ -481,8 +481,8 @@ enum DbCommands {
         /// Only show what would be changed, don't actually update
         #[arg(long)]
         dry_run: bool,
-        /// Batch size for updates (default: 1000)
-        #[arg(long, default_value = "1000")]
+        /// Batch size for scanning and updating (default: 4096)
+        #[arg(long, default_value = "4096")]
         batch_size: usize,
     },
 }

@@ -1,7 +1,5 @@
 # Cargo configuration for foiacquire
 # https://doc.rust-lang.org/cargo/reference/config.html
 
-[env]
-# Enable SQLx offline mode for builds without database connection
-# The .sqlx directory contains pre-computed query metadata
-SQLX_OFFLINE = "true"
+[alias]
+faq = "run --release --features postgres,browser --"

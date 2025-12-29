@@ -900,7 +900,8 @@ where
 /// Remap document categories based on MIME types.
 ///
 /// This command updates the category_id column for all documents based on
-/// the MIME type of their current (latest) version.
+/// the MIME type of their current (latest) version. Processes documents in
+/// batches to limit memory usage.
 pub async fn cmd_db_remap_categories(
     settings: &Settings,
     dry_run: bool,
@@ -913,12 +914,10 @@ pub async fn cmd_db_remap_categories(
         style("→").cyan(),
         if dry_run { " (dry run)" } else { "" }
     );
+    println!("  Batch size: {}", batch_size);
 
     let ctx = settings.create_db_context()?;
     let pool = ctx.pool();
-
-    // Get all documents with their current version's MIME type
-    println!("  Scanning documents...");
 
     #[derive(diesel::QueryableByName)]
     struct DocMime {
@@ -930,101 +929,150 @@ pub async fn cmd_db_remap_categories(
         current_category: Option<String>,
     }
 
-    let results: Vec<DocMime> = {
-        let query = r#"
-            SELECT d.id as document_id, dv.mime_type, d.category_id as current_category
-            FROM documents d
-            JOIN document_versions dv ON d.id = dv.document_id
-            WHERE dv.id = (SELECT MAX(id) FROM document_versions WHERE document_id = d.id)
-        "#;
-
-        crate::with_conn!(pool, conn, {
-            diesel::sql_query(query).load(&mut conn).await
-        })?
+    // Get total count for progress
+    let total_docs: i64 = {
+        #[derive(diesel::QueryableByName)]
+        struct CountRow {
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            count: i64,
+        }
+        let result: CountRow = crate::with_conn!(pool, conn, {
+            diesel::sql_query("SELECT COUNT(*) as count FROM documents")
+                .get_result(&mut conn)
+                .await
+        })?;
+        result.count
     };
 
-    println!("  Found {} documents", results.len());
+    println!("  Total documents: {}", total_docs);
+    println!("  Scanning and updating in batches...\n");
 
-    // Group by (current_category, new_category) for summary
-    let mut changes: HashMap<(Option<String>, String), Vec<String>> = HashMap::new();
-    let mut no_change_count = 0;
-
-    for doc in &results {
-        let new_category = mime_type_category(&doc.mime_type).id().to_string();
-        if doc.current_category.as_deref() == Some(&new_category) {
-            no_change_count += 1;
-        } else {
-            changes
-                .entry((doc.current_category.clone(), new_category))
-                .or_default()
-                .push(doc.document_id.clone());
-        }
-    }
-
-    // Print summary
-    println!("\n  Category changes:");
-    let mut total_changes = 0;
-    for ((from, to), doc_ids) in &changes {
-        let from_str = from.as_deref().unwrap_or("NULL");
-        println!("    {} -> {}: {} documents", from_str, to, doc_ids.len());
-        total_changes += doc_ids.len();
-    }
-    println!("    No change: {} documents", no_change_count);
-    println!("    Total to update: {} documents", total_changes);
-
-    if dry_run {
-        println!(
-            "\n{} Dry run complete. No changes made.",
-            style("✓").green()
-        );
-        return Ok(());
-    }
-
-    if total_changes == 0 {
-        println!(
-            "\n{} All documents already have correct categories.",
-            style("✓").green()
-        );
-        return Ok(());
-    }
-
-    // Apply updates in batches
-    println!("\n  Applying updates...");
-
-    let pb = ProgressBar::new(total_changes as u64);
+    let pb = ProgressBar::new(total_docs as u64);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("  {bar:40.cyan/dim} {pos}/{len} ({per_sec})")
+            .template("  {bar:40.cyan/dim} {pos}/{len} ({per_sec}) {msg}")
             .unwrap()
             .progress_chars("=>-"),
     );
     pb.enable_steady_tick(Duration::from_millis(100));
 
-    for ((_from, to), doc_ids) in changes {
-        for chunk in doc_ids.chunks(batch_size) {
-            // For now, use a simpler approach with individual updates
-            for doc_id in chunk {
+    let mut total_updated = 0u64;
+    let mut total_skipped = 0u64;
+    let mut category_stats: HashMap<(Option<String>, String), u64> = HashMap::new();
+    let mut offset = 0u64;
+
+    loop {
+        // Fetch batch of documents with their MIME types
+        let batch: Vec<DocMime> = {
+            let query = format!(
+                r#"SELECT d.id as document_id, dv.mime_type, d.category_id as current_category
+                   FROM documents d
+                   JOIN document_versions dv ON d.id = dv.document_id
+                   WHERE dv.id = (SELECT MAX(id) FROM document_versions WHERE document_id = d.id)
+                   ORDER BY d.id
+                   LIMIT {} OFFSET {}"#,
+                batch_size, offset
+            );
+            crate::with_conn!(pool, conn, {
+                diesel::sql_query(&query).load(&mut conn).await
+            })?
+        };
+
+        if batch.is_empty() {
+            break;
+        }
+
+        let batch_len = batch.len();
+
+        // Group by target category for bulk updates
+        let mut updates_by_category: HashMap<String, Vec<String>> = HashMap::new();
+
+        for doc in batch {
+            let new_category = mime_type_category(&doc.mime_type).id().to_string();
+            if doc.current_category.as_deref() == Some(&new_category) {
+                total_skipped += 1;
+            } else {
+                *category_stats
+                    .entry((doc.current_category.clone(), new_category.clone()))
+                    .or_insert(0) += 1;
+                updates_by_category
+                    .entry(new_category)
+                    .or_default()
+                    .push(doc.document_id);
+            }
+        }
+
+        // Apply bulk updates per category
+        if !dry_run {
+            for (category, doc_ids) in updates_by_category {
+                if doc_ids.is_empty() {
+                    continue;
+                }
+
+                // Build IN clause with escaped IDs
+                let escaped_ids: Vec<String> = doc_ids
+                    .iter()
+                    .map(|id| format!("'{}'", id.replace('\'', "''")))
+                    .collect();
+                let in_clause = escaped_ids.join(", ");
+
                 crate::with_conn!(pool, conn, {
                     diesel::sql_query(format!(
-                        "UPDATE documents SET category_id = '{}' WHERE id = '{}'",
-                        to.replace('\'', "''"),
-                        doc_id.replace('\'', "''")
+                        "UPDATE documents SET category_id = '{}' WHERE id IN ({})",
+                        category.replace('\'', "''"),
+                        in_clause
                     ))
                     .execute(&mut conn)
                     .await
                 })?;
-                pb.inc(1);
+
+                total_updated += doc_ids.len() as u64;
+            }
+        } else {
+            // In dry run, just count what would be updated
+            for doc_ids in updates_by_category.values() {
+                total_updated += doc_ids.len() as u64;
             }
         }
+
+        pb.inc(batch_len as u64);
+        offset += batch_len as u64;
+
+        pb.set_message(format!(
+            "updated: {}, skipped: {}",
+            total_updated, total_skipped
+        ));
     }
 
-    pb.finish();
+    pb.finish_with_message(format!(
+        "updated: {}, skipped: {}",
+        total_updated, total_skipped
+    ));
 
-    println!(
-        "\n{} Updated {} documents!",
-        style("✓").green(),
-        total_changes
-    );
+    // Print summary
+    println!("\n  Category changes:");
+    let mut sorted_stats: Vec<_> = category_stats.into_iter().collect();
+    sorted_stats.sort_by(|a, b| b.1.cmp(&a.1)); // Sort by count descending
+
+    for ((from, to), count) in sorted_stats {
+        let from_str = from.as_deref().unwrap_or("NULL");
+        println!("    {} -> {}: {} documents", from_str, to, count);
+    }
+    println!("    No change: {} documents", total_skipped);
+
+    if dry_run {
+        println!(
+            "\n{} Dry run complete. {} documents would be updated.",
+            style("✓").green(),
+            total_updated
+        );
+    } else {
+        println!(
+            "\n{} Updated {} documents!",
+            style("✓").green(),
+            total_updated
+        );
+    }
 
     Ok(())
 }
