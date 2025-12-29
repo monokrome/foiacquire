@@ -172,16 +172,12 @@ pub async fn cmd_scrape(
                             &format!("  {} {} error", style("✗").red(), source_id),
                         );
                     }
-                    // In daemon mode, log error and continue; otherwise propagate
-                    if daemon {
-                        let _ = crate::cli::tui::log(&format!(
-                            "\n{} Scraper error: {}",
-                            style("!").yellow(),
-                            e
-                        ));
-                    } else {
-                        return Err(e);
-                    }
+                    // Log error and continue - no reason to bail completely over one failure
+                    let _ = crate::cli::tui::log(&format!(
+                        "\n{} Scraper error: {}",
+                        style("!").yellow(),
+                        e
+                    ));
                 }
             }
         } else {
