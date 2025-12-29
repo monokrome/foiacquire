@@ -29,7 +29,7 @@ use anyhow::Result;
 #[cfg(feature = "browser")]
 use tokio::sync::Mutex;
 #[cfg(feature = "browser")]
-use tracing::info;
+use tracing::debug;
 
 #[cfg(feature = "browser")]
 use chromiumoxide::{Browser, BrowserConfig};
@@ -74,7 +74,7 @@ impl BrowserFetcher {
         for path in Self::CHROME_PATHS {
             let p = std::path::Path::new(path);
             if p.exists() {
-                info!("Found Chrome at: {}", path);
+                debug!("Found Chrome at: {}", path);
                 return Ok(p.to_path_buf());
             }
         }
@@ -90,7 +90,7 @@ impl BrowserFetcher {
                 if output.status.success() {
                     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     if !path.is_empty() {
-                        info!("Found Chrome in PATH: {}", path);
+                        debug!("Found Chrome in PATH: {}", path);
                         return Ok(std::path::PathBuf::from(path));
                     }
                 }
@@ -117,7 +117,7 @@ impl BrowserFetcher {
             return self.connect_remote(&remote_url).await;
         }
 
-        info!("Launching browser (headless={})", self.config.headless);
+        debug!("Launching browser (headless={})", self.config.headless);
 
         // Try to find Chrome, or download it
         let chrome_path = Self::find_or_download_chrome().await?;
@@ -179,7 +179,7 @@ impl BrowserFetcher {
 
     /// Connect to a remote Chrome instance.
     async fn connect_remote(&mut self, url: &str) -> Result<()> {
-        info!(
+        debug!(
             "Connecting to remote browser at {} (timeout: {}s)",
             url, self.config.timeout
         );
@@ -205,7 +205,7 @@ impl BrowserFetcher {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("No webSocketDebuggerUrl in response"))?;
 
-        info!("Connecting to WebSocket: {}", ws_url);
+        debug!("Connecting to WebSocket: {}", ws_url);
 
         // Configure browser with custom request timeout
         let handler_config = chromiumoxide::handler::HandlerConfig {

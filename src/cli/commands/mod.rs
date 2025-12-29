@@ -138,7 +138,15 @@ enum Commands {
     },
 
     /// Show system status
-    Status,
+    Status {
+        /// Continuously refresh status display (TUI mode)
+        #[arg(long)]
+        live: bool,
+
+        /// Refresh interval in seconds
+        #[arg(long, default_value = "5")]
+        interval: u64,
+    },
 
     /// Analyze documents: detect content types, extract text, and run OCR
     Analyze {
@@ -190,6 +198,10 @@ enum Commands {
         /// Address to bind to: PORT, HOST, or HOST:PORT (default: 127.0.0.1:3030)
         #[arg(default_value = "127.0.0.1:3030")]
         bind: String,
+
+        /// Skip automatic database migration on startup
+        #[arg(long)]
+        no_migrate: bool,
     },
 
     /// Refresh metadata for existing documents (server date, original filename)
@@ -443,6 +455,17 @@ enum StateCommands {
 
 #[derive(Subcommand)]
 enum DbCommands {
+    /// Run database migrations
+    Migrate {
+        /// Only check migration status, don't run migrations
+        #[arg(long)]
+        check: bool,
+
+        /// Force re-run migrations even if schema appears up-to-date
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Copy data between databases (e.g., SQLite to Postgres)
     Copy {
         /// Source database URL (e.g., ./data.db or postgres://user:pass@host/db)
@@ -537,6 +560,7 @@ pub async fn run() -> anyhow::Result<()> {
             }
         },
         Commands::Db { command } => match command {
+            DbCommands::Migrate { check, force } => db::cmd_migrate(&settings, check, force).await,
             DbCommands::Copy {
                 from,
                 to,
@@ -589,7 +613,7 @@ pub async fn run() -> anyhow::Result<()> {
             )
             .await
         }
-        Commands::Status => scrape::cmd_status(&settings).await,
+        Commands::Status { live, interval } => scrape::cmd_status(&settings, live, interval).await,
         Commands::Analyze {
             source_id,
             doc_id,
@@ -619,7 +643,9 @@ pub async fn run() -> anyhow::Result<()> {
             backends,
             deepseek_path,
         } => analyze::cmd_analyze_compare(&file, pages.as_deref(), &backends, deepseek_path).await,
-        Commands::Serve { bind } => serve::cmd_serve(&settings, &bind).await,
+        Commands::Serve { bind, no_migrate } => {
+            serve::cmd_serve(&settings, &bind, no_migrate).await
+        }
         Commands::Refresh {
             source_id,
             workers,

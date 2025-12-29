@@ -5,19 +5,43 @@ use console::style;
 use crate::config::Settings;
 
 /// Start the web server.
-pub async fn cmd_serve(settings: &Settings, bind: &str) -> anyhow::Result<()> {
+pub async fn cmd_serve(settings: &Settings, bind: &str, no_migrate: bool) -> anyhow::Result<()> {
     let (host, port) = parse_bind_address(bind)?;
 
-    // Run database migrations first
-    println!("{} Running database migrations...", style("→").cyan(),);
     let ctx = settings.create_db_context()?;
-    match ctx.init_schema().await {
-        Ok(()) => {
-            println!("  {} Database ready", style("✓").green(),);
+
+    if no_migrate {
+        // Check schema version but don't migrate
+        match ctx.get_schema_version().await {
+            Ok(Some(version)) => {
+                println!(
+                    "  {} Database schema version: {}",
+                    style("→").cyan(),
+                    version
+                );
+            }
+            Ok(None) => {
+                eprintln!(
+                    "{} Database not initialized. Run 'foiacquire db migrate' first.",
+                    style("!").yellow()
+                );
+                return Err(anyhow::anyhow!("Database not initialized"));
+            }
+            Err(e) => {
+                eprintln!("  {} Failed to check schema: {}", style("!").yellow(), e);
+            }
         }
-        Err(e) => {
-            eprintln!("  {} Migration failed: {}", style("✗").red(), e);
-            return Err(anyhow::anyhow!("Database migration failed: {}", e));
+    } else {
+        // Run database migrations
+        println!("{} Running database migrations...", style("→").cyan(),);
+        match ctx.init_schema().await {
+            Ok(()) => {
+                println!("  {} Database ready", style("✓").green(),);
+            }
+            Err(e) => {
+                eprintln!("  {} Migration failed: {}", style("✗").red(), e);
+                return Err(anyhow::anyhow!("Database migration failed: {}", e));
+            }
         }
     }
 

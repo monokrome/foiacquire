@@ -127,6 +127,39 @@ impl DieselDocumentRepository {
         self.count_by_status(None).await
     }
 
+    /// Get status counts for each source.
+    /// Returns a map of source_id -> (status -> count).
+    pub async fn get_source_status_counts(
+        &self,
+    ) -> Result<HashMap<String, HashMap<String, u64>>, DieselError> {
+        #[derive(diesel::QueryableByName)]
+        struct SourceStatusCount {
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            source_id: String,
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            status: String,
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            count: i64,
+        }
+
+        with_conn!(self.pool, conn, {
+            let rows: Vec<SourceStatusCount> = diesel::sql_query(
+                "SELECT source_id, status, COUNT(*) as count FROM documents GROUP BY source_id, status",
+            )
+            .load(&mut conn)
+            .await?;
+
+            let mut result: HashMap<String, HashMap<String, u64>> = HashMap::new();
+            for row in rows {
+                result
+                    .entry(row.source_id)
+                    .or_default()
+                    .insert(row.status, row.count as u64);
+            }
+            Ok(result)
+        })
+    }
+
     /// Count documents needing date estimation.
     /// These are documents without an estimated_date in metadata.
     pub async fn count_documents_needing_date_estimation(

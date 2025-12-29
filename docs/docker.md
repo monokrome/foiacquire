@@ -31,6 +31,7 @@ docker run -v ./foia-data:/opt/foiacquire \
 | `DATABASE_URL` | - | Database connection string |
 | `BROWSER_URL` | - | Remote Chrome DevTools URL |
 | `RUST_LOG` | `info` | Log level |
+| `MIGRATE` | `false` | Run database migrations on container start |
 
 ## Volume Mounts
 

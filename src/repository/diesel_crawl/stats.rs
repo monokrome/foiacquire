@@ -52,6 +52,23 @@ impl DieselCrawlRepository {
         })
     }
 
+    /// Count all pending downloads across all sources.
+    pub async fn count_pending_downloads(&self) -> Result<i64, DieselError> {
+        use diesel::dsl::count_star;
+        with_conn!(self.pool, conn, {
+            let count: i64 = crawl_urls::table
+                .filter(
+                    crawl_urls::status
+                        .eq("discovered")
+                        .or(crawl_urls::status.eq("fetching")),
+                )
+                .select(count_star())
+                .first(&mut conn)
+                .await?;
+            Ok(count)
+        })
+    }
+
     /// Get overall crawl state for a source.
     pub async fn get_crawl_state(&self, source_id: &str) -> Result<CrawlState, DieselError> {
         let counts = self.count_by_status(source_id).await?;

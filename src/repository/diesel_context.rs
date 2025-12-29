@@ -127,6 +127,62 @@ impl DieselDbContext {
         )
     }
 
+    /// Get the current schema version from the database.
+    ///
+    /// Returns None if the storage_meta table doesn't exist or has no format_version entry.
+    pub async fn get_schema_version(&self) -> Result<Option<String>, DieselError> {
+        #[derive(diesel::QueryableByName)]
+        struct MetaValue {
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            value: String,
+        }
+
+        let result = with_conn_split!(self.pool,
+            sqlite: conn => {
+                use diesel_async::RunQueryDsl;
+                let result: Result<MetaValue, _> = diesel::sql_query(
+                    "SELECT value FROM storage_meta WHERE key = 'format_version'"
+                )
+                .get_result(&mut conn)
+                .await;
+                result
+            },
+            postgres: conn => {
+                use diesel_async::RunQueryDsl;
+                let result: Result<MetaValue, _> = diesel::sql_query(
+                    "SELECT value FROM storage_meta WHERE key = 'format_version'"
+                )
+                .get_result(&mut conn)
+                .await;
+                result
+            }
+        );
+
+        match result {
+            Ok(meta) => Ok(Some(meta.value)),
+            Err(diesel::result::Error::NotFound) => Ok(None),
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::Unknown,
+                _,
+            )) => {
+                // Table doesn't exist
+                Ok(None)
+            }
+            Err(e) => {
+                // Check if it's a "no such table" error for SQLite or similar
+                let err_str = e.to_string();
+                if err_str.contains("no such table")
+                    || err_str.contains("does not exist")
+                    || err_str.contains("relation")
+                {
+                    Ok(None)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
     async fn init_sqlite_schema(conn: &mut SqliteConn) -> Result<(), DieselError> {
         conn.batch_execute(
             r#"
@@ -280,6 +336,15 @@ impl DieselDbContext {
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
+            -- Storage metadata table
+            CREATE TABLE IF NOT EXISTS storage_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
+            -- Set schema version
+            INSERT OR REPLACE INTO storage_meta (key, value) VALUES ('format_version', '13');
+
             -- Indexes
             CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_id);
             CREATE INDEX IF NOT EXISTS idx_documents_url ON documents(source_url);
@@ -425,6 +490,11 @@ impl DieselDbContext {
                 rate_limit_hits INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             )"#,
+            r#"CREATE TABLE IF NOT EXISTS storage_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )"#,
+            "INSERT INTO storage_meta (key, value) VALUES ('format_version', '13') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
             "CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_id)",
             "CREATE INDEX IF NOT EXISTS idx_documents_url ON documents(source_url)",
             "CREATE INDEX IF NOT EXISTS idx_document_versions_doc ON document_versions(document_id)",

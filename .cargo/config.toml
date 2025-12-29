@@ -4,4 +4,5 @@
 [alias]
 faq = "run --release --features postgres,browser --"
 serve = "run --release --features postgres -- serve"
-scrape = "run --release --features postgres -- scrape"
+scrape = "run --release --features postgres,browser -- scrape"
+ocr = "run --release --features postgres -- ocr"
