@@ -8,7 +8,7 @@ use super::helpers::truncate;
 
 /// List configured sources.
 pub async fn cmd_source_list(settings: &Settings) -> anyhow::Result<()> {
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let source_repo = ctx.sources();
     let sources = source_repo.get_all().await?;
 
@@ -52,7 +52,7 @@ pub async fn cmd_source_rename(
 ) -> anyhow::Result<()> {
     use std::io::{self, Write};
 
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let source_repo = ctx.sources();
     let doc_repo = ctx.documents();
     let crawl_repo = ctx.crawl();

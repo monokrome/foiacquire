@@ -17,7 +17,7 @@ pub async fn cmd_crawl_status(
     settings: &Settings,
     source_id: Option<String>,
 ) -> anyhow::Result<()> {
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let source_repo = ctx.sources();
     let crawl_repo = ctx.crawl();
 
@@ -125,7 +125,7 @@ pub async fn cmd_crawl_clear(
         return Ok(());
     }
 
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let crawl_repo = ctx.crawl();
     crawl_repo.clear_source_all(source_id).await?;
 
@@ -156,7 +156,7 @@ pub async fn cmd_crawl(settings: &Settings, source_id: &str, _limit: usize) -> a
         }
     };
 
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let source_repo = ctx.sources();
     let crawl_repo = Arc::new(ctx.crawl());
 

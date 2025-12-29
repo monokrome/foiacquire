@@ -101,7 +101,7 @@ pub async fn cmd_config_restore(settings: &Settings, output: Option<&Path>) -> a
         anyhow::bail!("Database not found: {}", settings.database_path().display());
     }
 
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let repo = ctx.config_history();
     let entry = repo
         .get_latest()
@@ -134,7 +134,7 @@ pub async fn cmd_config_history(settings: &Settings, full: bool) -> anyhow::Resu
         anyhow::bail!("Database not found: {}", settings.database_path().display());
     }
 
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let repo = ctx.config_history();
     let entries = repo.get_all().await?;
 

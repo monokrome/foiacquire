@@ -16,7 +16,7 @@ pub async fn cmd_discover(
     use regex::Regex;
     use std::collections::{HashMap, HashSet};
 
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
     let crawl_repo = ctx.crawl();
 

@@ -103,6 +103,16 @@ impl DieselDbContext {
         DieselConfigHistoryRepository::new(self.pool.clone())
     }
 
+    /// Test that the database connection works.
+    ///
+    /// For PostgreSQL, this validates credentials and network connectivity.
+    /// For SQLite, this creates the database file if it doesn't exist.
+    ///
+    /// Call this early in application startup to fail fast on connection issues.
+    pub async fn test_connection(&self) -> Result<(), DieselError> {
+        crate::with_conn!(self.pool, _conn, Ok(()))
+    }
+
     /// Initialize all database schemas.
     ///
     /// This creates the necessary tables if they don't exist.

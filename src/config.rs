@@ -128,10 +128,24 @@ impl Settings {
     /// Create a database context using the configured database URL or path.
     ///
     /// This is the preferred way to get a DieselDbContext from settings.
-    /// Panics if the database URL is invalid (e.g., invalid PostgreSQL URL).
-    pub fn create_db_context(&self) -> DieselDbContext {
+    /// Returns an error if the database URL is invalid.
+    pub fn create_db_context(&self) -> Result<DieselDbContext, diesel::result::Error> {
         DieselDbContext::from_url(&self.database_url(), &self.documents_dir)
-            .expect("Failed to create database context")
+    }
+
+    /// Create a database context and verify the connection works.
+    ///
+    /// This is useful for failing fast at startup if the database is unreachable.
+    /// For PostgreSQL, this validates credentials and network connectivity.
+    /// For SQLite, this creates the database file if it doesn't exist.
+    pub async fn create_db_context_validated(&self) -> Result<DieselDbContext, String> {
+        let ctx = self
+            .create_db_context()
+            .map_err(|e| format!("Failed to create database context: {}", e))?;
+        ctx.test_connection()
+            .await
+            .map_err(|e| format!("Failed to connect to database: {}", e))?;
+        Ok(ctx)
     }
 }
 
@@ -377,7 +391,13 @@ impl Config {
         let data = self.to_json_relative(&settings.data_dir);
         let format = "json";
 
-        let ctx = settings.create_db_context();
+        let ctx = match settings.create_db_context() {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                tracing::warn!("Could not save config to history (db context error): {}", e);
+                return;
+            }
+        };
         let repo = ctx.config_history();
 
         match repo.insert_if_new(&data, format, &hash).await {

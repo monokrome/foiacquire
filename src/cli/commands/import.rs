@@ -67,7 +67,7 @@ pub async fn cmd_import(
     }
 
     let documents_dir = settings.documents_dir.clone();
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
     let source_repo = ctx.sources();
 

@@ -26,7 +26,7 @@ pub async fn cmd_annotate(
     use crate::services::{AnnotationEvent, AnnotationService};
     use tokio::sync::mpsc;
 
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
 
     // Set up config watcher for stop-process and inplace modes
@@ -313,7 +313,7 @@ pub async fn cmd_detect_dates(
 ) -> anyhow::Result<()> {
     use crate::services::date_detection::{detect_date, DateConfidence};
 
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
 
     // Count documents needing date estimation

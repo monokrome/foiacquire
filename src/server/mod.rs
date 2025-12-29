@@ -52,7 +52,7 @@ pub struct AppState {
 
 impl AppState {
     pub async fn new(settings: &Settings) -> anyhow::Result<Self> {
-        let ctx = settings.create_db_context();
+        let ctx = settings.create_db_context()?;
 
         Ok(Self {
             doc_repo: Arc::new(ctx.documents()),

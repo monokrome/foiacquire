@@ -163,7 +163,7 @@ pub async fn cmd_scrape(
     }
 
     // Use DbContext for config history
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let config_history = ctx.config_history();
 
     // Initial config load for source list
@@ -481,7 +481,7 @@ async fn cmd_scrape_single_tui(
         }
     }
 
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let source_repo = ctx.sources();
     let doc_repo = ctx.documents();
     let crawl_repo = Arc::new(ctx.crawl());
@@ -607,7 +607,7 @@ pub async fn cmd_download(
 
     settings.ensure_directories()?;
 
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let doc_repo = Arc::new(ctx.documents());
     let crawl_repo = Arc::new(ctx.crawl());
 
@@ -777,7 +777,7 @@ pub async fn cmd_status(settings: &Settings) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
     let source_repo = ctx.sources();
 
@@ -817,7 +817,7 @@ pub async fn cmd_refresh(
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::sync::Semaphore;
 
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let doc_repo = Arc::new(ctx.documents());
 
     // Get documents that need metadata refresh

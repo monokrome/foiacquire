@@ -640,7 +640,7 @@ pub async fn cmd_analyze(
             None
         };
 
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
     let config_history = ctx.config_history();
 

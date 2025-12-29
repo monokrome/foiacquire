@@ -234,7 +234,7 @@ pub async fn cmd_archive(
 ) -> anyhow::Result<()> {
     use crate::ocr::TextExtractor;
 
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
 
     let archive_count = doc_repo.count_unprocessed_archives(source_id).await?;
@@ -330,7 +330,7 @@ pub async fn cmd_ls(
     limit: usize,
     format: &str,
 ) -> anyhow::Result<()> {
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
 
     // Get documents based on filters
@@ -424,7 +424,7 @@ pub async fn cmd_ls(
 
 /// Show document info/metadata.
 pub async fn cmd_info(settings: &Settings, doc_id: &str) -> anyhow::Result<()> {
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
 
     // Try to find document by ID
@@ -539,7 +539,7 @@ pub async fn cmd_info(settings: &Settings, doc_id: &str) -> anyhow::Result<()> {
 
 /// Output document content to stdout.
 pub async fn cmd_read(settings: &Settings, doc_id: &str, text_only: bool) -> anyhow::Result<()> {
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
 
     // Find document
@@ -604,7 +604,7 @@ pub async fn cmd_search(
     source_id: Option<&str>,
     limit: usize,
 ) -> anyhow::Result<()> {
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
 
     let query_lower = query.to_lowercase();

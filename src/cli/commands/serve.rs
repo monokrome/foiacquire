@@ -10,7 +10,7 @@ pub async fn cmd_serve(settings: &Settings, bind: &str) -> anyhow::Result<()> {
 
     // Run database migrations first
     println!("{} Running database migrations...", style("→").cyan(),);
-    let ctx = settings.create_db_context();
+    let ctx = settings.create_db_context()?;
     match ctx.init_schema().await {
         Ok(()) => {
             println!("  {} Database ready", style("✓").green(),);
