@@ -184,11 +184,24 @@ impl BrowserFetcher {
             url, self.config.timeout
         );
 
+        // Chrome DevTools only accepts connections with IP addresses or localhost in the Host header.
+        // When using Docker container names (e.g., ws://stealth:9222), we need to resolve the
+        // hostname to an IP address first.
+        let resolved_url = Self::resolve_hostname_to_ip(url).await.unwrap_or_else(|e| {
+            debug!(
+                "Could not resolve hostname to IP: {}, using original URL",
+                e
+            );
+            url.to_string()
+        });
+
         // Get WebSocket URL from the /json/version endpoint
-        let http_url = url
+        let http_url = resolved_url
             .replace("ws://", "http://")
             .replace("wss://", "https://");
         let version_url = format!("{}/json/version", http_url.trim_end_matches('/'));
+
+        debug!("Fetching browser version from: {}", version_url);
 
         let client = reqwest::Client::new();
         let resp: serde_json::Value = client
@@ -229,6 +242,41 @@ impl BrowserFetcher {
         self.browser = Some(Arc::new(Mutex::new(browser)));
 
         Ok(())
+    }
+
+    /// Resolve a hostname in a URL to an IP address.
+    /// Chrome DevTools rejects connections with non-IP Host headers for security.
+    async fn resolve_hostname_to_ip(url: &str) -> Result<String> {
+        use std::net::ToSocketAddrs;
+
+        // Parse the URL to extract host and port
+        let url_obj = url::Url::parse(url).context("Invalid URL")?;
+        let host = url_obj
+            .host_str()
+            .ok_or_else(|| anyhow::anyhow!("No host in URL"))?;
+        let port = url_obj.port().unwrap_or(9222);
+
+        // Skip resolution for localhost and IP addresses
+        if host == "localhost" || host.parse::<std::net::IpAddr>().is_ok() {
+            return Ok(url.to_string());
+        }
+
+        // Resolve hostname to IP (blocking, but fast for local DNS)
+        let addr_str = format!("{}:{}", host, port);
+        let resolved = tokio::task::spawn_blocking(move || addr_str.to_socket_addrs().ok()?.next())
+            .await
+            .context("DNS resolution task failed")?
+            .ok_or_else(|| anyhow::anyhow!("Could not resolve hostname: {}", host))?;
+
+        // Rebuild URL with IP address
+        let ip = resolved.ip();
+        let mut new_url = url_obj.clone();
+        new_url
+            .set_host(Some(&ip.to_string()))
+            .map_err(|_| anyhow::anyhow!("Failed to set host in URL"))?;
+
+        debug!("Resolved {} -> {}", url, new_url);
+        Ok(new_url.to_string())
     }
 
     /// Close the browser.
