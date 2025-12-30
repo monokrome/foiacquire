@@ -209,7 +209,9 @@ mod tests {
     fn test_mime_to_extension_office() {
         assert_eq!(mime_to_extension("application/msword"), "doc");
         assert_eq!(
-            mime_to_extension("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            mime_to_extension(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
             "docx"
         );
         assert_eq!(mime_to_extension("application/vnd.ms-excel"), "xls");

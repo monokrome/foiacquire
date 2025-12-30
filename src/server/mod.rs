@@ -153,7 +153,11 @@ mod tests {
         );
         doc.status = DocumentStatus::OcrComplete;
         doc.synopsis = Some("This is a test document synopsis.".to_string());
-        doc.tags = vec!["test".to_string(), "example".to_string(), "foia".to_string()];
+        doc.tags = vec![
+            "test".to_string(),
+            "example".to_string(),
+            "foia".to_string(),
+        ];
         ctx.documents().save(&doc).await.unwrap();
 
         let state = AppState {
@@ -361,12 +365,7 @@ mod tests {
         let (app, _dir) = setup_test_app().await;
 
         let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -456,12 +455,7 @@ mod tests {
         let (app, _dir) = setup_test_app().await;
 
         let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/tags")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri("/tags").body(Body::empty()).unwrap())
             .await
             .unwrap();
 

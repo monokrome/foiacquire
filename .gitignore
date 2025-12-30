@@ -21,5 +21,7 @@
 !.git*
 !.sqlx/
 !.cargo/
+!.env.example
 dist/
 *.png
+docker-compose.yml

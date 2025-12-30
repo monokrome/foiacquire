@@ -199,9 +199,7 @@ impl ServiceStatus {
 
 /// Get the current hostname.
 fn get_hostname() -> Option<String> {
-    hostname::get()
-        .ok()
-        .and_then(|h| h.into_string().ok())
+    hostname::get().ok().and_then(|h| h.into_string().ok())
 }
 
 #[cfg(test)]
@@ -269,7 +267,10 @@ mod tests {
         let mut status = ServiceStatus::new_scraper("test");
         status.set_running(Some("Processing documents"));
         assert_eq!(status.status, ServiceState::Running);
-        assert_eq!(status.current_task, Some("Processing documents".to_string()));
+        assert_eq!(
+            status.current_task,
+            Some("Processing documents".to_string())
+        );
         assert!(status.last_activity.is_some());
     }
 

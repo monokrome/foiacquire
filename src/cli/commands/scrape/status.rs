@@ -184,10 +184,7 @@ async fn display_status_simple(settings: &Settings) -> anyhow::Result<()> {
                 crate::models::ServiceState::Idle => style(svc.status.as_str()).dim(),
                 _ => style(svc.status.as_str()),
             };
-            let task = svc
-                .current_task
-                .as_deref()
-                .unwrap_or("-");
+            let task = svc.current_task.as_deref().unwrap_or("-");
             let age = chrono::Utc::now() - svc.last_heartbeat;
             let age_str = if age.num_seconds() < 60 {
                 format!("{}s ago", age.num_seconds())

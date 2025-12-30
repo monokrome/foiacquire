@@ -15,7 +15,8 @@ impl From<ServiceStatusRecord> for ServiceStatus {
     fn from(record: ServiceStatusRecord) -> Self {
         ServiceStatus {
             id: record.id,
-            service_type: ServiceType::from_str(&record.service_type).unwrap_or(ServiceType::Scraper),
+            service_type: ServiceType::from_str(&record.service_type)
+                .unwrap_or(ServiceType::Scraper),
             source_id: record.source_id,
             status: ServiceState::from_str(&record.status).unwrap_or(ServiceState::Running),
             last_heartbeat: parse_datetime(&record.last_heartbeat),
@@ -171,7 +172,7 @@ impl DieselServiceStatusRepository {
             let rows = diesel::delete(
                 service_status::table
                     .filter(service_status::last_heartbeat.lt(&cutoff))
-                    .filter(service_status::status.eq("stopped"))
+                    .filter(service_status::status.eq("stopped")),
             )
             .execute(&mut conn)
             .await?;
@@ -360,8 +361,7 @@ mod tests {
         repo.upsert(&status).await.unwrap();
 
         let retrieved = repo.get(&status.id).await.unwrap().unwrap();
-        let stats: crate::models::ScraperStats =
-            serde_json::from_value(retrieved.stats).unwrap();
+        let stats: crate::models::ScraperStats = serde_json::from_value(retrieved.stats).unwrap();
         assert_eq!(stats.session_processed, 100);
         assert_eq!(stats.session_new, 50);
         assert_eq!(stats.rate_per_min, Some(12.5));
