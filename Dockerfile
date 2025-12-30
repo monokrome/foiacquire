@@ -4,7 +4,8 @@ FROM alpine:latest
 ARG TARGETARCH
 ARG WITH_TESSERACT="false"
 
-RUN apk add --no-cache ca-certificates su-exec \
+RUN apk add --no-cache ca-certificates su-exec python3 py3-pip poppler-utils \
+    && pip3 install --no-cache-dir --break-system-packages yt-dlp \
     && if [ "$WITH_TESSERACT" = "true" ]; then \
          apk add --no-cache tesseract-ocr tesseract-ocr-data-eng; \
        fi
