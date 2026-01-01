@@ -74,6 +74,14 @@ pub enum DiscoveryMethod {
     PatternEnumeration,
     /// Found in Google Drive folder enumeration.
     GoogleDriveFolder,
+    /// Found via external search engine (Google, DuckDuckGo, etc.).
+    SearchEngine,
+    /// Found in sitemap.xml or robots.txt.
+    Sitemap,
+    /// Found in Wayback Machine CDX archive.
+    WaybackMachine,
+    /// Found by enumerating common document paths.
+    CommonPath,
 }
 
 impl DiscoveryMethod {
@@ -88,6 +96,10 @@ impl DiscoveryMethod {
             Self::OcrExtraction => "ocr_extraction",
             Self::PatternEnumeration => "pattern_enumeration",
             Self::GoogleDriveFolder => "google_drive_folder",
+            Self::SearchEngine => "search_engine",
+            Self::Sitemap => "sitemap",
+            Self::WaybackMachine => "wayback_machine",
+            Self::CommonPath => "common_path",
         }
     }
 
@@ -102,6 +114,10 @@ impl DiscoveryMethod {
             "ocr_extraction" => Some(Self::OcrExtraction),
             "pattern_enumeration" => Some(Self::PatternEnumeration),
             "google_drive_folder" => Some(Self::GoogleDriveFolder),
+            "search_engine" => Some(Self::SearchEngine),
+            "sitemap" => Some(Self::Sitemap),
+            "wayback_machine" => Some(Self::WaybackMachine),
+            "common_path" => Some(Self::CommonPath),
             _ => None,
         }
     }
@@ -361,6 +377,10 @@ mod tests {
             DiscoveryMethod::OcrExtraction,
             DiscoveryMethod::PatternEnumeration,
             DiscoveryMethod::GoogleDriveFolder,
+            DiscoveryMethod::SearchEngine,
+            DiscoveryMethod::Sitemap,
+            DiscoveryMethod::WaybackMachine,
+            DiscoveryMethod::CommonPath,
         ];
 
         for method in methods {

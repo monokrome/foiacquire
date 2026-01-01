@@ -6,6 +6,7 @@
 mod analysis;
 mod cli;
 mod config;
+mod discovery;
 mod llm;
 mod models;
 mod ocr;
