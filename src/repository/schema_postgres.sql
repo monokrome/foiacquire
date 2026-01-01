@@ -178,6 +178,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_analysis_results_doc_unique
 ON document_analysis_results(document_id, version_id, analysis_type, backend)
 WHERE page_id IS NULL;
 
+CREATE TABLE IF NOT EXISTS storage_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_id);
 CREATE INDEX IF NOT EXISTS idx_documents_url ON documents(source_url);
 CREATE INDEX IF NOT EXISTS idx_document_versions_doc ON document_versions(document_id);
