@@ -366,19 +366,10 @@ enum Commands {
         checkpoint_interval: usize,
     },
 
-    /// Discover new document URLs by analyzing patterns in existing URLs
+    /// Discover new document URLs using various methods
     Discover {
-        /// Source ID to analyze and generate URLs for
-        source_id: String,
-        /// Limit number of candidate URLs to generate (0 = unlimited)
-        #[arg(short, long, default_value = "0")]
-        limit: usize,
-        /// Show what would be discovered without adding to queue
-        #[arg(long)]
-        dry_run: bool,
-        /// Minimum number of URL examples before generating candidates
-        #[arg(long, default_value = "3")]
-        min_examples: usize,
+        #[command(subcommand)]
+        command: DiscoverCommands,
     },
 
     /// Test browser-based fetching (requires --features browser)
@@ -470,6 +461,102 @@ enum StateCommands {
         /// Confirm clearing
         #[arg(long)]
         confirm: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum DiscoverCommands {
+    /// Discover URLs by analyzing patterns in existing URLs
+    Pattern {
+        /// Source ID to analyze and generate URLs for
+        source_id: String,
+        /// Limit number of candidate URLs to generate (0 = unlimited)
+        #[arg(short, long, default_value = "0")]
+        limit: usize,
+        /// Show what would be discovered without adding to queue
+        #[arg(long)]
+        dry_run: bool,
+        /// Minimum number of URL examples before generating candidates
+        #[arg(long, default_value = "3")]
+        min_examples: usize,
+    },
+
+    /// Discover URLs using external search engines
+    Search {
+        /// Source ID (used to determine target domain)
+        source_id: String,
+        /// Search engines to use (comma-separated: duckduckgo,google,bing,brave)
+        #[arg(short, long, default_value = "duckduckgo")]
+        engines: String,
+        /// Search terms (comma-separated). Uses source's configured terms if not specified.
+        #[arg(short, long)]
+        terms: Option<String>,
+        /// Expand terms using LLM
+        #[arg(long)]
+        expand: bool,
+        /// Extract terms from HTML templates
+        #[arg(long)]
+        template: bool,
+        /// Maximum results per query (default: 100)
+        #[arg(short, long, default_value = "100")]
+        limit: usize,
+        /// Show what would be discovered without adding to queue
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Discover URLs from sitemaps and robots.txt
+    Sitemap {
+        /// Source ID (used to determine target domain)
+        source_id: String,
+        /// Maximum URLs to discover (0 = unlimited)
+        #[arg(short, long, default_value = "0")]
+        limit: usize,
+        /// Show what would be discovered without adding to queue
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Discover URLs from Wayback Machine historical snapshots
+    Wayback {
+        /// Source ID (used to determine target domain)
+        source_id: String,
+        /// Start date (YYYYMMDD format)
+        #[arg(long)]
+        from: Option<String>,
+        /// End date (YYYYMMDD format)
+        #[arg(long)]
+        to: Option<String>,
+        /// Maximum URLs to discover (0 = unlimited)
+        #[arg(short, long, default_value = "1000")]
+        limit: usize,
+        /// Show what would be discovered without adding to queue
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Discover URLs by checking common document paths
+    Paths {
+        /// Source ID (used to determine target domain)
+        source_id: String,
+        /// Additional paths to check (comma-separated)
+        #[arg(short = 'p', long)]
+        extra_paths: Option<String>,
+        /// Show what would be discovered without adding to queue
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Run all discovery methods
+    All {
+        /// Source ID
+        source_id: String,
+        /// Show what would be discovered without adding to queue
+        #[arg(long)]
+        dry_run: bool,
+        /// Maximum URLs per discovery method (0 = unlimited)
+        #[arg(short, long, default_value = "500")]
+        limit: usize,
     },
 }
 
@@ -779,12 +866,67 @@ pub async fn run() -> anyhow::Result<()> {
             )
             .await
         }
-        Commands::Discover {
-            source_id,
-            limit,
-            dry_run,
-            min_examples,
-        } => discover::cmd_discover(&settings, &source_id, limit, dry_run, min_examples).await,
+        Commands::Discover { command } => match command {
+            DiscoverCommands::Pattern {
+                source_id,
+                limit,
+                dry_run,
+                min_examples,
+            } => discover::cmd_discover_pattern(&settings, &source_id, limit, dry_run, min_examples).await,
+            DiscoverCommands::Search {
+                source_id,
+                engines,
+                terms,
+                expand,
+                template,
+                limit,
+                dry_run,
+            } => {
+                discover::cmd_discover_search(
+                    &settings,
+                    &source_id,
+                    &engines,
+                    terms.as_deref(),
+                    expand,
+                    template,
+                    limit,
+                    dry_run,
+                )
+                .await
+            }
+            DiscoverCommands::Sitemap {
+                source_id,
+                limit,
+                dry_run,
+            } => discover::cmd_discover_sitemap(&settings, &source_id, limit, dry_run).await,
+            DiscoverCommands::Wayback {
+                source_id,
+                from,
+                to,
+                limit,
+                dry_run,
+            } => {
+                discover::cmd_discover_wayback(
+                    &settings,
+                    &source_id,
+                    from.as_deref(),
+                    to.as_deref(),
+                    limit,
+                    dry_run,
+                )
+                .await
+            }
+            DiscoverCommands::Paths {
+                source_id,
+                extra_paths,
+                dry_run,
+            } => discover::cmd_discover_paths(&settings, &source_id, extra_paths.as_deref(), dry_run).await,
+            DiscoverCommands::All {
+                source_id,
+                dry_run,
+                limit,
+            } => discover::cmd_discover_all(&settings, &source_id, dry_run, limit).await,
+        },
         #[cfg(feature = "browser")]
         Commands::BrowserTest {
             url,

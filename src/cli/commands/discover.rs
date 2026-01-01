@@ -3,9 +3,13 @@
 use console::style;
 
 use crate::config::Settings;
+use crate::discovery::sources::{
+    common_paths::CommonPathsSource, sitemap::SitemapSource, wayback::WaybackSource,
+};
+use crate::discovery::{DiscoveredUrl, DiscoverySource, DiscoverySourceConfig};
 
 /// Analyze URL patterns and discover new URLs.
-pub async fn cmd_discover(
+pub async fn cmd_discover_pattern(
     settings: &Settings,
     source_id: &str,
     limit: usize,
@@ -538,6 +542,479 @@ pub async fn cmd_browser_test(
     }
 
     fetcher.close().await;
+
+    Ok(())
+}
+
+/// Helper to get base URL for a source from config.
+async fn get_source_base_url(settings: &Settings, source_id: &str) -> anyhow::Result<String> {
+    use crate::config::Config;
+
+    let config = Config::load().await;
+    let scraper = config.scrapers.get(source_id).ok_or_else(|| {
+        anyhow::anyhow!("Source '{}' not found in configuration", source_id)
+    })?;
+
+    scraper.base_url.clone().ok_or_else(|| {
+        anyhow::anyhow!("Source '{}' has no base_url configured", source_id)
+    })
+}
+
+/// Helper to add discovered URLs to the crawl queue.
+async fn add_discovered_urls(
+    settings: &Settings,
+    source_id: &str,
+    urls: Vec<DiscoveredUrl>,
+    dry_run: bool,
+) -> anyhow::Result<usize> {
+    use crate::models::CrawlUrl;
+
+    if dry_run {
+        println!(
+            "\n{} Dry run - would add {} URLs:",
+            style("ℹ").blue(),
+            urls.len()
+        );
+
+        // Show listing pages first
+        let listings: Vec<_> = urls.iter().filter(|u| u.is_listing_page).collect();
+        if !listings.is_empty() {
+            println!("\n  {} Listing pages (high priority):", style("📁").cyan());
+            for url in listings.iter().take(10) {
+                println!("    {}", url.url);
+            }
+            if listings.len() > 10 {
+                println!("    ... and {} more listing pages", listings.len() - 10);
+            }
+        }
+
+        // Then documents
+        let docs: Vec<_> = urls.iter().filter(|u| !u.is_listing_page).collect();
+        if !docs.is_empty() {
+            println!("\n  {} Document URLs:", style("📄").cyan());
+            for url in docs.iter().take(10) {
+                println!("    {}", url.url);
+            }
+            if docs.len() > 10 {
+                println!("    ... and {} more document URLs", docs.len() - 10);
+            }
+        }
+
+        return Ok(0);
+    }
+
+    let ctx = settings.create_db_context()?;
+    let crawl_repo = ctx.crawl();
+
+    let mut added = 0;
+    for discovered in urls {
+        let crawl_url = CrawlUrl::new(
+            discovered.url.clone(),
+            source_id.to_string(),
+            discovered.source_method,
+            discovered.query_used.clone(),
+            0,
+        );
+
+        match crawl_repo.add_url(&crawl_url).await {
+            Ok(true) => added += 1,
+            Ok(false) => {} // Already exists
+            Err(e) => tracing::warn!("Failed to add URL {}: {}", discovered.url, e),
+        }
+    }
+
+    Ok(added)
+}
+
+/// Discover URLs using external search engines.
+#[allow(clippy::too_many_arguments)]
+pub async fn cmd_discover_search(
+    settings: &Settings,
+    source_id: &str,
+    engines: &str,
+    terms: Option<&str>,
+    expand: bool,
+    template: bool,
+    max_results: usize,
+    dry_run: bool,
+) -> anyhow::Result<()> {
+    use crate::config::Config;
+    use crate::discovery::sources::search::create_search_engine;
+    use crate::discovery::term_extraction::{LlmTermExtractor, TemplateTermExtractor, ExtractionContext, TermExtractor};
+
+    let base_url = get_source_base_url(settings, source_id).await?;
+    let domain = url::Url::parse(&base_url)?
+        .host_str()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| base_url.clone());
+
+    println!(
+        "{} Search-based discovery for {}",
+        style("🔍").cyan(),
+        style(&domain).bold()
+    );
+
+    // Get search terms
+    let mut search_terms: Vec<String> = if let Some(t) = terms {
+        t.split(',').map(|s| s.trim().to_string()).collect()
+    } else {
+        // Try to get terms from config
+        let config = Config::load().await;
+        config
+            .scrapers
+            .get(source_id)
+            .map(|s| s.discovery.search_queries.clone())
+            .unwrap_or_default()
+    };
+
+    if search_terms.is_empty() {
+        // Default terms for FOIA document discovery
+        search_terms = vec![
+            "FOIA".to_string(),
+            "documents".to_string(),
+            "reading room".to_string(),
+            "reports".to_string(),
+        ];
+    }
+
+    println!("  Initial terms: {}", search_terms.join(", "));
+
+    // Template-based term extraction
+    if template {
+        println!("\n{} Extracting terms from HTML templates...", style("📝").cyan());
+        let extractor = TemplateTermExtractor::with_defaults();
+        let context = ExtractionContext::for_domain(&domain);
+
+        // Fetch the homepage for template extraction
+        let client = reqwest::Client::builder()
+            .user_agent("Mozilla/5.0 (compatible; FOIAcquire/1.0)")
+            .timeout(std::time::Duration::from_secs(30))
+            .build()?;
+
+        if let Ok(response) = client.get(&base_url).send().await {
+            if let Ok(html) = response.text().await {
+                let context = context.with_html(&html);
+                if let Ok(extracted) = extractor.extract_terms(&search_terms, &context).await {
+                    println!("  Extracted {} template terms", extracted.len());
+                    for term in extracted.iter().take(10) {
+                        if !search_terms.contains(term) {
+                            search_terms.push(term.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // LLM term expansion
+    if expand {
+        println!("\n{} Expanding terms with LLM...", style("🤖").cyan());
+        let extractor = LlmTermExtractor::new().max_terms(50);
+        let context = ExtractionContext::for_domain(&domain)
+            .with_description(&format!("Government documents from {}", domain));
+
+        match extractor.extract_terms(&search_terms, &context).await {
+            Ok(expanded) => {
+                println!("  LLM expanded to {} terms", expanded.len());
+                for term in expanded {
+                    if !search_terms.contains(&term) {
+                        search_terms.push(term);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("  {} LLM expansion failed: {}", style("!").yellow(), e);
+            }
+        }
+    }
+
+    println!("\n  Final terms: {} total", search_terms.len());
+
+    // Run searches
+    let engine_list: Vec<&str> = engines.split(',').map(|s| s.trim()).collect();
+    let mut all_urls: Vec<DiscoveredUrl> = Vec::new();
+
+    let config = DiscoverySourceConfig {
+        max_results,
+        ..Default::default()
+    };
+
+    for engine_name in engine_list {
+        println!(
+            "\n{} Searching with {}...",
+            style("→").cyan(),
+            engine_name
+        );
+
+        match create_search_engine(engine_name) {
+            Ok(engine) => {
+                match engine.discover(&domain, &search_terms, &config).await {
+                    Ok(urls) => {
+                        println!("  Found {} URLs", urls.len());
+                        all_urls.extend(urls);
+                    }
+                    Err(e) => {
+                        println!("  {} Search failed: {}", style("!").yellow(), e);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("  {} {}", style("!").yellow(), e);
+            }
+        }
+    }
+
+    // Deduplicate
+    all_urls.sort_by(|a, b| a.url.cmp(&b.url));
+    all_urls.dedup_by(|a, b| a.url == b.url);
+
+    println!(
+        "\n{} Found {} unique URLs from search",
+        style("📊").cyan(),
+        all_urls.len()
+    );
+
+    // Add to queue
+    let added = add_discovered_urls(settings, source_id, all_urls, dry_run).await?;
+
+    if !dry_run {
+        println!("{} Added {} URLs to crawl queue", style("✓").green(), added);
+    }
+
+    Ok(())
+}
+
+/// Discover URLs from sitemaps and robots.txt.
+pub async fn cmd_discover_sitemap(
+    settings: &Settings,
+    source_id: &str,
+    limit: usize,
+    dry_run: bool,
+) -> anyhow::Result<()> {
+    let base_url = get_source_base_url(settings, source_id).await?;
+
+    println!(
+        "{} Sitemap discovery for {}",
+        style("🗺").cyan(),
+        style(&base_url).bold()
+    );
+
+    let source = SitemapSource::new();
+    let config = DiscoverySourceConfig {
+        max_results: limit,
+        ..Default::default()
+    };
+
+    match source.discover(&base_url, &[], &config).await {
+        Ok(urls) => {
+            println!("  Found {} URLs in sitemaps", urls.len());
+
+            let listings = urls.iter().filter(|u| u.is_listing_page).count();
+            if listings > 0 {
+                println!("  {} are listing pages", listings);
+            }
+
+            let added = add_discovered_urls(settings, source_id, urls, dry_run).await?;
+
+            if !dry_run {
+                println!("{} Added {} URLs to crawl queue", style("✓").green(), added);
+            }
+        }
+        Err(e) => {
+            println!("{} Sitemap discovery failed: {}", style("✗").red(), e);
+        }
+    }
+
+    Ok(())
+}
+
+/// Discover URLs from Wayback Machine.
+pub async fn cmd_discover_wayback(
+    settings: &Settings,
+    source_id: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+    limit: usize,
+    dry_run: bool,
+) -> anyhow::Result<()> {
+    let base_url = get_source_base_url(settings, source_id).await?;
+
+    println!(
+        "{} Wayback Machine discovery for {}",
+        style("📜").cyan(),
+        style(&base_url).bold()
+    );
+
+    if let Some(f) = from {
+        println!("  From: {}", f);
+    }
+    if let Some(t) = to {
+        println!("  To: {}", t);
+    }
+
+    let source = WaybackSource::new();
+    let mut config = DiscoverySourceConfig {
+        max_results: limit,
+        ..Default::default()
+    };
+
+    // Add date range to custom params
+    if let Some(f) = from {
+        config.custom_params.insert("from".to_string(), serde_json::Value::String(f.to_string()));
+    }
+    if let Some(t) = to {
+        config.custom_params.insert("to".to_string(), serde_json::Value::String(t.to_string()));
+    }
+
+    match source.discover(&base_url, &[], &config).await {
+        Ok(urls) => {
+            println!("  Found {} historical URLs", urls.len());
+
+            let listings = urls.iter().filter(|u| u.is_listing_page).count();
+            if listings > 0 {
+                println!("  {} are listing pages", listings);
+            }
+
+            let added = add_discovered_urls(settings, source_id, urls, dry_run).await?;
+
+            if !dry_run {
+                println!("{} Added {} URLs to crawl queue", style("✓").green(), added);
+            }
+        }
+        Err(e) => {
+            println!("{} Wayback discovery failed: {}", style("✗").red(), e);
+        }
+    }
+
+    Ok(())
+}
+
+/// Discover URLs by checking common paths.
+pub async fn cmd_discover_paths(
+    settings: &Settings,
+    source_id: &str,
+    extra_paths: Option<&str>,
+    dry_run: bool,
+) -> anyhow::Result<()> {
+    let base_url = get_source_base_url(settings, source_id).await?;
+
+    println!(
+        "{} Common paths discovery for {}",
+        style("📁").cyan(),
+        style(&base_url).bold()
+    );
+
+    let mut source = CommonPathsSource::new();
+
+    if let Some(paths) = extra_paths {
+        let custom: Vec<String> = paths.split(',').map(|s| s.trim().to_string()).collect();
+        source = source.with_custom_paths(custom);
+    }
+
+    let config = DiscoverySourceConfig::default();
+
+    match source.discover(&base_url, &[], &config).await {
+        Ok(urls) => {
+            println!("  Found {} accessible paths", urls.len());
+
+            let added = add_discovered_urls(settings, source_id, urls, dry_run).await?;
+
+            if !dry_run {
+                println!("{} Added {} URLs to crawl queue", style("✓").green(), added);
+            }
+        }
+        Err(e) => {
+            println!("{} Path discovery failed: {}", style("✗").red(), e);
+        }
+    }
+
+    Ok(())
+}
+
+/// Run all discovery methods.
+pub async fn cmd_discover_all(
+    settings: &Settings,
+    source_id: &str,
+    dry_run: bool,
+    limit: usize,
+) -> anyhow::Result<()> {
+    let base_url = get_source_base_url(settings, source_id).await?;
+
+    println!(
+        "{} Running all discovery methods for {}",
+        style("🔍").cyan(),
+        style(&base_url).bold()
+    );
+
+    let mut total_urls: Vec<DiscoveredUrl> = Vec::new();
+
+    // 1. Pattern enumeration
+    println!("\n{} Pattern enumeration...", style("→").cyan());
+    // Note: Pattern enumeration uses the existing database, so we handle it separately
+    // Just run the command directly
+    cmd_discover_pattern(settings, source_id, limit, true, 3).await?;
+
+    // 2. Sitemap discovery
+    println!("\n{} Sitemap discovery...", style("→").cyan());
+    let sitemap_source = SitemapSource::new();
+    let config = DiscoverySourceConfig {
+        max_results: limit,
+        ..Default::default()
+    };
+    if let Ok(urls) = sitemap_source.discover(&base_url, &[], &config).await {
+        println!("  Found {} sitemap URLs", urls.len());
+        total_urls.extend(urls);
+    }
+
+    // 3. Wayback Machine
+    println!("\n{} Wayback Machine discovery...", style("→").cyan());
+    let wayback_source = WaybackSource::new();
+    if let Ok(urls) = wayback_source.discover(&base_url, &[], &config).await {
+        println!("  Found {} historical URLs", urls.len());
+        total_urls.extend(urls);
+    }
+
+    // 4. Common paths
+    println!("\n{} Common paths discovery...", style("→").cyan());
+    let paths_source = CommonPathsSource::new();
+    if let Ok(urls) = paths_source.discover(&base_url, &[], &config).await {
+        println!("  Found {} valid paths", urls.len());
+        total_urls.extend(urls);
+    }
+
+    // 5. Search (DuckDuckGo only for now)
+    println!("\n{} Search engine discovery...", style("→").cyan());
+    use crate::discovery::sources::search::DuckDuckGoSource;
+    let search_source = DuckDuckGoSource::new();
+    let terms = vec!["FOIA".to_string(), "documents".to_string(), "reports".to_string()];
+    if let Ok(urls) = search_source.discover(&base_url, &terms, &config).await {
+        println!("  Found {} search URLs", urls.len());
+        total_urls.extend(urls);
+    }
+
+    // Deduplicate
+    total_urls.sort_by(|a, b| a.url.cmp(&b.url));
+    total_urls.dedup_by(|a, b| a.url == b.url);
+
+    println!(
+        "\n{} Total: {} unique URLs discovered",
+        style("📊").cyan(),
+        total_urls.len()
+    );
+
+    let listings = total_urls.iter().filter(|u| u.is_listing_page).count();
+    println!("  {} listing pages, {} document URLs", listings, total_urls.len() - listings);
+
+    // Add to queue
+    let added = add_discovered_urls(settings, source_id, total_urls, dry_run).await?;
+
+    if !dry_run {
+        println!("{} Added {} URLs to crawl queue", style("✓").green(), added);
+        println!(
+            "  Run {} to crawl discovered URLs",
+            style(format!("foiacquire crawl {}", source_id)).cyan()
+        );
+    }
 
     Ok(())
 }
