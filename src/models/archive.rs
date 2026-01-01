@@ -1,5 +1,7 @@
 //! Archive history models for document provenance verification.
 
+#![allow(dead_code)]
+
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};

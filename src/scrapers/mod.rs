@@ -15,6 +15,7 @@ pub mod rate_limit_redis;
 pub mod rate_limit_sqlite;
 pub mod rate_limiter;
 
+#[allow(unused_imports)]
 pub use archive::{ArchiveError, ArchiveRegistry, ArchiveSource, SnapshotInfo, WaybackSource};
 #[cfg(feature = "browser")]
 pub use browser::BrowserFetcher;
