@@ -18,18 +18,19 @@ else
     BASE="HEAD"
 fi
 
-# Get list of migration files that existed in the base commit
-EXISTING_MIGRATIONS=$(git ls-tree --name-only "$BASE" -- "$MIGRATIONS_DIR" 2>/dev/null || echo "")
+# Get list of migration FILES (not directories) that existed in the base commit
+EXISTING_MIGRATIONS=$(git ls-tree -r --name-only "$BASE" -- "$MIGRATIONS_DIR" 2>/dev/null || echo "")
 
 if [ -z "$EXISTING_MIGRATIONS" ]; then
     echo "No existing migrations to check."
     exit 0
 fi
 
-# Check if any existing migrations were modified
+# Check if any existing migration files were modified (not just if new files were added)
 MODIFIED=0
 for migration in $EXISTING_MIGRATIONS; do
-    if git diff --name-only "$BASE" -- "$migration" | grep -q .; then
+    # Check if this specific file has content changes (not just that new files exist nearby)
+    if git diff --name-only "$BASE" HEAD -- "$migration" | grep -qx "$migration"; then
         echo "ERROR: Migration file was modified: $migration"
         echo "       Migrations are immutable. Create a new migration instead."
         MODIFIED=1
