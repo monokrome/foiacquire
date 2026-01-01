@@ -129,7 +129,8 @@ impl DieselDocumentRepository {
                 Ok(result.id)
             },
             postgres: conn => {
-                use diesel::upsert::excluded;
+                use diesel::upsert::{excluded, on_constraint};
+                // Use partial unique index name for ON CONFLICT with page-level results
                 let result: i32 = diesel::insert_into(document_analysis_results::table)
                     .values(NewDocumentAnalysisResult {
                         page_id: Some(page_id as i32),
@@ -145,11 +146,7 @@ impl DieselDocumentRepository {
                         created_at: &now,
                         metadata: metadata_str.as_deref(),
                     })
-                    .on_conflict((
-                        document_analysis_results::page_id,
-                        document_analysis_results::analysis_type,
-                        document_analysis_results::backend,
-                    ))
+                    .on_conflict(on_constraint("idx_analysis_results_page_unique"))
                     .do_update()
                     .set((
                         document_analysis_results::result_text.eq(excluded(document_analysis_results::result_text)),
@@ -216,8 +213,8 @@ impl DieselDocumentRepository {
                 Ok(result.id)
             },
             postgres: conn => {
-                use diesel::upsert::excluded;
-                // For document-level, we use document_id + version_id + analysis_type + backend as unique
+                use diesel::upsert::{excluded, on_constraint};
+                // Use partial unique index name for ON CONFLICT with document-level results
                 let result: i32 = diesel::insert_into(document_analysis_results::table)
                     .values(NewDocumentAnalysisResult {
                         page_id: None,
@@ -233,12 +230,7 @@ impl DieselDocumentRepository {
                         created_at: &now,
                         metadata: metadata_str.as_deref(),
                     })
-                    .on_conflict((
-                        document_analysis_results::document_id,
-                        document_analysis_results::version_id,
-                        document_analysis_results::analysis_type,
-                        document_analysis_results::backend,
-                    ))
+                    .on_conflict(on_constraint("idx_analysis_results_doc_unique"))
                     .do_update()
                     .set((
                         document_analysis_results::result_text.eq(excluded(document_analysis_results::result_text)),

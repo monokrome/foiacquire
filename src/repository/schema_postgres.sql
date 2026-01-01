@@ -135,10 +135,55 @@ CREATE TABLE IF NOT EXISTS rate_limit_state (
     updated_at TEXT NOT NULL
 );
 
+-- Service status tracking
+CREATE TABLE IF NOT EXISTS service_status (
+    id SERIAL PRIMARY KEY,
+    service_type TEXT NOT NULL,
+    hostname TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'starting',
+    current_source TEXT,
+    started_at TEXT NOT NULL,
+    last_heartbeat TEXT NOT NULL,
+    stats TEXT,
+    last_error TEXT,
+    error_count INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT service_status_type_host UNIQUE (service_type, hostname)
+);
+
+-- Unified analysis results table
+CREATE TABLE IF NOT EXISTS document_analysis_results (
+    id SERIAL PRIMARY KEY,
+    page_id INTEGER REFERENCES document_pages(id),
+    document_id TEXT NOT NULL REFERENCES documents(id),
+    version_id INTEGER NOT NULL,
+    analysis_type TEXT NOT NULL,
+    backend TEXT NOT NULL,
+    result_text TEXT,
+    confidence REAL,
+    processing_time_ms INTEGER,
+    error TEXT,
+    status TEXT NOT NULL DEFAULT 'complete',
+    created_at TEXT NOT NULL,
+    metadata TEXT
+);
+
+-- For page-level results, unique on (page_id, analysis_type, backend)
+-- Using a partial unique index for PostgreSQL
+CREATE UNIQUE INDEX IF NOT EXISTS idx_analysis_results_page_unique
+ON document_analysis_results(page_id, analysis_type, backend)
+WHERE page_id IS NOT NULL;
+
+-- For document-level results (page_id IS NULL), unique on (document_id, version_id, analysis_type, backend)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_analysis_results_doc_unique
+ON document_analysis_results(document_id, version_id, analysis_type, backend)
+WHERE page_id IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_id);
 CREATE INDEX IF NOT EXISTS idx_documents_url ON documents(source_url);
 CREATE INDEX IF NOT EXISTS idx_document_versions_doc ON document_versions(document_id);
 CREATE INDEX IF NOT EXISTS idx_document_versions_hashes ON document_versions(content_hash, content_hash_blake3, file_size);
 CREATE INDEX IF NOT EXISTS idx_crawl_urls_source_status ON crawl_urls(source_id, status);
 CREATE INDEX IF NOT EXISTS idx_crawl_requests_source ON crawl_requests(source_id, request_at);
-CREATE INDEX IF NOT EXISTS idx_config_history_hash ON configuration_history(hash)
+CREATE INDEX IF NOT EXISTS idx_config_history_hash ON configuration_history(hash);
+CREATE INDEX IF NOT EXISTS idx_analysis_results_document ON document_analysis_results(document_id);
+CREATE INDEX IF NOT EXISTS idx_analysis_results_type ON document_analysis_results(analysis_type)
