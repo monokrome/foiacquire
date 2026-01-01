@@ -2,8 +2,9 @@
 # https://doc.rust-lang.org/cargo/reference/config.html
 
 [alias]
-faq = "run --release --features postgres,browser --"
-serve = "run --release --features postgres -- serve"
-scrape = "run --release --features postgres,browser -- scrape"
-ocr = "run --release --features postgres -- ocr"
-status = "run --release --features postgres -- status"
+faq = "run --release --features postgres,browser -- -t /mnt/documents/research/foia"
+serve = "run --release --features postgres -- -t /mnt/documents/researchfoia serve"
+scrape = "run --release --features postgres,browser -- -t /mnt/documents/researchfoia scrape"
+ocr = "run --release --features postgres -- -t /mnt/documents/researchfoia ocr"
+status = "run --release --features postgres -- -t /mnt/documents/researchfoia status"
+db = "run --release --features postgres -- -t /mnt/documents/researchfoia db"

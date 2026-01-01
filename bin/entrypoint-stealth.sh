@@ -1,6 +1,18 @@
 #!/bin/sh
+
+# VNC=true enables display on port 5900 and disables headless mode
+if [ "$VNC" = "true" ]; then
+    Xvfb :99 -screen 0 1920x1080x24 &
+    sleep 1
+    export DISPLAY=:99
+    x11vnc -display :99 -forever -shared -nopw &
+    HEADLESS_FLAG=""
+else
+    HEADLESS_FLAG="--headless"
+fi
+
 chromium-browser \
-    --headless \
+    $HEADLESS_FLAG \
     --no-sandbox \
     --disable-gpu \
     --disable-dev-shm-usage \
