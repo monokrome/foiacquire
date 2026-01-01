@@ -55,19 +55,23 @@ FOIAcquire follows [Semantic Versioning](https://semver.org/):
 
 While in 0.x.y development, minor versions may contain breaking changes.
 
-### Release Checklist
+### Release Process
 
-**Pre-release:**
-- [ ] All tests pass: `cargo test`
-- [ ] Code compiles: `cargo build --release`
-- [ ] Clippy passes: `cargo clippy`
-- [ ] Format check: `cargo fmt --check`
-- [ ] Update version in `Cargo.toml`
+**You must run all checks locally before tagging.** CI will reject releases that fail these checks.
 
-**Release:**
 ```bash
+# 1. Run all checks (required before tagging)
+cargo fmt --check
+cargo clippy
+cargo test
+cargo build --release
+
+# 2. Update version and commit
+# Edit Cargo.toml: version = "0.x.y"
 git add Cargo.toml Cargo.lock
 git commit -m "chore: bump version to 0.x.y"
+
+# 3. Tag and push (only after checks pass)
 git tag v0.x.y
 git push origin main
 git push origin v0.x.y
