@@ -978,6 +978,314 @@ where
     Ok(())
 }
 
+/// Strategy for choosing which document to keep during deduplication.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeepStrategy {
+    /// Keep the oldest document (first created)
+    Oldest,
+    /// Keep the newest document (most recently created)
+    Newest,
+    /// Keep the document with the most complete data (most text, annotations, etc.)
+    MostComplete,
+}
+
+impl KeepStrategy {
+    fn from_str(s: &str) -> anyhow::Result<Self> {
+        match s.to_lowercase().as_str() {
+            "oldest" => Ok(Self::Oldest),
+            "newest" => Ok(Self::Newest),
+            "most-complete" | "mostcomplete" | "complete" => Ok(Self::MostComplete),
+            _ => anyhow::bail!(
+                "Invalid keep strategy '{}'. Use: oldest, newest, or most-complete",
+                s
+            ),
+        }
+    }
+}
+
+/// Deduplicate documents by content hash.
+///
+/// Finds documents with identical content (same content_hash) and merges them,
+/// keeping one document and updating all references to point to the keeper.
+pub async fn cmd_db_dedup(
+    settings: &Settings,
+    dry_run: bool,
+    keep: &str,
+    same_source: bool,
+    batch_size: usize,
+) -> anyhow::Result<()> {
+    use diesel_async::RunQueryDsl;
+
+    let strategy = KeepStrategy::from_str(keep)?;
+
+    println!(
+        "{} Deduplicating documents{}",
+        style("→").cyan(),
+        if dry_run { " (dry run)" } else { "" }
+    );
+    println!("  Strategy: keep {:?}", strategy);
+    println!(
+        "  Scope: {}",
+        if same_source {
+            "within same source only"
+        } else {
+            "cross-source"
+        }
+    );
+
+    let ctx = settings.create_db_context()?;
+    let pool = ctx.pool();
+
+    // Find duplicate groups
+    #[derive(diesel::QueryableByName, Debug)]
+    struct DuplicateGroup {
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        content_hash: String,
+        #[diesel(sql_type = diesel::sql_types::BigInt)]
+        doc_count: i64,
+    }
+
+    let group_query = if same_source {
+        // Group by content_hash AND source_id
+        r#"
+        SELECT dv.content_hash, COUNT(DISTINCT d.id) as doc_count
+        FROM document_versions dv
+        JOIN documents d ON d.id = dv.document_id
+        WHERE dv.content_hash IS NOT NULL AND dv.content_hash != ''
+        GROUP BY dv.content_hash, d.source_id
+        HAVING COUNT(DISTINCT d.id) > 1
+        ORDER BY doc_count DESC
+        "#
+    } else {
+        // Group by content_hash only (cross-source)
+        r#"
+        SELECT dv.content_hash, COUNT(DISTINCT d.id) as doc_count
+        FROM document_versions dv
+        JOIN documents d ON d.id = dv.document_id
+        WHERE dv.content_hash IS NOT NULL AND dv.content_hash != ''
+        GROUP BY dv.content_hash
+        HAVING COUNT(DISTINCT d.id) > 1
+        ORDER BY doc_count DESC
+        "#
+    };
+
+    let groups: Vec<DuplicateGroup> = crate::with_conn!(pool, conn, {
+        diesel::sql_query(group_query).load(&mut conn).await
+    })?;
+
+    if groups.is_empty() {
+        println!("\n{} No duplicates found!", style("✓").green());
+        return Ok(());
+    }
+
+    let total_groups = groups.len();
+    let total_duplicates: i64 = groups.iter().map(|g| g.doc_count - 1).sum();
+
+    println!("\n  Found {} duplicate groups ({} documents to remove)", total_groups, total_duplicates);
+
+    let pb = ProgressBar::new(total_groups as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("  {bar:40.cyan/dim} {pos}/{len} groups ({per_sec}) {msg}")
+            .unwrap()
+            .progress_chars("=>-"),
+    );
+    pb.enable_steady_tick(Duration::from_millis(100));
+
+    let mut total_deleted = 0u64;
+    let mut total_refs_updated = 0u64;
+
+    // Process in batches
+    for chunk in groups.chunks(batch_size) {
+        for group in chunk {
+            // Get all documents with this content_hash
+            #[derive(diesel::QueryableByName, Debug)]
+            #[allow(dead_code)]
+            struct DocInfo {
+                #[diesel(sql_type = diesel::sql_types::Text)]
+                id: String,
+                #[diesel(sql_type = diesel::sql_types::Text)]
+                source_id: String,
+                #[diesel(sql_type = diesel::sql_types::Text)]
+                created_at: String,
+                #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+                extracted_text: Option<String>,
+                #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+                synopsis: Option<String>,
+                #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+                tags: Option<String>,
+            }
+
+            let docs: Vec<DocInfo> = crate::with_conn!(pool, conn, {
+                diesel::sql_query(
+                    r#"
+                    SELECT d.id, d.source_id, d.created_at, d.extracted_text, d.synopsis, d.tags
+                    FROM documents d
+                    JOIN document_versions dv ON dv.document_id = d.id
+                    WHERE dv.content_hash = $1
+                    ORDER BY d.created_at ASC
+                    "#,
+                )
+                .bind::<diesel::sql_types::Text, _>(&group.content_hash)
+                .load(&mut conn)
+                .await
+            })?;
+
+            if docs.len() < 2 {
+                continue;
+            }
+
+            // Choose keeper based on strategy
+            let keeper_idx = match strategy {
+                KeepStrategy::Oldest => 0, // Already sorted by created_at ASC
+                KeepStrategy::Newest => docs.len() - 1,
+                KeepStrategy::MostComplete => {
+                    // Score by completeness: extracted_text length + has synopsis + has tags
+                    docs.iter()
+                        .enumerate()
+                        .max_by_key(|(_, d)| {
+                            let text_len = d.extracted_text.as_ref().map(|t| t.len()).unwrap_or(0);
+                            let has_synopsis = d.synopsis.is_some() as usize * 1000;
+                            let has_tags = d.tags.as_ref().map(|t| if t != "[]" { 500 } else { 0 }).unwrap_or(0);
+                            text_len + has_synopsis + has_tags
+                        })
+                        .map(|(i, _)| i)
+                        .unwrap_or(0)
+                }
+            };
+
+            let keeper_id = &docs[keeper_idx].id;
+            let to_delete: Vec<&str> = docs
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != keeper_idx)
+                .map(|(_, d)| d.id.as_str())
+                .collect();
+
+            if !dry_run {
+                // Update references in document_analysis_results
+                for dup_id in &to_delete {
+                    let updated: usize = crate::with_conn!(pool, conn, {
+                        diesel::sql_query(
+                            "UPDATE document_analysis_results SET document_id = $1 WHERE document_id = $2",
+                        )
+                        .bind::<diesel::sql_types::Text, _>(keeper_id)
+                        .bind::<diesel::sql_types::Text, _>(*dup_id)
+                        .execute(&mut conn)
+                        .await
+                    })?;
+                    total_refs_updated += updated as u64;
+                }
+
+                // Update references in document_annotations
+                for dup_id in &to_delete {
+                    let updated: usize = crate::with_conn!(pool, conn, {
+                        diesel::sql_query(
+                            "UPDATE document_annotations SET document_id = $1 WHERE document_id = $2",
+                        )
+                        .bind::<diesel::sql_types::Text, _>(keeper_id)
+                        .bind::<diesel::sql_types::Text, _>(*dup_id)
+                        .execute(&mut conn)
+                        .await
+                    })?;
+                    total_refs_updated += updated as u64;
+                }
+
+                // Delete duplicates (cascades to versions, pages, virtual_files)
+                for dup_id in &to_delete {
+                    // Delete in order respecting foreign keys
+                    // 1. document_pages (references document_versions)
+                    crate::with_conn!(pool, conn, {
+                        diesel::sql_query(
+                            "DELETE FROM document_pages WHERE document_id = $1",
+                        )
+                        .bind::<diesel::sql_types::Text, _>(*dup_id)
+                        .execute(&mut conn)
+                        .await
+                    })?;
+
+                    // 2. virtual_files
+                    crate::with_conn!(pool, conn, {
+                        diesel::sql_query(
+                            "DELETE FROM virtual_files WHERE document_id = $1",
+                        )
+                        .bind::<diesel::sql_types::Text, _>(*dup_id)
+                        .execute(&mut conn)
+                        .await
+                    })?;
+
+                    // 3. document_versions
+                    crate::with_conn!(pool, conn, {
+                        diesel::sql_query(
+                            "DELETE FROM document_versions WHERE document_id = $1",
+                        )
+                        .bind::<diesel::sql_types::Text, _>(*dup_id)
+                        .execute(&mut conn)
+                        .await
+                    })?;
+
+                    // 4. document_analysis_results (should be moved, but delete any remaining)
+                    crate::with_conn!(pool, conn, {
+                        diesel::sql_query(
+                            "DELETE FROM document_analysis_results WHERE document_id = $1",
+                        )
+                        .bind::<diesel::sql_types::Text, _>(*dup_id)
+                        .execute(&mut conn)
+                        .await
+                    })?;
+
+                    // 5. document_annotations (should be moved, but delete any remaining)
+                    crate::with_conn!(pool, conn, {
+                        diesel::sql_query(
+                            "DELETE FROM document_annotations WHERE document_id = $1",
+                        )
+                        .bind::<diesel::sql_types::Text, _>(*dup_id)
+                        .execute(&mut conn)
+                        .await
+                    })?;
+
+                    // 6. Finally delete the document
+                    crate::with_conn!(pool, conn, {
+                        diesel::sql_query(
+                            "DELETE FROM documents WHERE id = $1",
+                        )
+                        .bind::<diesel::sql_types::Text, _>(*dup_id)
+                        .execute(&mut conn)
+                        .await
+                    })?;
+
+                    total_deleted += 1;
+                }
+            } else {
+                total_deleted += to_delete.len() as u64;
+            }
+
+            pb.inc(1);
+            pb.set_message(format!("deleted: {}", total_deleted));
+        }
+    }
+
+    pb.finish_with_message(format!("deleted: {}", total_deleted));
+
+    if dry_run {
+        println!(
+            "\n{} Dry run complete. Would delete {} documents ({} references would be updated).",
+            style("✓").green(),
+            total_deleted,
+            total_refs_updated
+        );
+    } else {
+        println!(
+            "\n{} Deleted {} duplicate documents ({} references updated).",
+            style("✓").green(),
+            total_deleted,
+            total_refs_updated
+        );
+    }
+
+    Ok(())
+}
+
 /// Remap document categories based on MIME types.
 ///
 /// This command updates the category_id column for all documents based on

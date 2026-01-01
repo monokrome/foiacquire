@@ -528,6 +528,22 @@ enum DbCommands {
         #[arg(long, default_value = "4096")]
         batch_size: usize,
     },
+
+    /// Deduplicate documents by content hash
+    Dedup {
+        /// Only show what would be deleted, don't actually delete
+        #[arg(long)]
+        dry_run: bool,
+        /// Keep strategy: oldest (default), newest, or most-complete
+        #[arg(long, default_value = "oldest")]
+        keep: String,
+        /// Only deduplicate within a single source (don't merge cross-source)
+        #[arg(long)]
+        same_source: bool,
+        /// Batch size for processing (default: 1000)
+        #[arg(long, default_value = "1000")]
+        batch_size: usize,
+    },
 }
 
 /// Run the CLI.
@@ -609,6 +625,12 @@ pub async fn run() -> anyhow::Result<()> {
                 dry_run,
                 batch_size,
             } => db::cmd_db_remap_categories(&settings, dry_run, batch_size).await,
+            DbCommands::Dedup {
+                dry_run,
+                keep,
+                same_source,
+                batch_size,
+            } => db::cmd_db_dedup(&settings, dry_run, &keep, same_source, batch_size).await,
         },
         Commands::Scrape {
             source_ids,
