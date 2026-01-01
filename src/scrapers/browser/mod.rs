@@ -311,3 +311,54 @@ impl BrowserFetcher {
 
     pub async fn close(&mut self) {}
 }
+
+#[cfg(all(test, feature = "browser"))]
+mod tests {
+    use super::*;
+
+    /// Integration test: verify chromiumoxide can connect to a running browser.
+    ///
+    /// Run with: BROWSER_URL=ws://localhost:9222 cargo test --features browser browser_connection -- --ignored
+    #[tokio::test]
+    #[ignore = "requires running browser (set BROWSER_URL env var)"]
+    async fn browser_connection() {
+        let browser_url =
+            std::env::var("BROWSER_URL").unwrap_or_else(|_| "ws://localhost:9222".to_string());
+
+        let config = BrowserEngineConfig {
+            remote_url: Some(browser_url.clone()),
+            timeout: 30,
+            ..Default::default()
+        };
+
+        let mut fetcher = BrowserFetcher::new(config);
+
+        // Test connection
+        let result = fetcher.ensure_browser().await;
+        assert!(
+            result.is_ok(),
+            "Failed to connect to browser at {}: {:?}",
+            browser_url,
+            result.err()
+        );
+
+        // Verify we have a browser instance
+        assert!(
+            fetcher.browser.is_some(),
+            "Browser instance should be initialized"
+        );
+
+        // Try to create a new page (verifies CDP communication works)
+        if let Some(browser) = &fetcher.browser {
+            let browser_guard = browser.lock().await;
+            let new_page = browser_guard.new_page("about:blank").await;
+            assert!(
+                new_page.is_ok(),
+                "Failed to create new page: {:?}",
+                new_page.err()
+            );
+        }
+
+        fetcher.close().await;
+    }
+}

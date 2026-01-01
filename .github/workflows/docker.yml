@@ -39,6 +39,87 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-features -- -D warnings
 
+  browser-compat-test:
+    name: Browser Compatibility Test
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create stealth entrypoint
+        run: |
+          cat > bin/entrypoint-stealth.sh << 'EOF'
+          #!/bin/sh
+          chromium-browser \
+              --headless \
+              --no-sandbox \
+              --disable-gpu \
+              --disable-dev-shm-usage \
+              --disable-software-rasterizer \
+              --disable-blink-features=AutomationControlled \
+              --disable-infobars \
+              --disable-background-networking \
+              --disable-sync \
+              --disable-translate \
+              --no-first-run \
+              --no-default-browser-check \
+              --remote-debugging-port=9223 \
+              "$@" &
+          sleep 2
+          exec socat TCP-LISTEN:9222,fork,reuseaddr,bind=0.0.0.0 TCP:127.0.0.1:9223
+          EOF
+          chmod +x bin/entrypoint-stealth.sh
+
+      - name: Build chromium-stealth container
+        run: docker build -f Dockerfile.chromium-stealth -t chromium-stealth:test .
+
+      - name: Start chromium container
+        run: |
+          docker run -d --name chromium-test -p 9222:9222 chromium-stealth:test
+          echo "Waiting for chromium to start..."
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:9222/json/version > /dev/null 2>&1; then
+              echo "Chromium is ready!"
+              break
+            fi
+            echo "Attempt $i/30..."
+            sleep 1
+          done
+
+      - name: Verify CDP endpoint
+        run: |
+          echo "=== Chromium Version Info ==="
+          curl -s http://localhost:9222/json/version | head -20
+          echo ""
+          echo "=== Available Targets ==="
+          curl -s http://localhost:9222/json/list | head -20
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: browser-compat-test
+
+      - name: Build with browser feature
+        run: cargo build --features browser
+
+      - name: Run browser connectivity test
+        env:
+          BROWSER_URL: ws://localhost:9222
+          RUST_LOG: debug
+        run: |
+          # Run the ignored browser_connection test which requires a running browser
+          cargo test --features browser browser_connection -- --ignored --nocapture
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker logs chromium-test 2>&1 | tail -50 || true
+          docker stop chromium-test || true
+          docker rm chromium-test || true
+
   build-amd64:
     name: Build amd64 Binaries
     needs: lint
@@ -193,7 +274,7 @@ jobs:
       - name: Create stealth Dockerfile
         run: |
           cat > Dockerfile.chromium-stealth << 'EOF'
-          FROM alpine:latest
+          FROM alpine:3.21
           RUN apk add --no-cache chromium font-noto socat
           RUN adduser -D chrome
           USER chrome
