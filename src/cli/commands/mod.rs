@@ -530,7 +530,7 @@ enum DbCommands {
     },
 
     /// Deduplicate documents by content hash
-    Dedup {
+    Deduplicate {
         /// Only show what would be deleted, don't actually delete
         #[arg(long)]
         dry_run: bool,
@@ -625,7 +625,7 @@ pub async fn run() -> anyhow::Result<()> {
                 dry_run,
                 batch_size,
             } => db::cmd_db_remap_categories(&settings, dry_run, batch_size).await,
-            DbCommands::Dedup {
+            DbCommands::Deduplicate {
                 dry_run,
                 keep,
                 same_source,
