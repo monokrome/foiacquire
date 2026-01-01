@@ -1,11 +1,11 @@
 #!/bin/sh
 
-# VNC=true enables display on port 5900 and disables headless mode
-if [ "$VNC" = "true" ]; then
+# VNC_PASSWORD enables display on port 5900 with the given password
+if [ -n "$VNC_PASSWORD" ]; then
     Xvfb :99 -screen 0 1920x1080x24 &
     sleep 1
     export DISPLAY=:99
-    x11vnc -display :99 -forever -shared -nopw &
+    x11vnc -display :99 -forever -shared -passwd "$VNC_PASSWORD" &
     HEADLESS_FLAG=""
 else
     HEADLESS_FLAG="--headless"
