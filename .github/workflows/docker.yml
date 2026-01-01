@@ -8,7 +8,7 @@ on:
       - main
     paths:
       - 'Dockerfile*'
-      - 'bin/entrypoint.sh'
+      - 'bin/entrypoint*.sh'
       - 'src/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -46,32 +46,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create stealth entrypoint
-        run: |
-          cat > bin/entrypoint-stealth.sh << 'EOF'
-          #!/bin/sh
-          chromium-browser \
-              --headless \
-              --no-sandbox \
-              --disable-gpu \
-              --disable-dev-shm-usage \
-              --disable-software-rasterizer \
-              --disable-blink-features=AutomationControlled \
-              --disable-infobars \
-              --disable-background-networking \
-              --disable-sync \
-              --disable-translate \
-              --no-first-run \
-              --no-default-browser-check \
-              --remote-debugging-port=9223 \
-              "$@" &
-          sleep 2
-          exec socat TCP-LISTEN:9222,fork,reuseaddr,bind=0.0.0.0 TCP:127.0.0.1:9223
-          EOF
-          chmod +x bin/entrypoint-stealth.sh
-
-      - name: Build chromium-stealth container
-        run: docker build -f Dockerfile.chromium-stealth -t chromium-stealth:test .
+      - name: Build chromium container (stealth mode)
+        run: docker build -f Dockerfile.chromium --build-arg STEALTH=true -t chromium-stealth:test .
 
       - name: Start chromium container
         run: |
@@ -247,43 +223,6 @@ jobs:
           username: monokrome
           password: ${{ secrets.DOCKER_ACCESS_TOKEN }}
 
-      - name: Create stealth entrypoint
-        run: |
-          cat > bin/entrypoint-stealth.sh << 'EOF'
-          #!/bin/sh
-          chromium-browser \
-              --headless \
-              --no-sandbox \
-              --disable-gpu \
-              --disable-dev-shm-usage \
-              --disable-software-rasterizer \
-              --disable-blink-features=AutomationControlled \
-              --disable-infobars \
-              --disable-background-networking \
-              --disable-sync \
-              --disable-translate \
-              --no-first-run \
-              --no-default-browser-check \
-              --remote-debugging-port=9223 \
-              "$@" &
-          sleep 2
-          exec socat TCP-LISTEN:9222,fork,reuseaddr,bind=0.0.0.0 TCP:127.0.0.1:9223
-          EOF
-          chmod +x bin/entrypoint-stealth.sh
-
-      - name: Create stealth Dockerfile
-        run: |
-          cat > Dockerfile.chromium-stealth << 'EOF'
-          FROM alpine:3.21
-          RUN apk add --no-cache chromium font-noto socat
-          RUN adduser -D chrome
-          USER chrome
-          EXPOSE 9222
-          COPY --chown=chrome:chrome bin/entrypoint-stealth.sh /entrypoint.sh
-          ENTRYPOINT ["/entrypoint.sh"]
-          CMD []
-          EOF
-
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -297,11 +236,12 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile.chromium-stealth
+          file: ./Dockerfile.chromium
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
+          build-args: STEALTH=true
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

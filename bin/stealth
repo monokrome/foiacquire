@@ -7,6 +7,7 @@ set -e
 CONTAINER_NAME="foiacquire-chromium"
 IMAGE_NAME="foiacquire-chromium:latest"
 PORT="${STEALTH_PORT:-9222}"
+VNC_PORT="${STEALTH_VNC_PORT:-5900}"
 
 # Find project root (where Dockerfile.chromium lives)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,48 +25,15 @@ usage() {
     echo "  logs     Show container logs"
     echo ""
     echo "Environment:"
-    echo "  STEALTH_PORT  Port to expose (default: 9222)"
+    echo "  STEALTH_PORT      CDP port to expose (default: 9222)"
+    echo "  STEALTH_VNC_PORT  VNC port to expose (default: 5900)"
+    echo "  VNC_PASSWORD      Enable VNC with this password"
+    echo "  VNC_VIEWONLY      Set to 'true' for read-only VNC"
 }
 
 cmd_build() {
     echo "Building stealth browser image..."
-
-    # Create stealth entrypoint
-    cat > "$PROJECT_DIR/bin/entrypoint-stealth.sh" << 'EOF'
-#!/bin/sh
-chromium-browser \
-    --headless \
-    --no-sandbox \
-    --disable-gpu \
-    --disable-dev-shm-usage \
-    --disable-software-rasterizer \
-    --disable-blink-features=AutomationControlled \
-    --disable-infobars \
-    --disable-background-networking \
-    --disable-sync \
-    --disable-translate \
-    --no-first-run \
-    --no-default-browser-check \
-    --remote-debugging-port=9223 \
-    "$@" &
-sleep 2
-exec socat TCP-LISTEN:9222,fork,reuseaddr,bind=0.0.0.0 TCP:127.0.0.1:9223
-EOF
-    chmod +x "$PROJECT_DIR/bin/entrypoint-stealth.sh"
-
-    # Create stealth Dockerfile
-    cat > "$PROJECT_DIR/Dockerfile.chromium-stealth" << 'EOF'
-FROM alpine:latest
-RUN apk add --no-cache chromium font-noto socat
-RUN adduser -D chrome
-USER chrome
-EXPOSE 9222
-COPY --chown=chrome:chrome bin/entrypoint-stealth.sh /entrypoint.sh
-ENTRYPOINT ["/entrypoint.sh"]
-CMD []
-EOF
-
-    docker build -t "$IMAGE_NAME" -f "$PROJECT_DIR/Dockerfile.chromium-stealth" "$PROJECT_DIR"
+    docker build -t "$IMAGE_NAME" --build-arg STEALTH=true -f "$PROJECT_DIR/Dockerfile.chromium" "$PROJECT_DIR"
     echo "Done."
 }
 
@@ -79,13 +47,26 @@ cmd_start() {
     docker rm "$CONTAINER_NAME" 2>/dev/null || true
 
     echo "Starting stealth browser on port $PORT..."
+
+    # Build environment variable arguments
+    ENV_ARGS=()
+    [ -n "$VNC_PASSWORD" ] && ENV_ARGS+=(-e "VNC_PASSWORD=$VNC_PASSWORD")
+    [ "$VNC_VIEWONLY" = "true" ] && ENV_ARGS+=(-e "VNC_VIEWONLY=true")
+
     docker run -d --rm \
         --name "$CONTAINER_NAME" \
         --shm-size=2g \
         --network host \
+        "${ENV_ARGS[@]}" \
         "$IMAGE_NAME"
 
-    echo "Stealth browser running. Connect with: ws://localhost:$PORT"
+    if [ -n "$VNC_PASSWORD" ]; then
+        echo "Stealth browser running."
+        echo "  CDP: ws://localhost:$PORT"
+        echo "  VNC: localhost:$VNC_PORT"
+    else
+        echo "Stealth browser running. Connect with: ws://localhost:$PORT"
+    fi
 }
 
 cmd_stop() {
@@ -105,7 +86,12 @@ cmd_restart() {
 
 cmd_status() {
     if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-        echo "Stealth browser: running on port $PORT"
+        echo "Stealth browser: running"
+        echo "  CDP: ws://localhost:$PORT"
+        # Check if VNC is enabled by inspecting container env
+        if docker inspect "$CONTAINER_NAME" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -q "^VNC_PASSWORD="; then
+            echo "  VNC: localhost:$VNC_PORT"
+        fi
         docker ps --filter "name=$CONTAINER_NAME" --format "  Container: {{.ID}}\n  Image: {{.Image}}\n  Status: {{.Status}}"
     else
         echo "Stealth browser: stopped"

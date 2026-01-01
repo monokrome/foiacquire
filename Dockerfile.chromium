@@ -1,15 +1,28 @@
-# Lightweight Chromium container for browser automation
+# Chromium container for browser automation
 # Pin Alpine version to ensure Chromium version compatibility with chromiumoxide
+#
+# Build args:
+#   STEALTH=true  - Bake in anti-detection mode (default: false)
+#
+# Environment:
+#   STEALTH=true  - Use anti-detection flags (overrides build arg)
+#   VNC_PASSWORD  - Enable VNC on port 5900 with this password
+#   VNC_VIEWONLY  - Set to "true" for read-only VNC (default: interactive)
+#
 FROM alpine:3.21
 
-RUN apk add --no-cache chromium font-noto socat
+ARG STEALTH=false
+ENV STEALTH=${STEALTH}
+
+RUN apk add --no-cache chromium font-noto socat xvfb x11vnc
 
 RUN adduser -D chrome
 USER chrome
 
-EXPOSE 9222
+EXPOSE 9222 5900
 
 COPY --chown=chrome:chrome bin/entrypoint.sh /entrypoint.sh
+COPY --chown=chrome:chrome bin/entrypoint-stealth.sh /entrypoint-stealth.sh
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/bin/sh", "-c", "if [ \"$STEALTH\" = 'true' ]; then exec /entrypoint-stealth.sh \"$@\"; else exec /entrypoint.sh \"$@\"; fi", "--"]
 CMD []
