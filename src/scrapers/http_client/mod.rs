@@ -19,7 +19,6 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use reqwest::{Client, StatusCode};
-use tokio::sync::Mutex;
 use tracing::debug;
 
 use super::rate_limiter::RateLimiter;
@@ -28,12 +27,13 @@ use crate::models::{CrawlRequest, CrawlUrl, UrlStatus};
 use crate::repository::DieselCrawlRepository;
 
 #[cfg(feature = "browser")]
-use super::browser::{BrowserEngineConfig, BrowserFetcher};
+use super::browser::{BrowserPool, BrowserPoolConfig};
 
 /// HTTP client with request logging and conditional request support.
 ///
 /// When browser is configured (via `BROWSER_URL` env var), requests are
-/// automatically routed through the stealth browser.
+/// automatically routed through the browser pool. Multiple browsers can be
+/// specified with comma-separated URLs for load balancing and failover.
 #[derive(Clone)]
 pub struct HttpClient {
     client: Client,
@@ -43,20 +43,21 @@ pub struct HttpClient {
     referer: Option<String>,
     rate_limiter: RateLimiter,
     #[cfg(feature = "browser")]
-    browser: Option<Arc<Mutex<BrowserFetcher>>>,
+    browser_pool: Option<Arc<BrowserPool>>,
 }
 
 impl HttpClient {
-    /// Check if browser mode is available via BROWSER_URL env var.
+    /// Create browser pool from BROWSER_URL env var.
+    /// Supports comma-separated URLs for multiple browsers.
     #[cfg(feature = "browser")]
-    fn create_browser_fetcher() -> Option<Arc<Mutex<BrowserFetcher>>> {
-        if let Ok(url) = std::env::var("BROWSER_URL") {
-            debug!("BROWSER_URL set, enabling browser mode: {}", url);
-            let config = BrowserEngineConfig::default().with_env_overrides();
-            Some(Arc::new(Mutex::new(BrowserFetcher::new(config))))
-        } else {
-            None
-        }
+    fn create_browser_pool() -> Option<Arc<BrowserPool>> {
+        BrowserPoolConfig::from_env().map(|config| {
+            debug!(
+                "BROWSER_URL set, enabling browser pool with {} browser(s)",
+                config.urls.len()
+            );
+            Arc::new(BrowserPool::new(config))
+        })
     }
 
     /// Create a new HTTP client.
@@ -95,7 +96,7 @@ impl HttpClient {
             referer: None,
             rate_limiter: RateLimiter::new(backend),
             #[cfg(feature = "browser")]
-            browser: Self::create_browser_fetcher(),
+            browser_pool: Self::create_browser_pool(),
         }
     }
 
@@ -140,7 +141,7 @@ impl HttpClient {
             referer: None,
             rate_limiter,
             #[cfg(feature = "browser")]
-            browser: Self::create_browser_fetcher(),
+            browser_pool: Self::create_browser_pool(),
         }
     }
 
@@ -163,7 +164,7 @@ impl HttpClient {
 
     /// Make a GET request with optional conditional headers.
     /// Uses adaptive rate limiting per domain.
-    /// When BROWSER_URL is configured, routes through stealth browser.
+    /// When BROWSER_URL is configured, routes through browser pool.
     pub async fn get(
         &self,
         url: &str,
@@ -172,18 +173,18 @@ impl HttpClient {
     ) -> Result<HttpResponse, reqwest::Error> {
         // Check if browser mode is enabled
         #[cfg(feature = "browser")]
-        if let Some(ref browser) = self.browser {
-            return self.get_via_browser(browser, url).await;
+        if let Some(ref pool) = self.browser_pool {
+            return self.get_via_browser_pool(pool, url).await;
         }
 
         self.get_via_reqwest(url, etag, last_modified).await
     }
 
-    /// Fetch via stealth browser.
+    /// Fetch via browser pool (with load balancing and failover).
     #[cfg(feature = "browser")]
-    async fn get_via_browser(
+    async fn get_via_browser_pool(
         &self,
-        browser: &Arc<Mutex<BrowserFetcher>>,
+        pool: &Arc<BrowserPool>,
         url: &str,
     ) -> Result<HttpResponse, reqwest::Error> {
         // Wait for rate limiter
@@ -191,10 +192,8 @@ impl HttpClient {
 
         let start = Instant::now();
 
-        // Fetch via browser
-        let mut fetcher = browser.lock().await;
-        let result = fetcher.fetch(url).await;
-        drop(fetcher); // Release lock early
+        // Fetch via browser pool (handles selection and failover internally)
+        let result = pool.fetch(url).await;
 
         let duration = start.elapsed();
 
@@ -239,9 +238,9 @@ impl HttpClient {
                 ))
             }
             Err(e) => {
-                // Browser fetch failed - log and fall back to reqwest
+                // All browsers in pool failed - log and fall back to reqwest
                 debug!(
-                    "Browser fetch failed for {}: {}, falling back to reqwest",
+                    "Browser pool fetch failed for {}: {}, falling back to reqwest",
                     url, e
                 );
 

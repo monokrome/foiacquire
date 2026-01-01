@@ -9,10 +9,14 @@ mod binary;
 mod config;
 mod cookies;
 mod fetch;
+mod pool;
+mod selection;
 mod stealth;
 mod types;
 
 pub use config::{default_headless, default_timeout, BrowserEngineConfig, BrowserEngineType};
+pub use pool::{BrowserPool, BrowserPoolConfig};
+pub use selection::SelectionStrategyType;
 #[allow(unused_imports)]
 pub use types::{BinaryFetchResponse, BrowserCookie, BrowserFetchResponse};
 

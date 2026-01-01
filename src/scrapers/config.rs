@@ -5,7 +5,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::browser::{default_headless, default_timeout, BrowserEngineConfig, BrowserEngineType};
+use super::browser::{
+    default_headless, default_timeout, BrowserEngineConfig, BrowserEngineType,
+    SelectionStrategyType,
+};
 
 /// Scraper configuration from JSON.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -88,19 +91,47 @@ pub struct BrowserConfig {
 
     /// Remote Chrome DevTools URL (e.g., "ws://localhost:9222").
     /// If set, connects to existing browser instead of launching one.
+    /// For a single browser, use this field.
     #[serde(default)]
     pub remote_url: Option<String>,
+
+    /// Multiple remote browser URLs for load balancing/failover.
+    /// Overrides BROWSER_URL environment variable when set.
+    #[serde(default)]
+    pub urls: Vec<String>,
+
+    /// Browser selection strategy when multiple URLs are configured.
+    /// Options: "round-robin" (default), "random", "per-domain".
+    #[serde(default)]
+    pub selection: Option<String>,
 }
 
 impl BrowserConfig {
     /// Convert to BrowserEngineConfig.
-    /// Applies environment variable overrides (BROWSER_URL).
+    /// Per-scraper config overrides environment variables.
     pub fn to_engine_config(&self) -> BrowserEngineConfig {
         let engine = match self.engine.to_lowercase().as_str() {
             "stealth" => BrowserEngineType::Stealth,
             "cookies" => BrowserEngineType::Cookies,
             "standard" => BrowserEngineType::Standard,
             _ => BrowserEngineType::Stealth,
+        };
+
+        let selection = self
+            .selection
+            .as_ref()
+            .and_then(|s| SelectionStrategyType::from_str(s))
+            .unwrap_or_default();
+
+        // Per-scraper URLs override environment
+        let (remote_url, remote_urls) = if !self.urls.is_empty() {
+            (None, self.urls.clone())
+        } else if let Some(ref url) = self.remote_url {
+            (Some(url.clone()), Vec::new())
+        } else {
+            // Fall back to environment variables
+            let base = BrowserEngineConfig::default().with_env_overrides();
+            (base.remote_url, base.remote_urls)
         };
 
         BrowserEngineConfig {
@@ -111,9 +142,10 @@ impl BrowserConfig {
             timeout: self.timeout,
             wait_for_selector: self.wait_for_selector.clone(),
             chrome_args: Vec::new(),
-            remote_url: self.remote_url.clone(),
+            remote_url,
+            remote_urls,
+            selection,
         }
-        .with_env_overrides()
     }
 }
 
