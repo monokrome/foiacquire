@@ -1,7 +1,22 @@
 # FOIAcquire - FOIA document acquisition and research system
+
+# Stage 1: Build the Rust binary
+FROM rust:alpine AS builder
+
+RUN apk add --no-cache musl-dev
+
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY migrations ./migrations
+COPY templates ./templates
+COPY build.rs ./
+
+RUN cargo build --release && strip target/release/foia
+
+# Stage 2: Runtime image
 FROM alpine:3.21
 
-ARG TARGETARCH
 ARG WITH_TESSERACT="false"
 ARG WITH_TOR="false"
 
@@ -26,8 +41,8 @@ RUN adduser -D -u 1000 foiacquire \
 WORKDIR /opt/foiacquire
 VOLUME /opt/foiacquire
 
-# Copy pre-built binary for the target architecture
-COPY dist/${TARGETARCH}/foiacquire /usr/local/bin/foiacquire
+# Copy binary from builder
+COPY --from=builder /build/target/release/foia /usr/local/bin/foiacquire
 COPY bin/foiacquire-entrypoint.sh /entrypoint.sh
 RUN chmod 755 /usr/local/bin/foiacquire /entrypoint.sh
 
