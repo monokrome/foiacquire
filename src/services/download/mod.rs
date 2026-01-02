@@ -138,6 +138,7 @@ impl DownloadService {
 
                     // Handle YouTube URLs specially
                     if youtube::is_youtube_url(&url) {
+                        let proxy_url = privacy.effective_proxy_url();
                         let yt_result = download_youtube_video(
                             &url,
                             &crawl_url,
@@ -148,6 +149,7 @@ impl DownloadService {
                             &event_tx,
                             &downloaded,
                             &failed,
+                            proxy_url.as_deref(),
                         )
                         .await;
 

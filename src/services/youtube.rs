@@ -72,11 +72,18 @@ pub struct DownloadResult {
 }
 
 /// Download a YouTube video using yt-dlp.
-pub async fn download_video(url: &str, output_dir: &Path) -> Result<DownloadResult> {
+///
+/// If `proxy_url` is provided, it will be passed to yt-dlp's --proxy flag.
+/// This should be a SOCKS5 URL like "socks5://127.0.0.1:9050".
+pub async fn download_video(
+    url: &str,
+    output_dir: &Path,
+    proxy_url: Option<&str>,
+) -> Result<DownloadResult> {
     info!("Downloading YouTube video: {}", url);
 
     // First, get metadata
-    let metadata = fetch_metadata(url).await?;
+    let metadata = fetch_metadata(url, proxy_url).await?;
     debug!("Video metadata: {:?}", metadata);
 
     // Create output directory
@@ -89,19 +96,28 @@ pub async fn download_video(url: &str, output_dir: &Path) -> Result<DownloadResu
         .to_string_lossy()
         .to_string();
 
-    // Run yt-dlp
-    let output = Command::new("yt-dlp")
-        .args([
-            "--no-playlist",
-            "--format",
-            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-            "--merge-output-format",
-            "mp4",
-            "--output",
-            &output_template,
-            "--no-progress",
-            url,
-        ])
+    // Build yt-dlp command
+    let mut cmd = Command::new("yt-dlp");
+    cmd.args([
+        "--no-playlist",
+        "--format",
+        "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "--merge-output-format",
+        "mp4",
+        "--output",
+        &output_template,
+        "--no-progress",
+    ]);
+
+    // Add proxy if configured
+    if let Some(proxy) = proxy_url {
+        debug!("Using proxy for yt-dlp: {}", proxy);
+        cmd.args(["--proxy", proxy]);
+    }
+
+    cmd.arg(url);
+
+    let output = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -141,9 +157,19 @@ pub async fn download_video(url: &str, output_dir: &Path) -> Result<DownloadResu
 }
 
 /// Fetch video metadata without downloading.
-pub async fn fetch_metadata(url: &str) -> Result<VideoMetadata> {
-    let output = Command::new("yt-dlp")
-        .args(["--dump-json", "--no-playlist", url])
+///
+/// If `proxy_url` is provided, it will be passed to yt-dlp's --proxy flag.
+pub async fn fetch_metadata(url: &str, proxy_url: Option<&str>) -> Result<VideoMetadata> {
+    let mut cmd = Command::new("yt-dlp");
+    cmd.args(["--dump-json", "--no-playlist"]);
+
+    if let Some(proxy) = proxy_url {
+        cmd.args(["--proxy", proxy]);
+    }
+
+    cmd.arg(url);
+
+    let output = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
