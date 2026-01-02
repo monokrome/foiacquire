@@ -23,9 +23,8 @@ pub fn pdf_page_to_image(
         .status();
 
     match status {
-        Ok(s) if s.success() => find_page_image(output_dir, page).ok_or_else(|| {
-            OcrError::OcrFailed(format!("No image generated for page {}", page))
-        }),
+        Ok(s) if s.success() => find_page_image(output_dir, page)
+            .ok_or_else(|| OcrError::OcrFailed(format!("No image generated for page {}", page))),
         Ok(_) => Err(OcrError::OcrFailed(
             "pdftoppm failed to convert PDF page".to_string(),
         )),

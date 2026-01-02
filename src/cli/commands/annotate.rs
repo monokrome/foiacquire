@@ -480,7 +480,10 @@ pub async fn cmd_annotate_reset(
     let count = doc_repo.count_annotated(source_id).await?;
 
     if count == 0 {
-        println!("{} No annotated documents found to reset", style("!").yellow());
+        println!(
+            "{} No annotated documents found to reset",
+            style("!").yellow()
+        );
         return Ok(());
     }
 

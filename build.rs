@@ -40,10 +40,8 @@ fn generate_postgres_migrations() {
             let up_sql_path = entry.path().join("up.sql");
             if up_sql_path.exists() {
                 // Use absolute path from CARGO_MANIFEST_DIR
-                let absolute_path = format!(
-                    "{}/migrations/postgres/{}/up.sql",
-                    manifest_dir, dir_name
-                );
+                let absolute_path =
+                    format!("{}/migrations/postgres/{}/up.sql", manifest_dir, dir_name);
                 migrations.push((version, absolute_path));
             }
         }

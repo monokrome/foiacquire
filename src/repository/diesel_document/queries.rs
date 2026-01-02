@@ -944,7 +944,11 @@ impl DieselDocumentRepository {
                 query = query.filter(documents::source_id.eq(sid));
             }
 
-            query.count().get_result::<i64>(&mut conn).await.map(|c| c as u64)
+            query
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await
+                .map(|c| c as u64)
         })
     }
 }

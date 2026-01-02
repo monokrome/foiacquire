@@ -131,7 +131,6 @@ impl DeepSeekBackend {
             Err(e) => Err(OcrError::Io(e)),
         }
     }
-
 }
 
 impl Default for DeepSeekBackend {

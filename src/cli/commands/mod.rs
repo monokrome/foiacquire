@@ -830,7 +830,7 @@ pub async fn run() -> anyhow::Result<()> {
                 )
                 .await
             }
-        }
+        },
         Commands::DetectDates {
             source_id,
             limit,

@@ -57,7 +57,6 @@ impl TesseractBackend {
             Err(e) => Err(OcrError::Io(e)),
         }
     }
-
 }
 
 impl Default for TesseractBackend {
