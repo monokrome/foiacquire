@@ -951,4 +951,28 @@ impl DieselDocumentRepository {
                 .map(|c| c as u64)
         })
     }
+
+    /// Update synopsis and tags for a document.
+    pub async fn update_synopsis_and_tags(
+        &self,
+        id: &str,
+        synopsis: Option<&str>,
+        tags: &[String],
+    ) -> Result<(), DieselError> {
+        let now = Utc::now().to_rfc3339();
+        let tags_json = serde_json::to_string(tags).unwrap_or_else(|_| "[]".to_string());
+
+        with_conn!(self.pool, conn, {
+            diesel::update(documents::table.find(id))
+                .set((
+                    documents::synopsis.eq(synopsis),
+                    documents::tags.eq(&tags_json),
+                    documents::status.eq("indexed"),
+                    documents::updated_at.eq(&now),
+                ))
+                .execute(&mut conn)
+                .await?;
+            Ok(())
+        })
+    }
 }

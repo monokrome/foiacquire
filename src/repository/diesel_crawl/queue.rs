@@ -113,4 +113,37 @@ impl DieselCrawlRepository {
                 .map(|records| records.into_iter().map(CrawlUrl::from).collect())
         })
     }
+
+    /// Reset all failed URLs to 'discovered' status for retry.
+    ///
+    /// Optionally filter by source_id. Returns the number of URLs reset.
+    pub async fn reset_failed_urls(&self, source_id: Option<&str>) -> Result<u64, DieselError> {
+        let source_id = source_id.map(|s| s.to_string());
+
+        with_conn!(self.pool, conn, {
+            let mut query =
+                diesel::update(crawl_urls::table.filter(crawl_urls::status.eq("failed")))
+                    .into_boxed();
+
+            if let Some(ref sid) = source_id {
+                query = diesel::update(
+                    crawl_urls::table
+                        .filter(crawl_urls::status.eq("failed"))
+                        .filter(crawl_urls::source_id.eq(sid)),
+                )
+                .into_boxed();
+            }
+
+            query
+                .set((
+                    crawl_urls::status.eq("discovered"),
+                    crawl_urls::retry_count.eq(0),
+                    crawl_urls::last_error.eq::<Option<String>>(None),
+                    crawl_urls::next_retry_at.eq::<Option<String>>(None),
+                ))
+                .execute(&mut conn)
+                .await
+                .map(|n| n as u64)
+        })
+    }
 }
