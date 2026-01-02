@@ -2,6 +2,13 @@
 //!
 //! Allows users to define custom analysis commands in the configuration file.
 //! Commands can use placeholders like {file} and {page} in their arguments.
+//!
+//! # Privacy Integration
+//!
+//! Custom commands receive privacy-related environment variables:
+//! - `SOCKS_PROXY` - SOCKS5 proxy URL if configured
+//! - `ALL_PROXY` - Same as SOCKS_PROXY for compatibility
+//! - `FOIACQUIRE_DIRECT` - "1" if running in direct mode (no Tor)
 
 use std::path::Path;
 use std::process::Command;
@@ -75,6 +82,32 @@ impl CustomBackend {
     /// Create a new custom backend.
     pub fn new(name: String, config: CustomAnalysisConfig) -> Self {
         Self { name, config }
+    }
+
+    /// Apply privacy-related environment variables to a command.
+    ///
+    /// Sets:
+    /// - SOCKS_PROXY / ALL_PROXY if a proxy is available (embedded Arti or external)
+    /// - FOIACQUIRE_DIRECT if running in direct mode
+    fn apply_privacy_env(&self, cmd: &mut Command) {
+        // Check for embedded Arti first
+        #[cfg(feature = "embedded-tor")]
+        if let Some(proxy_url) = crate::privacy::get_arti_socks_url() {
+            cmd.env("SOCKS_PROXY", &proxy_url);
+            cmd.env("ALL_PROXY", &proxy_url);
+            return;
+        }
+
+        // If SOCKS_PROXY is already set in environment, it gets inherited automatically
+        // Just add ALL_PROXY as an alias for compatibility
+        if let Ok(proxy) = std::env::var("SOCKS_PROXY") {
+            cmd.env("ALL_PROXY", proxy);
+        }
+
+        // Forward FOIACQUIRE_DIRECT if set
+        if let Ok(direct) = std::env::var("FOIACQUIRE_DIRECT") {
+            cmd.env("FOIACQUIRE_DIRECT", direct);
+        }
     }
 
     /// Replace placeholders in argument string.
@@ -198,8 +231,11 @@ impl AnalysisBackend for CustomBackend {
         let start = Instant::now();
         let args = self.build_args(file_path, None);
 
-        let output = Command::new(&self.config.command)
-            .args(&args)
+        let mut cmd = Command::new(&self.config.command);
+        cmd.args(&args);
+        self.apply_privacy_env(&mut cmd);
+
+        let output = cmd
             .output()
             .map_err(|e| AnalysisError::CommandFailed(format!("Failed to run command: {}", e)))?;
 
@@ -239,8 +275,11 @@ impl AnalysisBackend for CustomBackend {
         let start = Instant::now();
         let args = self.build_args(file_path, Some(page));
 
-        let output = Command::new(&self.config.command)
-            .args(&args)
+        let mut cmd = Command::new(&self.config.command);
+        cmd.args(&args);
+        self.apply_privacy_env(&mut cmd);
+
+        let output = cmd
             .output()
             .map_err(|e| AnalysisError::CommandFailed(format!("Failed to run command: {}", e)))?;
 

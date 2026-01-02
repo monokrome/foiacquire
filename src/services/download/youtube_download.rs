@@ -26,11 +26,12 @@ pub async fn download_youtube_video(
     event_tx: &mpsc::Sender<DownloadEvent>,
     downloaded: &Arc<AtomicUsize>,
     failed: &Arc<AtomicUsize>,
+    proxy_url: Option<&str>,
 ) -> bool {
     debug!("Attempting YouTube download: {}", url);
 
     // Download with yt-dlp
-    let result = youtube::download_video(url, documents_dir).await;
+    let result = youtube::download_video(url, documents_dir, proxy_url).await;
 
     match result {
         Ok(yt_result) => {

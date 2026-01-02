@@ -322,9 +322,35 @@ impl PrivacyConfig {
         }
     }
 
-    /// Get the SOCKS proxy URL if configured.
+    /// Get the SOCKS proxy URL if configured (external proxy only).
     pub fn proxy_url(&self) -> Option<&str> {
         self.socks_proxy.as_deref()
+    }
+
+    /// Get the effective proxy URL for external commands (like yt-dlp).
+    ///
+    /// Returns the proxy URL to use, checking in order:
+    /// 1. External SOCKS proxy from config
+    /// 2. Embedded Arti proxy (if running)
+    /// 3. None if direct mode
+    pub fn effective_proxy_url(&self) -> Option<String> {
+        // Direct mode = no proxy
+        if self.direct {
+            return None;
+        }
+
+        // External proxy takes precedence
+        if let Some(ref proxy) = self.socks_proxy {
+            return Some(proxy.clone());
+        }
+
+        // Try embedded Arti if available
+        #[cfg(feature = "embedded-tor")]
+        if let Some(url) = crate::privacy::get_arti_socks_url() {
+            return Some(url);
+        }
+
+        None
     }
 
     /// Check if using embedded Arti (vs external proxy or direct).
