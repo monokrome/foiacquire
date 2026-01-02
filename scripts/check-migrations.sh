@@ -1,10 +1,12 @@
 #!/bin/bash
-# Check that existing migration files haven't been modified.
-# Migrations are immutable - we can only add new ones.
+# Check that:
+# 1. Existing migration files haven't been modified (immutability)
+# 2. All postgres migrations are registered in migrations.rs
 
 set -e
 
 MIGRATIONS_DIR="migrations"
+MIGRATIONS_RS="src/repository/migrations.rs"
 
 # Get the base commit to compare against
 if [ -n "$GITHUB_BASE_REF" ]; then
@@ -45,3 +47,30 @@ if [ $MODIFIED -eq 1 ]; then
 fi
 
 echo "Migration immutability check passed."
+
+# Check that all postgres migrations are registered in POSTGRES_MIGRATION_FILES
+echo ""
+echo "Checking postgres migration registration..."
+
+UNREGISTERED=0
+for migration_dir in migrations/postgres/*/; do
+    # Extract version from directory name (e.g., "2025-01-01-200000" from "2025-01-01-200000_archive_history")
+    dir_name=$(basename "$migration_dir")
+    version=$(echo "$dir_name" | sed 's/_.*$//')
+
+    # Check if this version is in migrations.rs
+    if ! grep -q "\"$version\"" "$MIGRATIONS_RS" 2>/dev/null; then
+        echo "ERROR: Postgres migration not registered: $dir_name"
+        echo "       Add it to POSTGRES_MIGRATION_FILES in $MIGRATIONS_RS"
+        UNREGISTERED=1
+    fi
+done
+
+if [ $UNREGISTERED -eq 1 ]; then
+    echo ""
+    echo "All postgres migrations must be registered in POSTGRES_MIGRATION_FILES."
+    echo "SQLite migrations are auto-discovered, but postgres requires manual registration."
+    exit 1
+fi
+
+echo "Postgres migration registration check passed."

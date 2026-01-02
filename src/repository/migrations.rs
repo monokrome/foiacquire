@@ -93,6 +93,10 @@ static POSTGRES_MIGRATION_FILES: &[(&str, &str)] = &[
             "../../migrations/postgres/2025-01-01-000000_add_missing_unique_constraints/up.sql"
         ),
     ),
+    (
+        "2025-01-01-200000",
+        include_str!("../../migrations/postgres/2025-01-01-200000_archive_history/up.sql"),
+    ),
 ];
 
 /// Run PostgreSQL migrations asynchronously.
