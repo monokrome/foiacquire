@@ -1,0 +1,106 @@
+#!/bin/bash
+# Generate database migration files.
+#
+# Usage:
+#   bin/makemigration <name>              # Both engines
+#   bin/makemigration -p <name>           # Postgres only
+#   bin/makemigration -s <name>           # SQLite only
+#   bin/makemigration --postgres <name>   # Postgres only
+#   bin/makemigration --sqlite <name>     # SQLite only
+#
+# Examples:
+#   bin/makemigration add user preferences
+#   bin/makemigration -p large refactor
+
+set -e
+
+POSTGRES=false
+SQLITE=false
+
+# Parse flags
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -p|--postgres)
+            POSTGRES=true
+            shift
+            ;;
+        -s|--sqlite)
+            SQLITE=true
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: bin/makemigration [OPTIONS] <name...>"
+            echo ""
+            echo "Options:"
+            echo "  -p, --postgres    Generate only postgres migration"
+            echo "  -s, --sqlite      Generate only sqlite migration"
+            echo "  -h, --help        Show this help"
+            echo ""
+            echo "If no engine flag is specified, generates for both."
+            echo ""
+            echo "Examples:"
+            echo "  bin/makemigration add user preferences"
+            echo "  bin/makemigration -p large refactor"
+            exit 0
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# If neither specified, do both
+if [ "$POSTGRES" = false ] && [ "$SQLITE" = false ]; then
+    POSTGRES=true
+    SQLITE=true
+fi
+
+# Remaining args are the migration name
+if [ $# -eq 0 ]; then
+    echo "Error: Migration name required"
+    echo "Usage: bin/makemigration [OPTIONS] <name...>"
+    exit 1
+fi
+
+# Join args with underscores and convert to lowercase
+NAME=$(echo "$*" | tr '[:upper:]' '[:lower:]' | tr ' ' '_' | tr '-' '_')
+
+# Generate timestamp in diesel format: YYYY-MM-DD-HHMMSS
+TIMESTAMP=$(date -u +"%Y-%m-%d-%H%M%S")
+
+create_migration() {
+    local engine=$1
+    local dir="migrations/${engine}/${TIMESTAMP}_${NAME}"
+
+    mkdir -p "$dir"
+
+    # Create up.sql with header
+    cat > "$dir/up.sql" << EOF
+-- Migration: ${NAME}
+-- Created: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+EOF
+
+    # Create down.sql with header
+    cat > "$dir/down.sql" << EOF
+-- Rollback: ${NAME}
+-- Created: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+EOF
+
+    echo "Created: $dir/{up,down}.sql"
+}
+
+if [ "$POSTGRES" = true ]; then
+    create_migration "postgres"
+fi
+
+if [ "$SQLITE" = true ]; then
+    create_migration "sqlite"
+fi
+
+echo ""
+echo "Next steps:"
+echo "  1. Edit the up.sql file(s) with your schema changes"
+echo "  2. Edit the down.sql file(s) with rollback statements"
+echo "  3. Run 'cargo build' to include in binary"
