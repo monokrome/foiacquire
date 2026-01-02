@@ -13,15 +13,16 @@ fn main() {
 
 fn generate_postgres_migrations() {
     let out_dir = env::var("OUT_DIR").unwrap();
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("postgres_migrations.rs");
 
-    let migrations_dir = Path::new("migrations/postgres");
+    let migrations_dir = Path::new(&manifest_dir).join("migrations/postgres");
 
     // Collect migration directories
     let mut migrations: Vec<(String, String)> = Vec::new();
 
     if migrations_dir.exists() {
-        let mut entries: Vec<_> = fs::read_dir(migrations_dir)
+        let mut entries: Vec<_> = fs::read_dir(&migrations_dir)
             .expect("Failed to read migrations/postgres directory")
             .filter_map(|e| e.ok())
             .filter(|e| e.path().is_dir())
@@ -38,8 +39,12 @@ fn generate_postgres_migrations() {
 
             let up_sql_path = entry.path().join("up.sql");
             if up_sql_path.exists() {
-                let relative_path = format!("migrations/postgres/{}/up.sql", dir_name);
-                migrations.push((version, relative_path));
+                // Use absolute path from CARGO_MANIFEST_DIR
+                let absolute_path = format!(
+                    "{}/migrations/postgres/{}/up.sql",
+                    manifest_dir, dir_name
+                );
+                migrations.push((version, absolute_path));
             }
         }
     }
@@ -52,7 +57,7 @@ fn generate_postgres_migrations() {
 
     for (version, path) in &migrations {
         output.push_str(&format!(
-            "    (\"{}\", include_str!(\"../../../{}\")),\n",
+            "    (\"{}\", include_str!(\"{}\")),\n",
             version, path
         ));
     }
