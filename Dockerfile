@@ -3,7 +3,7 @@
 # Stage 1: Build the Rust binary
 FROM rust:alpine AS builder
 
-ARG FEATURES=""
+ARG FEATURES="browser,postgres"
 
 RUN apk add --no-cache musl-dev
 
