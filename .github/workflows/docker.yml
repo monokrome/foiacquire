@@ -45,6 +45,9 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-features -- -D warnings
 
+      - name: Check CI references correct binary name
+        run: ./scripts/check-binary-name.sh
+
   browser-compat-test:
     name: Browser Compatibility Test
     needs: lint

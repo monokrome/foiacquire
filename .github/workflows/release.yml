@@ -84,14 +84,14 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          tar -czvf ../../../${{ matrix.name }}.tar.gz foiacquire
+          tar -czvf ../../../${{ matrix.name }}.tar.gz foia
           cd ../../..
 
       - name: Create archive (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Compress-Archive -Path "target/${{ matrix.target }}/release/foiacquire.exe" -DestinationPath "${{ matrix.name }}.zip"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/foia.exe" -DestinationPath "${{ matrix.name }}.zip"
 
       - name: Upload artifact (Unix)
         if: runner.os != 'Windows'
