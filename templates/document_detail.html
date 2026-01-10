@@ -190,32 +190,47 @@
         const header = document.createElement('div');
         header.className = 'page-text-header';
 
-        const originalText = page.final_text || page.ocr_text || page.pdf_text || '';
-        const deepseekText = page.deepseek_text || '';
-        const hasComparison = !!deepseekText;
+        // Collect all available text sources - each gets its own tab
+        const sources = [];
+        if (page.pdf_text) sources.push({ id: 'embedded', label: 'Embedded', text: page.pdf_text });
+        if (page.ocr_text) sources.push({ id: 'ocr', label: 'OCR', text: page.ocr_text });
+        if (page.deepseek_text) sources.push({ id: 'deepseek', label: 'DeepSeek', text: page.deepseek_text });
 
-        if (hasComparison) {
+        if (sources.length === 0) {
+            // No text at all
+            header.innerHTML = `<span class="page-num">Page ${page.page_number}</span>`;
+            const pre = document.createElement('pre');
+            pre.className = 'page-text';
+            pre.textContent = '(No text extracted)';
+            textCol.appendChild(header);
+            textCol.appendChild(pre);
+        } else if (sources.length === 1) {
+            // Single source - no tabs needed
+            header.innerHTML = `<span class="page-num">Page ${page.page_number}</span>`;
+            const pre = document.createElement('pre');
+            pre.className = 'page-text';
+            pre.textContent = sources[0].text;
+            textCol.appendChild(header);
+            textCol.appendChild(pre);
+        } else {
+            // Multiple sources - show tabs
+            const tabsHtml = sources.map((s, i) =>
+                `<button class="ocr-tab${i === 0 ? ' active' : ''}" data-tab="${s.id}">${s.label}</button>`
+            ).join('');
+
             header.innerHTML = `
                 <span class="page-num">Page ${page.page_number}</span>
-                <div class="ocr-tabs">
-                    <button class="ocr-tab active" data-tab="original">Original</button>
-                    <button class="ocr-tab" data-tab="deepseek">DeepSeek</button>
-                </div>
+                <div class="ocr-tabs">${tabsHtml}</div>
             `;
-
-            const originalPre = document.createElement('pre');
-            originalPre.className = 'page-text ocr-panel active';
-            originalPre.dataset.panel = 'original';
-            originalPre.textContent = originalText || '(No text extracted)';
-
-            const deepseekPre = document.createElement('pre');
-            deepseekPre.className = 'page-text ocr-panel';
-            deepseekPre.dataset.panel = 'deepseek';
-            deepseekPre.textContent = deepseekText;
-
             textCol.appendChild(header);
-            textCol.appendChild(originalPre);
-            textCol.appendChild(deepseekPre);
+
+            sources.forEach((s, i) => {
+                const pre = document.createElement('pre');
+                pre.className = 'page-text ocr-panel' + (i === 0 ? ' active' : '');
+                pre.dataset.panel = s.id;
+                pre.textContent = s.text;
+                textCol.appendChild(pre);
+            });
 
             header.querySelectorAll('.ocr-tab').forEach(tab => {
                 tab.addEventListener('click', () => {
@@ -227,13 +242,6 @@
                     });
                 });
             });
-        } else {
-            header.innerHTML = `<span class="page-num">Page ${page.page_number}</span>`;
-            const pre = document.createElement('pre');
-            pre.className = 'page-text';
-            pre.textContent = originalText || '(No text extracted)';
-            textCol.appendChild(header);
-            textCol.appendChild(pre);
         }
 
         content.appendChild(imageCol);

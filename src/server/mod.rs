@@ -6,11 +6,11 @@
 //! - Cross-source deduplication display
 //! - Document version history
 
+mod assets;
 mod cache;
 mod handlers;
 mod routes;
 mod template_structs;
-mod templates;
 
 pub use routes::create_router;
 
@@ -100,13 +100,13 @@ mod tests {
 
         let db_url = format!("sqlite:{}", db_path.display());
         migrations::run_migrations(&db_url).await.unwrap();
-        let ctx = DieselDbContext::from_sqlite_path(&db_path, &docs_dir).unwrap();
+        let ctx = DieselDbContext::from_sqlite_path(&db_path).unwrap();
 
         let state = AppState {
             doc_repo: Arc::new(ctx.documents()),
             source_repo: Arc::new(ctx.sources()),
             crawl_repo: Arc::new(ctx.crawl()),
-            documents_dir: docs_dir,
+            documents_dir: docs_dir.clone(),
             stats_cache: Arc::new(StatsCache::new()),
             deepseek_job: Arc::new(RwLock::new(DeepSeekJobStatus::default())),
         };
@@ -126,7 +126,7 @@ mod tests {
 
         let db_url = format!("sqlite:{}", db_path.display());
         migrations::run_migrations(&db_url).await.unwrap();
-        let ctx = DieselDbContext::from_sqlite_path(&db_path, &docs_dir).unwrap();
+        let ctx = DieselDbContext::from_sqlite_path(&db_path).unwrap();
 
         // Add test data
         let source = Source::new(

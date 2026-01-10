@@ -1,12 +1,13 @@
 //! Duplicate document detection handlers.
 
+use askama::Template;
 use axum::{
     extract::State,
     response::{Html, IntoResponse},
 };
 use std::collections::HashMap;
 
-use super::super::templates;
+use super::super::template_structs::{DuplicateDoc, DuplicateGroup, DuplicatesTemplate, ErrorTemplate};
 use super::super::AppState;
 
 /// List documents that exist in multiple sources.
@@ -14,11 +15,12 @@ pub async fn list_duplicates(State(state): State<AppState>) -> impl IntoResponse
     let hashes = match state.doc_repo.get_content_hashes().await {
         Ok(h) => h,
         Err(e) => {
-            return Html(templates::base_template(
-                "Error",
-                &format!("<p>Failed to load documents: {}</p>", e),
-                None,
-            ));
+            let msg = format!("Failed to load documents: {}", e);
+            let template = ErrorTemplate {
+                title: "Error",
+                message: &msg,
+            };
+            return Html(template.render().unwrap_or_else(|_| msg));
         }
     };
 
@@ -31,19 +33,31 @@ pub async fn list_duplicates(State(state): State<AppState>) -> impl IntoResponse
             .push((doc_id, source_id, title));
     }
 
-    let duplicates: Vec<_> = hash_to_docs
+    let duplicates: Vec<DuplicateGroup> = hash_to_docs
         .into_iter()
         .filter(|(_, docs)| {
             let unique_sources: std::collections::HashSet<_> =
                 docs.iter().map(|(_, source, _)| source).collect();
             unique_sources.len() > 1
         })
+        .map(|(content_hash, docs)| DuplicateGroup {
+            hash_prefix: content_hash.chars().take(16).collect(),
+            docs: docs
+                .into_iter()
+                .map(|(id, source_id, title)| DuplicateDoc {
+                    id,
+                    title,
+                    source_id,
+                })
+                .collect(),
+        })
         .collect();
 
-    let content = templates::duplicates_list(&duplicates);
-    Html(templates::base_template(
-        "Cross-Source Duplicates",
-        &content,
-        None,
-    ))
+    let template = DuplicatesTemplate {
+        title: "Cross-Source Duplicates",
+        has_duplicates: !duplicates.is_empty(),
+        duplicates,
+    };
+
+    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
 }

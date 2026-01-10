@@ -58,7 +58,7 @@ pub use migration_sqlite::SqliteMigrator;
 pub use pool::DieselError;
 
 // Re-export helper types from document module
-pub use document::{extract_filename_parts, sanitize_filename, DocumentSummary};
+pub use document::{extract_filename_parts, sanitize_filename};
 
 // Re-export models (public API)
 #[allow(unused_imports)]

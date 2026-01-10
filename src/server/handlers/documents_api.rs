@@ -107,9 +107,12 @@ pub async fn list_documents(
         .doc_repo
         .browse(
             params.source.as_deref(),
-            None,
+            params.status.as_deref(),
             &types,
             &tags,
+            params.q.as_deref(),
+            params.sort.as_deref(),
+            params.order.as_deref(),
             per_page as u32,
             offset as u32,
         )
@@ -128,7 +131,13 @@ pub async fn list_documents(
     // Get total count
     let total = state
         .doc_repo
-        .browse_count(params.source.as_deref(), None, &types, &tags)
+        .browse_count(
+            params.source.as_deref(),
+            params.status.as_deref(),
+            &types,
+            &tags,
+            params.q.as_deref(),
+        )
         .await
         .unwrap_or(documents.len() as u64);
 

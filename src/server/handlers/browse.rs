@@ -1,5 +1,6 @@
 //! Browse page handler.
 
+use askama::Template;
 use axum::{
     extract::{Query, State},
     response::{Html, IntoResponse},
@@ -7,9 +8,12 @@ use axum::{
 use serde::Deserialize;
 
 use super::super::cache::StatsCache;
-use super::super::templates;
+use super::super::template_structs::{
+    ActiveTagDisplay, BrowseTemplate, CategoryWithCount, DocumentRow, ErrorTemplate, SourceOption,
+    TagWithCount,
+};
 use super::super::AppState;
-use super::helpers::build_timeline_data;
+use crate::utils::MimeCategory;
 
 /// Query params for the unified browse page.
 #[derive(Debug, Clone, Deserialize)]
@@ -76,11 +80,11 @@ pub async fn browse_documents(
 
     let has_filters = !types.is_empty() || !tags.is_empty() || params.q.is_some();
 
-    // Run browse query with simpler signature
+    // Run optimized browse query (excludes extracted_text, uses single JOIN)
     let offset = page.saturating_sub(1) * per_page;
-    let documents = match state
+    let browse_rows = match state
         .doc_repo
-        .browse(
+        .browse_fast(
             params.source.as_deref(),
             None, // status
             &types,
@@ -92,28 +96,28 @@ pub async fn browse_documents(
     {
         Ok(result) => result,
         Err(e) => {
-            return Html(templates::base_template(
-                "Error",
-                &format!("<p>Failed to load documents: {}</p>", e),
-                None,
-            ));
+            let template = ErrorTemplate {
+                title: "Error",
+                message: &format!("Failed to load documents: {}", e),
+            };
+            return Html(template.render().unwrap_or_else(|_| e.to_string()));
         }
     };
 
     // Get total count for pagination
     let total = match state
         .doc_repo
-        .browse_count(params.source.as_deref(), None, &types, &tags)
+        .browse_count(params.source.as_deref(), None, &types, &tags, params.q.as_deref())
         .await
     {
         Ok(count) => count,
-        Err(_) => documents.len() as u64,
+        Err(_) => browse_rows.len() as u64,
     };
 
-    // Get type stats
+    // Get type stats (filtered by source if specified)
     let type_stats: Vec<(String, u64)> = state
         .doc_repo
-        .get_category_stats()
+        .get_category_stats(params.source.as_deref())
         .await
         .unwrap_or_default()
         .into_iter()
@@ -164,6 +168,7 @@ pub async fn browse_documents(
         let source_bg = params.source.clone();
         let types_bg = types.clone();
         let tags_bg = tags.clone();
+        let q_bg = params.q.clone();
 
         let cache_key =
             StatsCache::browse_count_key(source_bg.as_deref(), &types, &tags, params.q.as_deref());
@@ -171,7 +176,7 @@ pub async fn browse_documents(
         tokio::spawn(async move {
             if let Ok(count) = state_for_count
                 .doc_repo
-                .browse_count(source_bg.as_deref(), None, &types_bg, &tags_bg)
+                .browse_count(source_bg.as_deref(), None, &types_bg, &tags_bg, q_bg.as_deref())
                 .await
             {
                 state_for_count
@@ -181,29 +186,10 @@ pub async fn browse_documents(
         });
     }
 
-    let timeline = build_timeline_data(&documents);
-    let timeline_json = serde_json::to_string(&timeline).unwrap_or_else(|_| "{}".to_string());
-
-    let doc_data: Vec<_> = documents
-        .iter()
-        .filter_map(|doc| {
-            let version = doc.current_version()?;
-            let display_name = version
-                .original_filename
-                .clone()
-                .unwrap_or_else(|| doc.title.clone());
-
-            Some((
-                doc.id.clone(),
-                display_name,
-                doc.source_id.clone(),
-                version.mime_type.clone(),
-                version.file_size,
-                version.acquired_at,
-                doc.synopsis.clone(),
-                doc.tags.clone(),
-            ))
-        })
+    // Convert BrowseRows to DocumentRows (fast path - no Document model needed)
+    let doc_rows: Vec<DocumentRow> = browse_rows
+        .into_iter()
+        .map(DocumentRow::from_browse_row)
         .collect();
 
     // Calculate pagination cursors
@@ -221,27 +207,128 @@ pub async fn browse_documents(
         None
     };
 
-    // Convert tags to expected format
-    let all_tags_with_counts: Vec<(String, usize)> =
-        all_tags.iter().map(|t| (t.clone(), 0)).collect();
+    // Build query string for document links
+    let nav_query_string = {
+        let mut qs_parts = Vec::new();
+        if !types.is_empty() {
+            qs_parts.push(format!(
+                "types={}",
+                urlencoding::encode(&types.join(","))
+            ));
+        }
+        if !tags.is_empty() {
+            qs_parts.push(format!(
+                "tags={}",
+                urlencoding::encode(&tags.join(","))
+            ));
+        }
+        if let Some(source) = params.source.as_deref() {
+            qs_parts.push(format!("source={}", urlencoding::encode(source)));
+        }
+        if qs_parts.is_empty() {
+            String::new()
+        } else {
+            format!("?{}", qs_parts.join("&"))
+        }
+    };
 
-    let content = templates::browse_page(
-        &doc_data,
-        &type_stats,
-        &types,
-        &tags,
-        params.source.as_deref(),
-        &all_tags_with_counts,
-        &sources,
-        prev_cursor.as_deref(),
-        next_cursor.as_deref(),
+    // Build categories for type toggles
+    let categories: Vec<CategoryWithCount> = MimeCategory::all()
+        .iter()
+        .filter_map(|(cat_id, cat_name)| {
+            let count = type_stats
+                .iter()
+                .find(|(c, _)| c == *cat_id)
+                .map(|(_, n)| *n)
+                .unwrap_or(0);
+            if count > 0 {
+                let checked = types.is_empty() || types.iter().any(|t| t == *cat_id);
+                Some(CategoryWithCount {
+                    id: cat_id.to_string(),
+                    name: cat_name.to_string(),
+                    count,
+                    active: false,
+                    checked,
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Build source options
+    let source_options: Vec<SourceOption> = sources
+        .iter()
+        .map(|(id, name, count)| SourceOption {
+            id: id.clone(),
+            name: name.clone(),
+            count: *count,
+            selected: params.source.as_deref() == Some(id.as_str()),
+        })
+        .collect();
+
+    // Build tag list
+    let all_tags_with_counts: Vec<TagWithCount> = all_tags
+        .iter()
+        .map(|t| TagWithCount::new(t.clone(), 0))
+        .collect();
+
+    // Active tags display
+    let active_tags_display: Vec<ActiveTagDisplay> = tags
+        .iter()
+        .enumerate()
+        .map(|(i, t)| ActiveTagDisplay {
+            name: t.clone(),
+            index: i,
+        })
+        .collect();
+
+    // JSON for JavaScript
+    let active_tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".to_string());
+    let active_types_json = serde_json::to_string(&types).unwrap_or_else(|_| "[]".to_string());
+    let active_source_js = params
+        .source
+        .as_ref()
+        .map(|s| format!("\"{}\"", s))
+        .unwrap_or_else(|| "null".to_string());
+    let prev_cursor_js = prev_cursor
+        .as_ref()
+        .map(|c| format!("\"{}\"", c))
+        .unwrap_or_else(|| "null".to_string());
+    let next_cursor_js = next_cursor
+        .as_ref()
+        .map(|c| format!("\"{}\"", c))
+        .unwrap_or_else(|| "null".to_string());
+
+    let end_position = start_position + doc_rows.len() as u64;
+
+    let template = BrowseTemplate {
+        title: "Browse",
+        documents: doc_rows,
+        categories,
+        type_stats_empty: type_stats.is_empty(),
+        sources: source_options,
+        sources_empty: sources.is_empty(),
+        has_active_source: params.source.is_some(),
+        active_source_val: params.source.clone().unwrap_or_default(),
+        all_tags: all_tags_with_counts,
+        active_tags_display,
+        has_prev_cursor: prev_cursor.is_some(),
+        prev_cursor_val: prev_cursor.unwrap_or_default(),
+        has_next_cursor: next_cursor.is_some(),
+        next_cursor_val: next_cursor.unwrap_or_default(),
         start_position,
-        total,
+        end_position,
+        total_count: total,
         per_page,
-    );
-    Html(templates::base_template(
-        "Browse",
-        &content,
-        Some(&timeline_json),
-    ))
+        has_pagination: has_prev || has_next,
+        nav_query_string,
+        active_tags_json,
+        active_types_json,
+        active_source_js,
+        prev_cursor_js,
+        next_cursor_js,
+    };
+
+    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
 }

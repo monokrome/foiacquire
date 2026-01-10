@@ -6,6 +6,7 @@ use std::time::Duration;
 use crate::privacy::PrivacyConfig;
 
 /// Events emitted during download operations.
+/// Fields are populated when events are created, even if consumers don't read all of them.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum DownloadEvent {
@@ -44,6 +45,7 @@ pub enum DownloadEvent {
 }
 
 /// Result of a download operation.
+/// Part of public API - consumers may use any field even if current CLI doesn't read all.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct DownloadResult {

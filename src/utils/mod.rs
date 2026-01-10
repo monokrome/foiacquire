@@ -6,9 +6,7 @@
 //! - `mime`: MIME type categorization and icons
 
 mod format;
-mod html;
 mod mime;
 
 pub use format::format_size;
-pub use html::html_escape;
-pub use mime::{category_to_mime_patterns, mime_icon, mime_type_category, MimeCategory};
+pub use mime::{category_to_mime_patterns, mime_icon, mime_to_category, mime_type_category, MimeCategory};

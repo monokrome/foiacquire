@@ -191,9 +191,14 @@ pub async fn cmd_annotate(
                             progress.inc(1);
                         }
                     }
-                    AnnotationEvent::DocumentFailed { error, .. } => {
+                    AnnotationEvent::DocumentFailed { document_id, error } => {
                         if let Some(ref progress) = *pb_clone.lock().await {
-                            progress.println(format!("{} {}", style("✗").red(), error));
+                            progress.println(format!(
+                                "{} Document {} failed: {}",
+                                style("✗").red(),
+                                &document_id[..8.min(document_id.len())],
+                                error
+                            ));
                             progress.inc(1);
                         }
                     }

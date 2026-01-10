@@ -67,7 +67,7 @@ impl DbContext {
 
     /// Get a document repository.
     pub fn documents(&self) -> DieselDocumentRepository {
-        DieselDocumentRepository::new(self.pool.clone(), self.documents_dir.clone())
+        DieselDocumentRepository::new(self.pool.clone())
     }
 
     /// Get a config history repository.

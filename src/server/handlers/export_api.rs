@@ -98,6 +98,9 @@ pub async fn export_documents(
             None,
             &types,
             &tags,
+            None,
+            None,
+            None,
             limit as u32,
             0,
         )
@@ -277,7 +280,7 @@ pub async fn export_annotations(
 
     let documents = match state
         .doc_repo
-        .browse(params.source.as_deref(), None, &[], &[], limit as u32, 0)
+        .browse(params.source.as_deref(), None, &[], &[], None, None, None, limit as u32, 0)
         .await
     {
         Ok(docs) => docs,

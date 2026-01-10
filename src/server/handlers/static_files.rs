@@ -6,7 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::super::templates;
+use super::super::assets;
 use super::super::AppState;
 
 /// Serve a document file.
@@ -55,13 +55,13 @@ pub async fn serve_file(State(state): State<AppState>, Path(path): Path<String>)
 
 /// Serve CSS.
 pub async fn serve_css() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "text/css")], templates::CSS)
+    ([(header::CONTENT_TYPE, "text/css")], assets::CSS)
 }
 
 /// Serve JavaScript.
 pub async fn serve_js() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "application/javascript")],
-        templates::JS,
+        assets::JS,
     )
 }

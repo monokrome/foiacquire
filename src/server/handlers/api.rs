@@ -293,13 +293,13 @@ pub async fn api_recent_docs(
 /// API endpoint to get document type statistics.
 pub async fn api_type_stats(
     State(state): State<AppState>,
-    Query(_params): Query<SourceFilterParams>,
+    Query(params): Query<SourceFilterParams>,
 ) -> impl IntoResponse {
     use crate::utils::MimeCategory;
 
     let stats = state
         .doc_repo
-        .get_category_stats()
+        .get_category_stats(params.source.as_deref())
         .await
         .unwrap_or_default();
 

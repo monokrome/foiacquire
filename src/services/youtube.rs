@@ -16,37 +16,8 @@ pub fn is_youtube_url(url: &str) -> bool {
         || url.contains("youtube.com/v/")
 }
 
-/// Extract video ID from YouTube URL.
-#[allow(dead_code)]
-pub fn extract_video_id(url: &str) -> Option<String> {
-    // youtube.com/watch?v=VIDEO_ID
-    if let Some(pos) = url.find("v=") {
-        let start = pos + 2;
-        let end = url[start..]
-            .find(['&', '#'])
-            .map(|i| start + i)
-            .unwrap_or(url.len());
-        return Some(url[start..end].to_string());
-    }
-
-    // youtube.com/embed/VIDEO_ID or youtu.be/VIDEO_ID
-    for prefix in &["/embed/", "youtu.be/", "/v/"] {
-        if let Some(pos) = url.find(prefix) {
-            let start = pos + prefix.len();
-            let end = url[start..]
-                .find(['?', '&', '#', '/'])
-                .map(|i| start + i)
-                .unwrap_or(url.len());
-            return Some(url[start..end].to_string());
-        }
-    }
-
-    None
-}
-
 /// Metadata returned by yt-dlp.
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
 pub struct VideoMetadata {
     pub id: String,
     pub title: String,
@@ -60,8 +31,6 @@ pub struct VideoMetadata {
     pub duration: Option<f64>,
     #[serde(default)]
     pub view_count: Option<u64>,
-    #[serde(default)]
-    pub ext: Option<String>,
 }
 
 /// Result of a YouTube download.
@@ -214,23 +183,4 @@ mod tests {
         assert!(!is_youtube_url("https://vimeo.com/123456"));
     }
 
-    #[test]
-    fn test_extract_video_id() {
-        assert_eq!(
-            extract_video_id("https://www.youtube.com/watch?v=abc123"),
-            Some("abc123".to_string())
-        );
-        assert_eq!(
-            extract_video_id("https://www.youtube.com/watch?v=abc123&t=10"),
-            Some("abc123".to_string())
-        );
-        assert_eq!(
-            extract_video_id("https://youtube.com/embed/xyz789"),
-            Some("xyz789".to_string())
-        );
-        assert_eq!(
-            extract_video_id("https://youtu.be/def456"),
-            Some("def456".to_string())
-        );
-    }
 }

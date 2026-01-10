@@ -6,54 +6,9 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use serde::Deserialize;
 
 use super::super::AppState;
-
-/// Active scrape jobs (in-memory tracking).
-pub type ScrapeJobs = Arc<RwLock<std::collections::HashMap<String, ScrapeJobState>>>;
-
-/// State of an active scrape job.
-#[derive(Debug, Clone, Serialize)]
-pub struct ScrapeJobState {
-    pub source_id: String,
-    pub status: ScrapeStatus,
-    pub started_at: String,
-    pub documents_processed: u64,
-    pub documents_new: u64,
-    pub errors: u64,
-    pub last_error: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ScrapeStatus {
-    Queued,
-    Running,
-    Completed,
-    Failed,
-    Cancelled,
-}
-
-/// Request to start a scrape.
-#[derive(Debug, Deserialize)]
-pub struct StartScrapeRequest {
-    /// Source IDs to scrape (if empty, uses all)
-    pub sources: Option<Vec<String>>,
-    /// Maximum documents to fetch per source
-    pub limit: Option<usize>,
-    /// Number of concurrent workers
-    pub workers: Option<usize>,
-}
-
-/// Response for scrape start.
-#[derive(Debug, Serialize)]
-pub struct StartScrapeResponse {
-    pub job_ids: Vec<String>,
-    pub message: String,
-}
 
 /// List all scrapers/sources with their configuration.
 pub async fn list_scrapers(State(state): State<AppState>) -> impl IntoResponse {
@@ -170,8 +125,6 @@ pub async fn get_scrape_status(
 #[derive(Debug, Deserialize)]
 pub struct QueueQuery {
     pub source: Option<String>,
-    pub status: Option<String>,
-    pub page: Option<usize>,
     pub per_page: Option<usize>,
 }
 

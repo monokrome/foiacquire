@@ -14,7 +14,7 @@ mod pages;
 mod queries;
 mod versions;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
@@ -38,42 +38,16 @@ pub struct OcrResult {
     pub created_at: DateTime<Utc>,
 }
 
-/// Summary of a document for list views.
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct DieselDocumentSummary {
-    pub id: String,
-    pub source_id: String,
-    pub url: String,
-    pub title: Option<String>,
-    pub status: DocumentStatus,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub version_count: u32,
-    pub latest_file_size: Option<u64>,
-}
-
 /// Diesel-based document repository with compile-time query checking.
 #[derive(Clone)]
 pub struct DieselDocumentRepository {
     pub(crate) pool: DbPool,
-    #[allow(dead_code)]
-    pub(crate) documents_dir: PathBuf,
 }
 
 impl DieselDocumentRepository {
     /// Create a new Diesel document repository.
-    pub fn new(pool: DbPool, documents_dir: PathBuf) -> Self {
-        Self {
-            pool,
-            documents_dir,
-        }
-    }
-
-    /// Get the documents directory path.
-    #[allow(dead_code)]
-    pub fn documents_dir(&self) -> &Path {
-        &self.documents_dir
+    pub fn new(pool: DbPool) -> Self {
+        Self { pool }
     }
 
     // ========================================================================
@@ -600,6 +574,30 @@ pub(crate) struct CountRow {
     pub count: i64,
 }
 
+/// Lightweight browse result that excludes large text fields.
+/// Used for document listing pages to avoid loading extracted_text.
+#[derive(diesel::QueryableByName, Debug, Clone)]
+pub struct BrowseRow {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub id: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub title: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub source_id: String,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+    pub synopsis: Option<String>,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+    pub tags: Option<String>,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+    pub original_filename: Option<String>,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub mime_type: String,
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    pub file_size: i32,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub acquired_at: String,
+}
+
 #[derive(diesel::QueryableByName)]
 pub(crate) struct LastInsertRowId {
     #[diesel(sql_type = diesel::sql_types::BigInt, column_name = "last_insert_rowid()")]
@@ -699,7 +697,7 @@ mod tests {
     #[tokio::test]
     async fn test_document_crud() {
         let (pool, dir) = setup_test_db().await;
-        let repo = DieselDocumentRepository::new(pool, dir.path().to_path_buf());
+        let repo = DieselDocumentRepository::new(pool);
 
         let doc = Document {
             id: "doc-1".to_string(),
@@ -737,7 +735,7 @@ mod tests {
     #[tokio::test]
     async fn test_document_versions() {
         let (pool, dir) = setup_test_db().await;
-        let repo = DieselDocumentRepository::new(pool, dir.path().to_path_buf());
+        let repo = DieselDocumentRepository::new(pool);
 
         let doc = Document {
             id: "doc-2".to_string(),

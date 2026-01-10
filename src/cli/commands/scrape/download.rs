@@ -123,9 +123,22 @@ pub async fn cmd_download(
                         progress.finish_download(worker_id, true).await;
                     }
                 }
-                DownloadEvent::Failed { worker_id, .. } => {
+                DownloadEvent::Failed { worker_id, url, error } => {
                     if let Some(ref progress) = progress_clone {
+                        progress.println(&format!(
+                            "{} Failed to download {}: {}",
+                            console::style("✗").red(),
+                            url,
+                            error
+                        ));
                         progress.finish_download(worker_id, false).await;
+                    } else {
+                        eprintln!(
+                            "{} Failed to download {}: {}",
+                            console::style("✗").red(),
+                            url,
+                            error
+                        );
                     }
                 }
             }

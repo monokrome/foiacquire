@@ -1,6 +1,7 @@
 //! Analysis service types and events.
 
 /// Events emitted during document analysis.
+/// Fields are populated when events are created, even if consumers don't read all of them.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum AnalysisEvent {
@@ -64,7 +65,6 @@ pub enum AnalysisEvent {
 
 /// Result of document analysis.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct AnalysisResult {
     pub mime_checked: usize,
     pub mime_fixed: usize,
@@ -81,6 +81,5 @@ pub struct PageOcrResult {
     /// Whether the OCR text was better than the PDF text.
     pub improved: bool,
     /// Whether this page completion triggered document finalization.
-    #[allow(dead_code)]
     pub document_finalized: bool,
 }

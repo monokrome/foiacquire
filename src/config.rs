@@ -33,16 +33,6 @@ impl AnalysisConfig {
     pub fn is_default(&self) -> bool {
         self.methods.is_empty() && self.default_methods.is_empty()
     }
-
-    /// Get default methods, falling back to ["ocr"] if not configured.
-    #[allow(dead_code)]
-    pub fn get_default_methods(&self) -> Vec<String> {
-        if self.default_methods.is_empty() {
-            vec!["ocr".to_string()]
-        } else {
-            self.default_methods.clone()
-        }
-    }
 }
 
 /// Configuration for a single analysis method.
@@ -281,7 +271,7 @@ impl Settings {
     /// This is the preferred way to get a DieselDbContext from settings.
     /// Returns an error if the database URL is invalid.
     pub fn create_db_context(&self) -> Result<DieselDbContext, diesel::result::Error> {
-        DieselDbContext::from_url(&self.database_url(), &self.documents_dir)
+        DieselDbContext::from_url(&self.database_url())
     }
 
     /// Create a database context and verify the connection works.
@@ -547,12 +537,7 @@ impl Config {
 
     /// Load configuration from database history.
     pub async fn load_from_db(db_path: &Path) -> Option<Self> {
-        // Use a dummy documents dir since we only need config_history
-        let docs_dir = db_path
-            .parent()
-            .unwrap_or(Path::new("."))
-            .join(DOCUMENTS_SUBDIR);
-        let ctx = DieselDbContext::from_sqlite_path(db_path, &docs_dir).ok()?;
+        let ctx = DieselDbContext::from_sqlite_path(db_path).ok()?;
         let entry = ctx.config_history().get_latest().await.ok()??;
 
         let mut config: Config = match entry.format.to_lowercase().as_str() {

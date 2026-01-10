@@ -3,7 +3,7 @@
 //! Provides a unified entry point for database operations using Diesel ORM.
 //! Supports both SQLite (via SyncConnectionWrapper) and PostgreSQL backends.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::diesel_config_history::DieselConfigHistoryRepository;
 use super::diesel_crawl::DieselCrawlRepository;
@@ -20,14 +20,13 @@ use crate::with_conn_split;
 ///
 /// # Example
 /// ```ignore
-/// let ctx = DieselDbContext::from_url("postgres://localhost/db", &documents_dir)?;
+/// let ctx = DieselDbContext::from_url("postgres://localhost/db")?;
 /// let sources = ctx.sources().get_all().await?;
 /// let docs = ctx.documents().get_by_source("my-source").await?;
 /// ```
 #[derive(Clone)]
 pub struct DieselDbContext {
     pool: DbPool,
-    documents_dir: PathBuf,
 }
 
 #[allow(dead_code)]
@@ -37,30 +36,24 @@ impl DieselDbContext {
     /// Supports:
     /// - SQLite URLs like `sqlite:path/to/db.sqlite` or just file paths
     /// - PostgreSQL URLs like `postgres://user:pass@host/db`
-    pub fn from_url(database_url: &str, documents_dir: &Path) -> Result<Self, DieselError> {
+    pub fn from_url(database_url: &str) -> Result<Self, DieselError> {
         let pool = DbPool::from_url(database_url)?;
-        Ok(Self {
-            pool,
-            documents_dir: documents_dir.to_path_buf(),
-        })
+        Ok(Self { pool })
     }
 
     /// Create a new database context from a SQLite file path.
     ///
     /// This is a convenience method that constructs a sqlite: URL from the path.
     /// For PostgreSQL or explicit URLs, use `from_url()` instead.
-    pub fn from_sqlite_path(db_path: &Path, documents_dir: &Path) -> Result<Self, DieselError> {
+    pub fn from_sqlite_path(db_path: &Path) -> Result<Self, DieselError> {
         let url = format!("sqlite:{}", db_path.display());
-        Self::from_url(&url, documents_dir)
+        Self::from_url(&url)
     }
 
     /// Create a context with an existing pool.
     #[allow(dead_code)]
-    pub fn with_pool(pool: DbPool, documents_dir: PathBuf) -> Self {
-        Self {
-            pool,
-            documents_dir,
-        }
+    pub fn with_pool(pool: DbPool) -> Self {
+        Self { pool }
     }
 
     /// Get the underlying connection pool.
@@ -91,7 +84,7 @@ impl DieselDbContext {
 
     /// Get a document repository.
     pub fn documents(&self) -> DieselDocumentRepository {
-        DieselDocumentRepository::new(self.pool.clone(), self.documents_dir.clone())
+        DieselDocumentRepository::new(self.pool.clone())
     }
 
     /// Get a config history repository.
@@ -214,13 +207,12 @@ mod tests {
     async fn test_diesel_context() {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let docs_dir = dir.path().join("docs");
 
         // Initialize schema via migrations
         let db_url = format!("sqlite:{}", db_path.display());
         migrations::run_migrations(&db_url).await.unwrap();
 
-        let ctx = DieselDbContext::from_sqlite_path(&db_path, &docs_dir).unwrap();
+        let ctx = DieselDbContext::from_sqlite_path(&db_path).unwrap();
 
         // List tables
         let tables = ctx.list_tables().await.unwrap();

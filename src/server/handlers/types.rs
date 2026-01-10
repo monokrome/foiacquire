@@ -1,15 +1,17 @@
 //! Document type handlers.
 
+use askama::Template;
 use axum::{
     extract::{Path, Query, State},
     response::{Html, IntoResponse},
 };
 use serde::Deserialize;
 
-use super::super::templates;
+use super::super::template_structs::{
+    CategoryWithCount, DocumentRow, ErrorTemplate, TypeDocumentsTemplate, TypeStat, TypesTemplate,
+};
 use super::super::AppState;
-use super::helpers::mime_to_category;
-use crate::models::DocumentDisplay;
+use crate::utils::{mime_to_category, MimeCategory};
 
 /// Filter parameters for type listing.
 #[derive(Debug, Deserialize)]
@@ -23,21 +25,56 @@ pub async fn list_types(State(state): State<AppState>) -> impl IntoResponse {
     let type_stats = match state.doc_repo.get_type_stats().await {
         Ok(stats) => stats,
         Err(e) => {
-            return Html(templates::base_template(
-                "Error",
-                &format!("<p>Failed to load type stats: {}</p>", e),
-                None,
-            ));
+            let msg = format!("Failed to load type stats: {}", e);
+            let template = ErrorTemplate {
+                title: "Error",
+                message: &msg,
+            };
+            return Html(template.render().unwrap_or_else(|_| msg));
         }
     };
 
-    let stats_with_category: Vec<_> = type_stats
+    // Build category counts
+    let mut cat_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    for (mime, count) in &type_stats {
+        let cat = mime_to_category(mime).to_string();
+        *cat_counts.entry(cat).or_default() += count;
+    }
+
+    let categories: Vec<CategoryWithCount> = MimeCategory::all()
         .iter()
-        .map(|(mime, count)| (mime_to_category(mime).to_string(), mime.clone(), *count))
+        .filter_map(|(cat_id, cat_name)| {
+            let count = cat_counts.get(*cat_id).copied().unwrap_or(0);
+            if count > 0 {
+                Some(CategoryWithCount {
+                    id: cat_id.to_string(),
+                    name: cat_name.to_string(),
+                    count,
+                    active: false,
+                    checked: false,
+                })
+            } else {
+                None
+            }
+        })
         .collect();
 
-    let content = templates::types_list(&stats_with_category);
-    Html(templates::base_template("Document Types", &content, None))
+    let stats_with_category: Vec<TypeStat> = type_stats
+        .iter()
+        .map(|(mime, count)| TypeStat {
+            category: mime_to_category(mime).to_string(),
+            mime_type: mime.clone(),
+            count: *count,
+        })
+        .collect();
+
+    let template = TypesTemplate {
+        title: "Document Types",
+        categories,
+        type_stats: stats_with_category,
+    };
+
+    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
 }
 
 /// List documents filtered by type.
@@ -56,15 +93,17 @@ pub async fn list_by_type(
     {
         Ok(docs) => docs,
         Err(e) => {
-            return Html(templates::base_template(
-                "Error",
-                &format!("<p>Failed to load documents: {}</p>", e),
-                None,
-            ));
+            let msg = format!("Failed to load documents: {}", e);
+            let template = ErrorTemplate {
+                title: "Error",
+                message: &msg,
+            };
+            return Html(template.render().unwrap_or_else(|_| msg));
         }
     };
 
-    let category_stats: Option<Vec<(String, u64)>> = match state.doc_repo.get_type_stats().await {
+    // Get category stats for tabs
+    let tabs: Vec<CategoryWithCount> = match state.doc_repo.get_type_stats().await {
         Ok(stats) => {
             let mut cat_counts: std::collections::HashMap<String, u64> =
                 std::collections::HashMap::new();
@@ -72,20 +111,59 @@ pub async fn list_by_type(
                 let cat = mime_to_category(&mime).to_string();
                 *cat_counts.entry(cat).or_default() += count;
             }
-            Some(cat_counts.into_iter().collect())
+
+            MimeCategory::all()
+                .iter()
+                .filter_map(|(cat_id, cat_name)| {
+                    let count = cat_counts.get(*cat_id).copied().unwrap_or(0);
+                    if count > 0 {
+                        Some(CategoryWithCount {
+                            id: cat_id.to_string(),
+                            name: cat_name.to_string(),
+                            count,
+                            active: *cat_id == type_name,
+                            checked: false,
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect()
         }
-        Err(_) => None,
+        Err(_) => Vec::new(),
     };
 
-    let doc_data: Vec<_> = documents
+    let doc_rows: Vec<DocumentRow> = documents
         .iter()
-        .filter_map(|doc| DocumentDisplay::from_document(doc).map(|d| d.to_tuple()))
+        .filter_map(|doc| {
+            let version = doc.current_version()?;
+            let display_name = version
+                .original_filename
+                .clone()
+                .unwrap_or_else(|| doc.title.clone());
+
+            Some(DocumentRow::new(
+                doc.id.clone(),
+                display_name,
+                doc.source_id.clone(),
+                version.mime_type.clone(),
+                version.file_size,
+                version.acquired_at,
+                doc.synopsis.clone(),
+                doc.tags.clone(),
+            ))
+        })
         .collect();
 
-    let content = templates::type_documents(&type_name, &doc_data, category_stats.as_deref());
-    Html(templates::base_template(
-        &format!("Type: {}", type_name),
-        &content,
-        None,
-    ))
+    let title = format!("Type: {}", type_name);
+    let template = TypeDocumentsTemplate {
+        title: &title,
+        type_name: &type_name,
+        document_count: doc_rows.len(),
+        tabs: tabs.clone(),
+        has_tabs: !tabs.is_empty(),
+        documents: doc_rows,
+    };
+
+    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
 }

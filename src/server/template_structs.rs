@@ -1,21 +1,14 @@
 //! Askama template structs for the web interface.
 //!
 //! Each struct corresponds to an HTML template in the templates/ directory.
-//!
-//! These templates are ready to use but the handlers haven't been migrated yet.
-//! Once handlers are updated, remove the dead_code allow.
-
-#![allow(dead_code)]
+//! Askama provides compile-time verification that templates are valid.
 
 use askama::Template;
 
-/// Helper struct for source data in templates.
-pub struct SourceRow {
-    pub id: String,
-    pub name: String,
-    pub doc_count: u64,
-    pub last_scraped_str: String,
-}
+use crate::models::{VirtualFile, VirtualFileStatus};
+use crate::repository::diesel_document::BrowseRow;
+use crate::repository::parse_datetime;
+use crate::utils::{format_size, mime_icon};
 
 /// Helper struct for document rows in listings.
 pub struct DocumentRow {
@@ -31,8 +24,6 @@ pub struct DocumentRow {
     pub synopsis_preview: String,
     pub tags: Vec<TagRef>,
     pub other_tags: Vec<TagRef>,
-    pub other_sources_count: usize,
-    pub other_sources_list: String,
 }
 
 /// Helper struct for tag references.
@@ -63,6 +54,7 @@ pub struct VersionItem {
 }
 
 /// Helper struct for virtual file display.
+#[derive(Clone)]
 pub struct VirtualFileRow {
     pub id: String,
     pub filename: String,
@@ -80,6 +72,7 @@ pub struct TypeStat {
 }
 
 /// Helper struct for category with count.
+#[derive(Clone)]
 pub struct CategoryWithCount {
     pub id: String,
     pub name: String,
@@ -107,23 +100,6 @@ pub struct DuplicateDoc {
     pub id: String,
     pub title: String,
     pub source_id: String,
-}
-
-/// Sources list page.
-#[derive(Template)]
-#[template(path = "sources.html")]
-pub struct SourcesTemplate<'a> {
-    pub title: &'a str,
-    pub sources: Vec<SourceRow>,
-}
-
-/// Documents list for a source.
-#[derive(Template)]
-#[template(path = "documents.html")]
-pub struct DocumentsTemplate<'a> {
-    pub title: &'a str,
-    pub source_name: &'a str,
-    pub documents: Vec<DocumentRow>,
 }
 
 /// Duplicates list page.
@@ -237,4 +213,147 @@ pub struct BrowseTemplate<'a> {
     pub active_source_js: String,
     pub prev_cursor_js: String,
     pub next_cursor_js: String,
+}
+
+/// Error page template.
+#[derive(Template)]
+#[template(path = "error.html")]
+pub struct ErrorTemplate<'a> {
+    pub title: &'a str,
+    pub message: &'a str,
+}
+
+// Helper implementations for converting data to template structs
+
+impl TagRef {
+    pub fn new(name: String) -> Self {
+        let encoded = urlencoding::encode(&name).to_string();
+        Self { name, encoded }
+    }
+}
+
+impl TagWithCount {
+    pub fn new(name: String, count: usize) -> Self {
+        let encoded = urlencoding::encode(&name).to_string();
+        Self { name, encoded, count }
+    }
+}
+
+impl VirtualFileRow {
+    pub fn from_virtual_file(vf: &VirtualFile) -> Self {
+        let status_badge = match vf.status {
+            VirtualFileStatus::Pending => r#"<span class="status-badge pending">pending</span>"#,
+            VirtualFileStatus::OcrComplete => r#"<span class="status-badge complete">OCR</span>"#,
+            VirtualFileStatus::Failed => r#"<span class="status-badge failed">failed</span>"#,
+            VirtualFileStatus::Unsupported => r#"<span class="status-badge unsupported">—</span>"#,
+        };
+        Self {
+            id: vf.id.to_string(),
+            filename: vf.filename.clone(),
+            icon: mime_icon(&vf.mime_type).to_string(),
+            mime_type: vf.mime_type.clone(),
+            size_str: format_size(vf.file_size),
+            status_badge: status_badge.to_string(),
+        }
+    }
+}
+
+impl DocumentRow {
+    /// Create a DocumentRow with basic fields, no other_sources info.
+    pub fn new(
+        id: String,
+        title: String,
+        source_id: String,
+        mime_type: String,
+        size: u64,
+        acquired_at: chrono::DateTime<chrono::Utc>,
+        synopsis: Option<String>,
+        tags: Vec<String>,
+    ) -> Self {
+        let synopsis_preview = synopsis
+            .as_ref()
+            .map(|s| {
+                let preview: String = s.chars().take(100).collect();
+                if s.len() > 100 {
+                    format!("{}...", preview)
+                } else {
+                    preview
+                }
+            })
+            .unwrap_or_default();
+
+        Self {
+            id,
+            title,
+            icon: mime_icon(&mime_type).to_string(),
+            mime_type,
+            size_str: format_size(size),
+            date_str: acquired_at.format("%Y-%m-%d %H:%M").to_string(),
+            timestamp: acquired_at.timestamp(),
+            source_id,
+            has_synopsis: synopsis.is_some(),
+            synopsis_preview,
+            tags: tags.iter().map(|t| TagRef::new(t.clone())).collect(),
+            other_tags: Vec::new(),
+        }
+    }
+
+    /// Create with other_tags for tag document pages (excludes the current tag).
+    pub fn with_other_tags(mut self, current_tag: &str) -> Self {
+        self.other_tags = self
+            .tags
+            .iter()
+            .filter(|t| t.name.to_lowercase() != current_tag.to_lowercase())
+            .take(5)
+            .cloned()
+            .collect();
+        self
+    }
+
+    /// Create from an optimized BrowseRow (used for fast browse queries).
+    pub fn from_browse_row(row: BrowseRow) -> Self {
+        let display_name = row.original_filename.unwrap_or(row.title);
+        let tags: Vec<String> = row
+            .tags
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        let acquired_at = parse_datetime(&row.acquired_at);
+
+        let synopsis_preview = row
+            .synopsis
+            .as_ref()
+            .map(|s| {
+                let preview: String = s.chars().take(100).collect();
+                if s.len() > 100 {
+                    format!("{}...", preview)
+                } else {
+                    preview
+                }
+            })
+            .unwrap_or_default();
+
+        Self {
+            id: row.id,
+            title: display_name,
+            icon: mime_icon(&row.mime_type).to_string(),
+            mime_type: row.mime_type,
+            size_str: format_size(row.file_size as u64),
+            date_str: acquired_at.format("%Y-%m-%d %H:%M").to_string(),
+            timestamp: acquired_at.timestamp(),
+            source_id: row.source_id,
+            has_synopsis: row.synopsis.is_some(),
+            synopsis_preview,
+            tags: tags.iter().map(|t| TagRef::new(t.clone())).collect(),
+            other_tags: Vec::new(),
+        }
+    }
+}
+
+impl Clone for TagRef {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            encoded: self.encoded.clone(),
+        }
+    }
 }

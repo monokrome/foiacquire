@@ -10,6 +10,7 @@ use crate::models::DocumentStatus;
 use crate::repository::DieselDocumentRepository;
 
 /// Events emitted during annotation processing.
+/// Fields are populated when events are created, even if consumers don't read all of them.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum AnnotationEvent {
@@ -32,6 +33,7 @@ pub enum AnnotationEvent {
 }
 
 /// Result of annotation processing.
+/// Part of public API - consumers may use any field even if current CLI doesn't read all.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct AnnotationResult {

@@ -735,10 +735,25 @@ pub async fn cmd_analyze(
                             progress.inc(1);
                         }
                     }
-                    AnalysisEvent::DocumentFailed { .. } => {
+                    AnalysisEvent::DocumentFailed { document_id, error } => {
                         phase1_failed += 1;
                         if let Some(ref progress) = *pb_clone.lock().await {
+                            progress.suspend(|| {
+                                eprintln!(
+                                    "  {} Document {} failed: {}",
+                                    style("✗").red(),
+                                    document_id,
+                                    error
+                                );
+                            });
                             progress.inc(1);
+                        } else {
+                            eprintln!(
+                                "  {} Document {} failed: {}",
+                                style("✗").red(),
+                                document_id,
+                                error
+                            );
                         }
                     }
                     AnalysisEvent::Phase1Complete { .. } => {
@@ -788,10 +803,27 @@ pub async fn cmd_analyze(
                             progress.inc(1);
                         }
                     }
-                    AnalysisEvent::PageOcrFailed { .. } => {
+                    AnalysisEvent::PageOcrFailed { document_id, page_number, error } => {
                         phase2_failed += 1;
                         if let Some(ref progress) = *pb_clone.lock().await {
+                            progress.suspend(|| {
+                                eprintln!(
+                                    "  {} Page {} of {} failed: {}",
+                                    style("✗").red(),
+                                    page_number,
+                                    document_id,
+                                    error
+                                );
+                            });
                             progress.inc(1);
+                        } else {
+                            eprintln!(
+                                "  {} Page {} of {} failed: {}",
+                                style("✗").red(),
+                                page_number,
+                                document_id,
+                                error
+                            );
                         }
                     }
                     AnalysisEvent::DocumentFinalized { .. } => {

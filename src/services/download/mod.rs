@@ -42,23 +42,6 @@ impl DownloadService {
         }
     }
 
-    /// Get the number of pending documents for a source (or all sources).
-    #[allow(dead_code)]
-    pub async fn pending_count(&self, source_id: Option<&str>) -> anyhow::Result<u64> {
-        if let Some(sid) = source_id {
-            Ok(self.crawl_repo.get_crawl_state(sid).await?.urls_pending)
-        } else {
-            // Aggregate across all sources - we need source repo for this
-            // For now just return 0 if no source specified
-            Ok(self
-                .crawl_repo
-                .get_crawl_state("all")
-                .await
-                .map(|s| s.urls_pending)
-                .unwrap_or(0))
-        }
-    }
-
     /// Download pending documents.
     ///
     /// Returns a channel receiver for progress events and spawns worker tasks.

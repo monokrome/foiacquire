@@ -34,21 +34,6 @@ impl AnalysisService {
         }
     }
 
-    /// Create a new analysis service with a custom AnalysisManager.
-    #[allow(dead_code)]
-    pub fn with_manager(doc_repo: DieselDocumentRepository, manager: AnalysisManager) -> Self {
-        Self {
-            doc_repo,
-            analysis_manager: manager,
-        }
-    }
-
-    /// Get a reference to the analysis manager.
-    #[allow(dead_code)]
-    pub fn manager(&self) -> &AnalysisManager {
-        &self.analysis_manager
-    }
-
     /// Get count of documents needing analysis.
     pub async fn count_needing_processing(
         &self,

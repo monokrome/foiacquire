@@ -64,6 +64,9 @@ pub async fn list_annotations(
                 None,
                 &[],
                 &[],
+                None,
+                None,
+                None,
                 per_page as u32,
                 offset as u32,
             )

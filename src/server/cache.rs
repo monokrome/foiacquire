@@ -43,8 +43,6 @@ impl<T: Clone> CacheEntry<T> {
 /// Cache for document statistics.
 #[allow(clippy::type_complexity)]
 pub struct StatsCache {
-    /// Type stats: category -> count
-    type_stats: RwLock<Option<CacheEntry<Vec<(String, u64)>>>>,
     /// All tags with counts
     all_tags: RwLock<Option<CacheEntry<Vec<(String, usize)>>>>,
     /// Source counts: source_id -> count
@@ -59,23 +57,10 @@ impl StatsCache {
     /// Create a new stats cache with default TTL.
     pub fn new() -> Self {
         Self {
-            type_stats: RwLock::new(None),
             all_tags: RwLock::new(None),
             source_counts: RwLock::new(None),
             browse_counts: RwLock::new(HashMap::new()),
             ttl: DEFAULT_TTL,
-        }
-    }
-
-    /// Create a new stats cache with custom TTL.
-    #[allow(dead_code)]
-    pub fn with_ttl(ttl: Duration) -> Self {
-        Self {
-            type_stats: RwLock::new(None),
-            all_tags: RwLock::new(None),
-            source_counts: RwLock::new(None),
-            browse_counts: RwLock::new(HashMap::new()),
-            ttl,
         }
     }
 
@@ -114,23 +99,6 @@ impl StatsCache {
         }
     }
 
-    /// Get cached type stats, or None if expired/missing.
-    #[allow(dead_code)]
-    pub fn get_type_stats(&self) -> Option<Vec<(String, u64)>> {
-        self.type_stats
-            .read()
-            .ok()
-            .and_then(|guard| guard.as_ref().and_then(|e| e.get()))
-    }
-
-    /// Set type stats in cache.
-    #[allow(dead_code)]
-    pub fn set_type_stats(&self, stats: Vec<(String, u64)>) {
-        if let Ok(mut guard) = self.type_stats.write() {
-            *guard = Some(CacheEntry::new(stats, self.ttl));
-        }
-    }
-
     /// Get cached tags, or None if expired/missing.
     pub fn get_all_tags(&self) -> Option<Vec<(String, usize)>> {
         self.all_tags
@@ -158,23 +126,6 @@ impl StatsCache {
     pub fn set_source_counts(&self, counts: HashMap<String, u64>) {
         if let Ok(mut guard) = self.source_counts.write() {
             *guard = Some(CacheEntry::new(counts, self.ttl));
-        }
-    }
-
-    /// Invalidate all cached stats (call when documents change).
-    #[allow(dead_code)]
-    pub fn invalidate(&self) {
-        if let Ok(mut guard) = self.type_stats.write() {
-            *guard = None;
-        }
-        if let Ok(mut guard) = self.all_tags.write() {
-            *guard = None;
-        }
-        if let Ok(mut guard) = self.source_counts.write() {
-            *guard = None;
-        }
-        if let Ok(mut guard) = self.browse_counts.write() {
-            guard.clear();
         }
     }
 }

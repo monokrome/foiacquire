@@ -192,12 +192,10 @@ mod tests {
     async fn setup_test_db() -> (DieselDbContext, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let docs_dir = dir.path().join("docs");
-        std::fs::create_dir_all(&docs_dir).unwrap();
 
         let db_url = format!("sqlite:{}", db_path.display());
         migrations::run_migrations(&db_url).await.unwrap();
-        let ctx = DieselDbContext::from_sqlite_path(&db_path, &docs_dir).unwrap();
+        let ctx = DieselDbContext::from_sqlite_path(&db_path).unwrap();
         (ctx, dir)
     }
 

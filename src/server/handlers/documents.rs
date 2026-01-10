@@ -1,5 +1,6 @@
 //! Document detail and versions handlers.
 
+use askama::Template;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -7,10 +8,12 @@ use axum::{
 };
 use serde::Deserialize;
 
-use super::super::templates;
+use super::super::template_structs::{
+    DocumentDetailTemplate, ErrorTemplate, VersionItem, VirtualFileRow,
+};
 use super::super::AppState;
 use super::helpers::{find_sources_with_hash, VersionInfo};
-use crate::models::VirtualFile;
+use crate::utils::format_size;
 
 /// Query params for document detail navigation context.
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -30,42 +33,21 @@ pub async fn document_detail(
     let doc = match state.doc_repo.get(&doc_id).await {
         Ok(Some(d)) => d,
         Ok(None) => {
-            return Html(templates::base_template(
-                "Not Found",
-                "<p>Document not found.</p>",
-                None,
-            ));
+            let template = ErrorTemplate {
+                title: "Not Found",
+                message: "Document not found.",
+            };
+            return Html(template.render().unwrap_or_else(|_| "Not found".to_string()));
         }
         Err(e) => {
-            return Html(templates::base_template(
-                "Error",
-                &format!("<p>Failed to load document: {}</p>", e),
-                None,
-            ));
+            let msg = format!("Failed to load document: {}", e);
+            let template = ErrorTemplate {
+                title: "Error",
+                message: &msg,
+            };
+            return Html(template.render().unwrap_or_else(|_| msg));
         }
     };
-
-    let _types: Vec<String> = params
-        .types
-        .as_ref()
-        .map(|t| {
-            t.split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let _tags: Vec<String> = params
-        .tags
-        .as_ref()
-        .map(|t| {
-            t.split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
 
     let source_for_nav = params.source.as_deref().unwrap_or("");
     let navigation = state
@@ -95,7 +77,7 @@ pub async fn document_detail(
         }
     };
 
-    let versions: Vec<_> = doc
+    let versions: Vec<VersionItem> = doc
         .versions
         .iter()
         .map(|v| {
@@ -105,14 +87,23 @@ pub async fn document_detail(
                 .unwrap_or(&v.file_path)
                 .to_string_lossy()
                 .to_string();
-            (
-                v.content_hash.clone(),
-                relative_path,
-                v.file_size,
-                v.acquired_at,
-                v.original_filename.clone(),
-                v.server_date,
-            )
+
+            let date_str = v
+                .server_date
+                .map(|dt| dt.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|| v.acquired_at.format("%Y-%m-%d").to_string());
+
+            let filename = v
+                .original_filename
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string());
+
+            VersionItem {
+                path: relative_path,
+                filename,
+                size_str: format_size(v.file_size),
+                date_str,
+            }
         })
         .collect();
 
@@ -125,12 +116,15 @@ pub async fn document_detail(
     let current_version = doc.current_version();
     let current_version_id = current_version.map(|v| v.id);
 
-    let virtual_files: Vec<VirtualFile> = if let Some(vid) = current_version_id {
+    let virtual_files: Vec<VirtualFileRow> = if let Some(vid) = current_version_id {
         state
             .doc_repo
             .get_virtual_files(&doc_id, vid as i32)
             .await
             .unwrap_or_default()
+            .iter()
+            .map(VirtualFileRow::from_virtual_file)
+            .collect()
     } else {
         vec![]
     };
@@ -140,40 +134,81 @@ pub async fn document_detail(
         None => None,
     };
 
-    let content = templates::document_detail(
-        &doc.id,
-        &doc.title,
-        &doc.source_id,
-        &doc.source_url,
-        &versions,
-        &other_sources,
-        doc.extracted_text.as_deref(),
-        doc.synopsis.as_deref(),
-        &virtual_files,
-        navigation
-            .as_ref()
-            .and_then(|n| n.prev_id.as_ref())
-            .map(|s| s.as_str()),
-        navigation
-            .as_ref()
-            .and_then(|n| n.prev_title.as_ref())
-            .map(|s| s.as_str()),
-        navigation
-            .as_ref()
-            .and_then(|n| n.next_id.as_ref())
-            .map(|s| s.as_str()),
-        navigation
-            .as_ref()
-            .and_then(|n| n.next_title.as_ref())
-            .map(|s| s.as_str()),
-        navigation.as_ref().map(|n| n.position).unwrap_or(0),
-        navigation.as_ref().map(|n| n.total).unwrap_or(0),
-        &nav_query_string,
-        page_count,
-        current_version_id,
-    );
+    // Navigation helpers
+    let (has_prev, prev_id_val, prev_title_val, prev_title_truncated) =
+        if let Some(ref nav) = navigation {
+            if let (Some(id), Some(title)) = (&nav.prev_id, &nav.prev_title) {
+                let truncated: String = title.chars().take(40).collect();
+                let truncated = if title.len() > 40 {
+                    format!("{}...", truncated)
+                } else {
+                    truncated
+                };
+                (true, id.clone(), title.clone(), truncated)
+            } else {
+                (false, String::new(), String::new(), String::new())
+            }
+        } else {
+            (false, String::new(), String::new(), String::new())
+        };
 
-    Html(templates::base_template(&doc.title, &content, None))
+    let (has_next, next_id_val, next_title_val, next_title_truncated) =
+        if let Some(ref nav) = navigation {
+            if let (Some(id), Some(title)) = (&nav.next_id, &nav.next_title) {
+                let truncated: String = title.chars().take(40).collect();
+                let truncated = if title.len() > 40 {
+                    format!("{}...", truncated)
+                } else {
+                    truncated
+                };
+                (true, id.clone(), title.clone(), truncated)
+            } else {
+                (false, String::new(), String::new(), String::new())
+            }
+        } else {
+            (false, String::new(), String::new(), String::new())
+        };
+
+    let template = DocumentDetailTemplate {
+        title: &doc.title,
+        doc_id: &doc.id,
+        source_id: &doc.source_id,
+        source_url: &doc.source_url,
+        versions,
+        has_versions: !doc.versions.is_empty(),
+        other_sources,
+        has_other_sources: !doc.versions.is_empty()
+            && doc.current_version().is_some()
+            && find_sources_with_hash(
+                &state,
+                &doc.current_version().unwrap().content_hash,
+                &doc.source_id,
+            )
+            .await
+            .len()
+                > 0,
+        has_extracted_text: doc.extracted_text.is_some(),
+        extracted_text_val: doc.extracted_text.clone().unwrap_or_default(),
+        virtual_files: virtual_files.clone(),
+        has_virtual_files: !virtual_files.is_empty(),
+        virtual_files_count: virtual_files.len(),
+        has_prev,
+        prev_id_val,
+        prev_title_val,
+        prev_title_truncated,
+        has_next,
+        next_id_val,
+        next_title_val,
+        next_title_truncated,
+        position: navigation.as_ref().map(|n| n.position).unwrap_or(0),
+        total: navigation.as_ref().map(|n| n.total).unwrap_or(0),
+        nav_query_string,
+        has_pages: page_count.is_some() && page_count.unwrap() > 0,
+        page_count_val: page_count.unwrap_or(0),
+        version_id_val: current_version_id.unwrap_or(0),
+    };
+
+    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
 }
 
 /// Get document versions as JSON.

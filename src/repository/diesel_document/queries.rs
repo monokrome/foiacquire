@@ -7,14 +7,13 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 
 use super::{
-    CountRow, DieselDocumentRepository, DieselDocumentSummary, DocIdRow, MimeCount, SourceCount,
-    StatusCount, TagRow,
+    CountRow, DieselDocumentRepository, DocIdRow, MimeCount, SourceCount, StatusCount, TagRow,
 };
 use crate::models::{Document, DocumentStatus};
 use crate::repository::diesel_models::DocumentRecord;
 use crate::repository::pool::DieselError;
-use crate::repository::{document::DocumentNavigation, parse_datetime};
-use crate::schema::{document_versions, documents};
+use crate::repository::document::DocumentNavigation;
+use crate::schema::documents;
 use crate::{with_conn, with_conn_split};
 
 impl DieselDocumentRepository {
@@ -231,7 +230,10 @@ impl DieselDocumentRepository {
     }
 
     /// Get category statistics - count documents by category_id.
-    pub async fn get_category_stats(&self) -> Result<HashMap<String, u64>, DieselError> {
+    pub async fn get_category_stats(
+        &self,
+        source_id: Option<&str>,
+    ) -> Result<HashMap<String, u64>, DieselError> {
         #[derive(diesel::QueryableByName)]
         struct CategoryCount {
             #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
@@ -241,13 +243,24 @@ impl DieselDocumentRepository {
         }
 
         with_conn!(self.pool, conn, {
-            let results: Vec<CategoryCount> = diesel_async::RunQueryDsl::load(
-                diesel::sql_query(
-                    "SELECT category_id, COUNT(*) as count FROM documents GROUP BY category_id",
-                ),
-                &mut conn,
-            )
-            .await?;
+            let results: Vec<CategoryCount> = if let Some(sid) = source_id {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(
+                        "SELECT category_id, COUNT(*) as count FROM documents WHERE source_id = $1 GROUP BY category_id",
+                    )
+                    .bind::<diesel::sql_types::Text, _>(sid),
+                    &mut conn,
+                )
+                .await?
+            } else {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(
+                        "SELECT category_id, COUNT(*) as count FROM documents GROUP BY category_id",
+                    ),
+                    &mut conn,
+                )
+                .await?
+            };
 
             let mut stats = HashMap::new();
             for row in results {
@@ -288,6 +301,9 @@ impl DieselDocumentRepository {
         status: Option<&str>,
         categories: &[String],
         tags: &[String],
+        search_query: Option<&str>,
+        sort_field: Option<&str>,
+        sort_order: Option<&str>,
         limit: u32,
         offset: u32,
     ) -> Result<Vec<Document>, DieselError> {
@@ -313,14 +329,46 @@ impl DieselDocumentRepository {
                 let pattern = format!("%{}%", tag);
                 query = query.filter(documents::tags.like(pattern));
             }
+            // Text search on title and synopsis
+            if let Some(q) = search_query {
+                if !q.is_empty() {
+                    let pattern = format!("%{}%", q);
+                    query = query.filter(
+                        documents::title
+                            .like(pattern.clone())
+                            .or(documents::synopsis.like(pattern)),
+                    );
+                }
+            }
 
-            // Order and paginate after filtering
-            query
-                .order(documents::updated_at.desc())
-                .limit(limit)
-                .offset(offset)
-                .load(&mut conn)
-                .await
+            // Apply sorting
+            let is_desc = sort_order.map(|o| o.eq_ignore_ascii_case("desc")).unwrap_or(true);
+            match sort_field {
+                Some("created_at") => {
+                    if is_desc {
+                        query = query.order(documents::created_at.desc());
+                    } else {
+                        query = query.order(documents::created_at.asc());
+                    }
+                }
+                Some("title") => {
+                    if is_desc {
+                        query = query.order(documents::title.desc());
+                    } else {
+                        query = query.order(documents::title.asc());
+                    }
+                }
+                _ => {
+                    // Default: updated_at desc
+                    if is_desc {
+                        query = query.order(documents::updated_at.desc());
+                    } else {
+                        query = query.order(documents::updated_at.asc());
+                    }
+                }
+            }
+
+            query.limit(limit).offset(offset).load(&mut conn).await
         })?;
 
         // Batch load all versions in a single query
@@ -344,6 +392,7 @@ impl DieselDocumentRepository {
         status: Option<&str>,
         categories: &[String],
         tags: &[String],
+        search_query: Option<&str>,
     ) -> Result<u64, DieselError> {
         use diesel::dsl::count_star;
         with_conn!(self.pool, conn, {
@@ -361,8 +410,85 @@ impl DieselDocumentRepository {
                 let pattern = format!("%{}%", tag);
                 query = query.filter(documents::tags.like(pattern));
             }
+            if let Some(q) = search_query {
+                if !q.is_empty() {
+                    let pattern = format!("%{}%", q);
+                    query = query.filter(
+                        documents::title
+                            .like(pattern.clone())
+                            .or(documents::synopsis.like(pattern)),
+                    );
+                }
+            }
             let count: i64 = query.first(&mut conn).await?;
             Ok(count as u64)
+        })
+    }
+
+    /// Optimized browse that only loads columns needed for listing.
+    /// Avoids loading `extracted_text` which can be very large (OCR text).
+    /// Uses a single JOIN query instead of N+1 version queries.
+    pub async fn browse_fast(
+        &self,
+        source_id: Option<&str>,
+        _status: Option<&str>,
+        categories: &[String],
+        tags: &[String],
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<super::BrowseRow>, DieselError> {
+        // Build WHERE conditions
+        let mut conditions = Vec::new();
+
+        if let Some(sid) = source_id {
+            conditions.push(format!("d.source_id = '{}'", sid.replace('\'', "''")));
+        }
+
+        if !categories.is_empty() {
+            let cats: Vec<String> = categories
+                .iter()
+                .map(|c| format!("'{}'", c.replace('\'', "''")))
+                .collect();
+            conditions.push(format!("d.category_id IN ({})", cats.join(",")));
+        }
+
+        for tag in tags {
+            conditions.push(format!("d.tags LIKE '%{}%'", tag.replace('\'', "''")));
+        }
+
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
+        };
+
+        // Query that JOINs documents with latest version, selecting only needed columns
+        let query = format!(
+            r#"SELECT
+                d.id,
+                d.title,
+                d.source_id,
+                d.synopsis,
+                d.tags,
+                dv.original_filename,
+                dv.mime_type,
+                dv.file_size,
+                dv.acquired_at
+            FROM documents d
+            INNER JOIN document_versions dv ON d.id = dv.document_id
+            INNER JOIN (
+                SELECT document_id, MAX(id) as max_id
+                FROM document_versions
+                GROUP BY document_id
+            ) latest ON dv.document_id = latest.document_id AND dv.id = latest.max_id
+            {}
+            ORDER BY d.updated_at DESC
+            LIMIT {} OFFSET {}"#,
+            where_clause, limit, offset
+        );
+
+        with_conn!(self.pool, conn, {
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await
         })
     }
 
@@ -605,108 +731,134 @@ impl DieselDocumentRepository {
     }
 
     // ========================================================================
-    // Summary Operations
+    // Timeline Operations
     // ========================================================================
 
-    /// Get document summaries.
-    pub async fn get_summaries(
+    /// Get timeline buckets (daily counts) for documents by publication date.
+    ///
+    /// Returns (date_string, timestamp, count) tuples grouped by day.
+    /// Uses `manual_date` if set, otherwise `estimated_date`.
+    /// Only includes documents that have a publication date.
+    /// Optionally filtered by source_id and date range.
+    pub async fn get_timeline_buckets(
         &self,
-        source_id: &str,
-        limit: u32,
-        offset: u32,
-    ) -> Result<Vec<DieselDocumentSummary>, DieselError> {
-        let limit = limit as i64;
-        let offset = offset as i64;
+        source_id: Option<&str>,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+    ) -> Result<Vec<(String, i64, u64)>, DieselError> {
+        #[derive(diesel::QueryableByName)]
+        struct TimelineBucket {
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            date_bucket: String,
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            count: i64,
+        }
+
+        // Use publication date: prefer manual_date, fall back to estimated_date
+        // Only include documents that have at least one of these dates
+        let date_expr = "COALESCE(manual_date, estimated_date)";
+        let base_query = format!(
+            "SELECT date({}) as date_bucket, COUNT(*) as count FROM documents",
+            date_expr
+        );
+
+        // Always filter to documents with a publication date
+        let mut conditions = vec![format!("{} IS NOT NULL", date_expr)];
+
+        if source_id.is_some() {
+            conditions.push("source_id = $1".to_string());
+        }
+        if start_date.is_some() {
+            let idx = if source_id.is_some() { "$2" } else { "$1" };
+            conditions.push(format!("date({}) >= {}", date_expr, idx));
+        }
+        if end_date.is_some() {
+            let idx = match (source_id.is_some(), start_date.is_some()) {
+                (true, true) => "$3",
+                (true, false) | (false, true) => "$2",
+                (false, false) => "$1",
+            };
+            conditions.push(format!("date({}) <= {}", date_expr, idx));
+        }
+
+        let where_clause = format!(" WHERE {}", conditions.join(" AND "));
+
+        let query = format!(
+            "{}{} GROUP BY date_bucket ORDER BY date_bucket ASC",
+            base_query, where_clause
+        );
 
         with_conn!(self.pool, conn, {
-            let records: Vec<DocumentRecord> = documents::table
-                .filter(documents::source_id.eq(source_id))
-                .order(documents::updated_at.desc())
-                .limit(limit)
-                .offset(offset)
-                .load(&mut conn)
-                .await?;
+            use diesel_async::RunQueryDsl;
 
-            let mut summaries = Vec::with_capacity(records.len());
-            for record in records {
-                let version_count: i64 = document_versions::table
-                    .filter(document_versions::document_id.eq(&record.id))
-                    .count()
-                    .get_result(&mut conn)
-                    .await?;
+            // Build and execute query with appropriate bindings
+            let results: Vec<TimelineBucket> = match (source_id, start_date, end_date) {
+                (Some(sid), Some(start), Some(end)) => {
+                    diesel::sql_query(&query)
+                        .bind::<diesel::sql_types::Text, _>(sid)
+                        .bind::<diesel::sql_types::Text, _>(start)
+                        .bind::<diesel::sql_types::Text, _>(end)
+                        .load(&mut conn)
+                        .await?
+                }
+                (Some(sid), Some(start), None) => {
+                    diesel::sql_query(&query)
+                        .bind::<diesel::sql_types::Text, _>(sid)
+                        .bind::<diesel::sql_types::Text, _>(start)
+                        .load(&mut conn)
+                        .await?
+                }
+                (Some(sid), None, Some(end)) => {
+                    diesel::sql_query(&query)
+                        .bind::<diesel::sql_types::Text, _>(sid)
+                        .bind::<diesel::sql_types::Text, _>(end)
+                        .load(&mut conn)
+                        .await?
+                }
+                (Some(sid), None, None) => {
+                    diesel::sql_query(&query)
+                        .bind::<diesel::sql_types::Text, _>(sid)
+                        .load(&mut conn)
+                        .await?
+                }
+                (None, Some(start), Some(end)) => {
+                    diesel::sql_query(&query)
+                        .bind::<diesel::sql_types::Text, _>(start)
+                        .bind::<diesel::sql_types::Text, _>(end)
+                        .load(&mut conn)
+                        .await?
+                }
+                (None, Some(start), None) => {
+                    diesel::sql_query(&query)
+                        .bind::<diesel::sql_types::Text, _>(start)
+                        .load(&mut conn)
+                        .await?
+                }
+                (None, None, Some(end)) => {
+                    diesel::sql_query(&query)
+                        .bind::<diesel::sql_types::Text, _>(end)
+                        .load(&mut conn)
+                        .await?
+                }
+                (None, None, None) => {
+                    diesel::sql_query(&query).load(&mut conn).await?
+                }
+            };
 
-                let latest_size: Option<i32> = document_versions::table
-                    .filter(document_versions::document_id.eq(&record.id))
-                    .order(document_versions::id.desc())
-                    .select(document_versions::file_size)
-                    .first(&mut conn)
-                    .await
-                    .optional()?;
+            // Convert to output format with timestamps
+            let buckets: Vec<(String, i64, u64)> = results
+                .into_iter()
+                .map(|b| {
+                    // Parse date string to timestamp (midnight UTC)
+                    let timestamp = chrono::NaiveDate::parse_from_str(&b.date_bucket, "%Y-%m-%d")
+                        .map(|d| d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp())
+                        .unwrap_or(0);
+                    (b.date_bucket, timestamp, b.count as u64)
+                })
+                .collect();
 
-                summaries.push(DieselDocumentSummary {
-                    id: record.id,
-                    source_id: record.source_id,
-                    url: record.source_url,
-                    title: Some(record.title),
-                    status: DocumentStatus::from_str(&record.status)
-                        .unwrap_or(DocumentStatus::Pending),
-                    created_at: parse_datetime(&record.created_at),
-                    updated_at: parse_datetime(&record.updated_at),
-                    version_count: version_count as u32,
-                    latest_file_size: latest_size.map(|s| s as u64),
-                });
-            }
-            Ok(summaries)
+            Ok(buckets)
         })
-    }
-
-    /// Get all document summaries.
-    pub async fn get_all_summaries(&self) -> Result<Vec<DieselDocumentSummary>, DieselError> {
-        with_conn!(self.pool, conn, {
-            let records: Vec<DocumentRecord> = documents::table
-                .order(documents::updated_at.desc())
-                .load(&mut conn)
-                .await?;
-
-            let mut summaries = Vec::with_capacity(records.len());
-            for record in records {
-                let version_count: i64 = document_versions::table
-                    .filter(document_versions::document_id.eq(&record.id))
-                    .count()
-                    .get_result(&mut conn)
-                    .await?;
-
-                let latest_size: Option<i32> = document_versions::table
-                    .filter(document_versions::document_id.eq(&record.id))
-                    .order(document_versions::id.desc())
-                    .select(document_versions::file_size)
-                    .first(&mut conn)
-                    .await
-                    .optional()?;
-
-                summaries.push(DieselDocumentSummary {
-                    id: record.id,
-                    source_id: record.source_id,
-                    url: record.source_url,
-                    title: Some(record.title),
-                    status: DocumentStatus::from_str(&record.status)
-                        .unwrap_or(DocumentStatus::Pending),
-                    created_at: parse_datetime(&record.created_at),
-                    updated_at: parse_datetime(&record.updated_at),
-                    version_count: version_count as u32,
-                    latest_file_size: latest_size.map(|s| s as u64),
-                });
-            }
-            Ok(summaries)
-        })
-    }
-
-    /// Get summaries for a specific source.
-    pub async fn get_summaries_by_source(
-        &self,
-        source_id: &str,
-    ) -> Result<Vec<DieselDocumentSummary>, DieselError> {
-        self.get_summaries(source_id, 1000, 0).await
     }
 
     // ========================================================================

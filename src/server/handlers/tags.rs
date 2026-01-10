@@ -1,31 +1,42 @@
 //! Tag-related handlers.
 
+use askama::Template;
 use axum::{
     extract::{Path, State},
     response::{Html, IntoResponse},
 };
 
-use super::super::templates;
+use super::super::template_structs::{
+    DocumentRow, ErrorTemplate, TagDocumentsTemplate, TagWithCount, TagsTemplate,
+};
 use super::super::AppState;
-use crate::models::DocumentDisplay;
 
 /// List all tags with document counts.
 pub async fn list_tags(State(state): State<AppState>) -> impl IntoResponse {
     let tags = match state.doc_repo.get_all_tags().await {
         Ok(t) => t,
         Err(e) => {
-            return Html(templates::base_template(
-                "Error",
-                &format!("<p>Failed to load tags: {}</p>", e),
-                None,
-            ));
+            let msg = format!("Failed to load tags: {}", e);
+            let template = ErrorTemplate {
+                title: "Error",
+                message: &msg,
+            };
+            return Html(template.render().unwrap_or_else(|_| msg));
         }
     };
 
-    // Convert tags to format expected by template (with dummy counts)
-    let tags_with_counts: Vec<(String, usize)> = tags.into_iter().map(|t| (t, 0)).collect();
-    let content = templates::tags_list(&tags_with_counts);
-    Html(templates::base_template("Tags", &content, None))
+    let tags_with_counts: Vec<TagWithCount> = tags
+        .into_iter()
+        .map(|t| TagWithCount::new(t, 0))
+        .collect();
+
+    let template = TagsTemplate {
+        title: "Tags",
+        has_tags: !tags_with_counts.is_empty(),
+        tags: tags_with_counts,
+    };
+
+    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
 }
 
 /// List documents with a specific tag.
@@ -40,25 +51,49 @@ pub async fn list_tag_documents(
     let documents = match state.doc_repo.get_by_tag(&tag, None).await {
         Ok(docs) => docs,
         Err(e) => {
-            return Html(templates::base_template(
-                "Error",
-                &format!("<p>Failed to load documents: {}</p>", e),
-                None,
-            ));
+            let msg = format!("Failed to load documents: {}", e);
+            let template = ErrorTemplate {
+                title: "Error",
+                message: &msg,
+            };
+            return Html(template.render().unwrap_or_else(|_| msg));
         }
     };
 
-    let doc_data: Vec<_> = documents
+    let doc_rows: Vec<DocumentRow> = documents
         .iter()
-        .filter_map(|doc| DocumentDisplay::from_document(doc).map(|d| d.to_tuple()))
+        .filter_map(|doc| {
+            let version = doc.current_version()?;
+            let display_name = version
+                .original_filename
+                .clone()
+                .unwrap_or_else(|| doc.title.clone());
+
+            Some(
+                DocumentRow::new(
+                    doc.id.clone(),
+                    display_name,
+                    doc.source_id.clone(),
+                    version.mime_type.clone(),
+                    version.file_size,
+                    version.acquired_at,
+                    doc.synopsis.clone(),
+                    doc.tags.clone(),
+                )
+                .with_other_tags(&tag),
+            )
+        })
         .collect();
 
-    let content = templates::tag_documents(&tag, &doc_data);
-    Html(templates::base_template(
-        &format!("Tag: {}", tag),
-        &content,
-        None,
-    ))
+    let title = format!("Tag: {}", tag);
+    let template = TagDocumentsTemplate {
+        title: &title,
+        tag: &tag,
+        document_count: doc_rows.len(),
+        documents: doc_rows,
+    };
+
+    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
 }
 
 /// API endpoint to get all tags as JSON.

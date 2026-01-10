@@ -1,79 +1,5 @@
 //! Shared types and helper utilities for the document repository.
 
-use chrono::{DateTime, Utc};
-use std::path::PathBuf;
-
-use crate::models::{Document, DocumentStatus, DocumentVersion};
-
-/// Partial document data loaded from a row, before versions are attached.
-/// Used internally by bulk-load methods to avoid N+1 queries.
-#[allow(dead_code)]
-pub(crate) struct DocumentPartial {
-    pub id: String,
-    pub source_id: String,
-    pub title: String,
-    pub source_url: String,
-    pub extracted_text: Option<String>,
-    pub synopsis: Option<String>,
-    pub tags: Vec<String>,
-    pub status: DocumentStatus,
-    pub metadata: serde_json::Value,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub discovery_method: String,
-}
-
-impl DocumentPartial {
-    #[allow(dead_code)]
-    pub fn with_versions(self, versions: Vec<DocumentVersion>) -> Document {
-        Document {
-            id: self.id,
-            source_id: self.source_id,
-            title: self.title,
-            source_url: self.source_url,
-            versions,
-            extracted_text: self.extracted_text,
-            synopsis: self.synopsis,
-            tags: self.tags,
-            status: self.status,
-            metadata: self.metadata,
-            created_at: self.created_at,
-            updated_at: self.updated_at,
-            discovery_method: self.discovery_method,
-        }
-    }
-}
-
-/// Lightweight document summary for listings (excludes extracted_text for memory efficiency).
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct DocumentSummary {
-    pub id: String,
-    pub source_id: String,
-    pub title: String,
-    pub source_url: String,
-    pub synopsis: Option<String>,
-    pub tags: Vec<String>,
-    pub status: DocumentStatus,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    /// Current version info (if any)
-    pub current_version: Option<VersionSummary>,
-}
-
-/// Lightweight version summary.
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct VersionSummary {
-    pub content_hash: String,
-    pub file_path: PathBuf,
-    pub file_size: u64,
-    pub mime_type: String,
-    pub acquired_at: DateTime<Utc>,
-    pub original_filename: Option<String>,
-    pub server_date: Option<DateTime<Utc>>,
-}
-
 /// Navigation context for a document within a filtered list.
 /// Uses window functions to efficiently find prev/next documents.
 #[derive(Debug, Clone)]
@@ -86,20 +12,6 @@ pub struct DocumentNavigation {
     pub total: u64,
 }
 
-/// Result of cursor-based pagination browse query.
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct BrowseResult {
-    pub documents: Vec<Document>,
-    /// ID of the first document on the previous page (for "Previous" link)
-    pub prev_cursor: Option<String>,
-    /// ID of the first document on the next page (for "Next" link)
-    pub next_cursor: Option<String>,
-    /// Position of first document on this page (1-indexed)
-    pub start_position: u64,
-    /// Total documents matching filters
-    pub total: u64,
-}
 
 /// Extract filename parts (basename and extension) from URL, title, or mime type.
 pub fn extract_filename_parts(url: &str, title: &str, mime_type: &str) -> (String, String) {
@@ -131,26 +43,6 @@ pub fn extract_filename_parts(url: &str, title: &str, mime_type: &str) -> (Strin
     (basename.to_string(), ext.to_string())
 }
 
-/// Map MIME type to category.
-#[allow(dead_code)]
-pub fn mime_to_category(mime: &str) -> &'static str {
-    match mime {
-        "application/pdf" => "documents",
-        m if m.contains("word") || m == "application/msword" => "documents",
-        m if m.contains("rfc822") || m.contains("message") => "documents",
-        m if m.starts_with("text/") && !m.contains("csv") => "documents",
-        m if m.contains("excel")
-            || m.contains("spreadsheet")
-            || m == "text/csv"
-            || m == "application/json"
-            || m == "application/xml" =>
-        {
-            "data"
-        }
-        m if m.starts_with("image/") => "images",
-        _ => "other",
-    }
-}
 
 /// Sanitize a string for use as a filename.
 pub fn sanitize_filename(name: &str) -> String {

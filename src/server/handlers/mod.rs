@@ -1,7 +1,5 @@
 //! HTTP request handlers for the web server.
 
-#![allow(dead_code)]
-
 mod annotations_api;
 mod api;
 mod browse;
@@ -13,7 +11,6 @@ mod helpers;
 mod ocr;
 mod pages;
 mod scrape_api;
-mod sources;
 mod static_files;
 mod tags;
 mod timeline;
@@ -33,8 +30,6 @@ pub use export_api::{export_annotations, export_documents, export_stats};
 pub use ocr::{api_reocr_document, api_reocr_status};
 pub use pages::api_document_pages;
 pub use scrape_api::{get_scrape_status, list_queue, list_scrapers, retry_failed};
-// Note: sources handlers (index, list_source_documents, list_sources) are
-// currently unused since the browse page serves as the main entry point.
 pub use static_files::{serve_css, serve_file, serve_js};
 pub use tags::{api_tags, list_tag_documents, list_tags};
 pub use timeline::{timeline_aggregate, timeline_source};
