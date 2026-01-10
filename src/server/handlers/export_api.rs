@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 
 use super::super::AppState;
+use crate::repository::diesel_document::BrowseParams;
 
 /// Export format options.
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -93,17 +94,13 @@ pub async fn export_documents(
     // Fetch documents
     let documents = match state
         .doc_repo
-        .browse(
-            params.source.as_deref(),
-            None,
-            &types,
-            &tags,
-            None,
-            None,
-            None,
-            limit as u32,
-            0,
-        )
+        .browse(BrowseParams {
+            source_id: params.source.as_deref(),
+            categories: &types,
+            tags: &tags,
+            limit: limit as u32,
+            ..Default::default()
+        })
         .await
     {
         Ok(docs) => docs,
@@ -280,7 +277,13 @@ pub async fn export_annotations(
 
     let documents = match state
         .doc_repo
-        .browse(params.source.as_deref(), None, &[], &[], None, None, None, limit as u32, 0)
+        .browse(BrowseParams {
+            source_id: params.source.as_deref(),
+            categories: &[],
+            tags: &[],
+            limit: limit as u32,
+            ..Default::default()
+        })
         .await
     {
         Ok(docs) => docs,

@@ -235,7 +235,11 @@ impl TagRef {
 impl TagWithCount {
     pub fn new(name: String, count: usize) -> Self {
         let encoded = urlencoding::encode(&name).to_string();
-        Self { name, encoded, count }
+        Self {
+            name,
+            encoded,
+            count,
+        }
     }
 }
 
@@ -260,6 +264,7 @@ impl VirtualFileRow {
 
 impl DocumentRow {
     /// Create a DocumentRow with basic fields, no other_sources info.
+    #[allow(clippy::too_many_arguments)] // Template struct initialization
     pub fn new(
         id: String,
         title: String,

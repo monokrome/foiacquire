@@ -11,10 +11,24 @@ use super::{
 };
 use crate::models::{Document, DocumentStatus};
 use crate::repository::diesel_models::DocumentRecord;
-use crate::repository::pool::DieselError;
 use crate::repository::document::DocumentNavigation;
+use crate::repository::pool::DieselError;
 use crate::schema::documents;
 use crate::{with_conn, with_conn_split};
+
+/// Parameters for browsing/filtering documents.
+#[derive(Debug, Default, Clone)]
+pub struct BrowseParams<'a> {
+    pub source_id: Option<&'a str>,
+    pub status: Option<&'a str>,
+    pub categories: &'a [String],
+    pub tags: &'a [String],
+    pub search_query: Option<&'a str>,
+    pub sort_field: Option<&'a str>,
+    pub sort_order: Option<&'a str>,
+    pub limit: u32,
+    pub offset: u32,
+}
 
 impl DieselDocumentRepository {
     // ========================================================================
@@ -295,20 +309,16 @@ impl DieselDocumentRepository {
     }
 
     /// Browse documents.
-    pub async fn browse(
-        &self,
-        source_id: Option<&str>,
-        status: Option<&str>,
-        categories: &[String],
-        tags: &[String],
-        search_query: Option<&str>,
-        sort_field: Option<&str>,
-        sort_order: Option<&str>,
-        limit: u32,
-        offset: u32,
-    ) -> Result<Vec<Document>, DieselError> {
-        let limit = limit as i64;
-        let offset = offset as i64;
+    pub async fn browse(&self, params: BrowseParams<'_>) -> Result<Vec<Document>, DieselError> {
+        let limit = params.limit as i64;
+        let offset = params.offset as i64;
+        let source_id = params.source_id;
+        let status = params.status;
+        let categories = params.categories;
+        let tags = params.tags;
+        let search_query = params.search_query;
+        let sort_field = params.sort_field;
+        let sort_order = params.sort_order;
 
         let records: Vec<DocumentRecord> = with_conn!(self.pool, conn, {
             // Build query with filters first, then order and paginate
@@ -342,7 +352,9 @@ impl DieselDocumentRepository {
             }
 
             // Apply sorting
-            let is_desc = sort_order.map(|o| o.eq_ignore_ascii_case("desc")).unwrap_or(true);
+            let is_desc = sort_order
+                .map(|o| o.eq_ignore_ascii_case("desc"))
+                .unwrap_or(true);
             match sort_field {
                 Some("created_at") => {
                     if is_desc {
@@ -840,9 +852,7 @@ impl DieselDocumentRepository {
                         .load(&mut conn)
                         .await?
                 }
-                (None, None, None) => {
-                    diesel::sql_query(&query).load(&mut conn).await?
-                }
+                (None, None, None) => diesel::sql_query(&query).load(&mut conn).await?,
             };
 
             // Convert to output format with timestamps

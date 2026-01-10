@@ -803,7 +803,11 @@ pub async fn cmd_analyze(
                             progress.inc(1);
                         }
                     }
-                    AnalysisEvent::PageOcrFailed { document_id, page_number, error } => {
+                    AnalysisEvent::PageOcrFailed {
+                        document_id,
+                        page_number,
+                        error,
+                    } => {
                         phase2_failed += 1;
                         if let Some(ref progress) = *pb_clone.lock().await {
                             progress.suspend(|| {

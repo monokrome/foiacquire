@@ -7,7 +7,9 @@ use axum::{
 };
 use std::collections::HashMap;
 
-use super::super::template_structs::{DuplicateDoc, DuplicateGroup, DuplicatesTemplate, ErrorTemplate};
+use super::super::template_structs::{
+    DuplicateDoc, DuplicateGroup, DuplicatesTemplate, ErrorTemplate,
+};
 use super::super::AppState;
 
 /// List documents that exist in multiple sources.
@@ -20,7 +22,7 @@ pub async fn list_duplicates(State(state): State<AppState>) -> impl IntoResponse
                 title: "Error",
                 message: &msg,
             };
-            return Html(template.render().unwrap_or_else(|_| msg));
+            return Html(template.render().unwrap_or(msg));
         }
     };
 
@@ -59,5 +61,9 @@ pub async fn list_duplicates(State(state): State<AppState>) -> impl IntoResponse
         duplicates,
     };
 
-    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(
+        template
+            .render()
+            .unwrap_or_else(|e| format!("Template error: {}", e)),
+    )
 }

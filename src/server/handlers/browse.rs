@@ -107,7 +107,13 @@ pub async fn browse_documents(
     // Get total count for pagination
     let total = match state
         .doc_repo
-        .browse_count(params.source.as_deref(), None, &types, &tags, params.q.as_deref())
+        .browse_count(
+            params.source.as_deref(),
+            None,
+            &types,
+            &tags,
+            params.q.as_deref(),
+        )
         .await
     {
         Ok(count) => count,
@@ -176,7 +182,13 @@ pub async fn browse_documents(
         tokio::spawn(async move {
             if let Ok(count) = state_for_count
                 .doc_repo
-                .browse_count(source_bg.as_deref(), None, &types_bg, &tags_bg, q_bg.as_deref())
+                .browse_count(
+                    source_bg.as_deref(),
+                    None,
+                    &types_bg,
+                    &tags_bg,
+                    q_bg.as_deref(),
+                )
                 .await
             {
                 state_for_count
@@ -211,16 +223,10 @@ pub async fn browse_documents(
     let nav_query_string = {
         let mut qs_parts = Vec::new();
         if !types.is_empty() {
-            qs_parts.push(format!(
-                "types={}",
-                urlencoding::encode(&types.join(","))
-            ));
+            qs_parts.push(format!("types={}", urlencoding::encode(&types.join(","))));
         }
         if !tags.is_empty() {
-            qs_parts.push(format!(
-                "tags={}",
-                urlencoding::encode(&tags.join(","))
-            ));
+            qs_parts.push(format!("tags={}", urlencoding::encode(&tags.join(","))));
         }
         if let Some(source) = params.source.as_deref() {
             qs_parts.push(format!("source={}", urlencoding::encode(source)));
@@ -330,5 +336,9 @@ pub async fn browse_documents(
         next_cursor_js,
     };
 
-    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(
+        template
+            .render()
+            .unwrap_or_else(|e| format!("Template error: {}", e)),
+    )
 }

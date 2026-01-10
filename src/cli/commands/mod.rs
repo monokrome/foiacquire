@@ -241,7 +241,7 @@ enum Commands {
         deepseek_path: Option<std::path::PathBuf>,
     },
 
-    /// Start web server to browse documents
+    /// Start web server to browse documents (as Tor hidden service by default)
     Serve {
         /// Address to bind to: PORT, HOST, or HOST:PORT (default: 127.0.0.1:3030)
         #[arg(default_value = "127.0.0.1:3030")]
@@ -250,6 +250,15 @@ enum Commands {
         /// Skip automatic database migration on startup
         #[arg(long)]
         no_migrate: bool,
+
+        /// Disable hidden service (clearnet only - shows security warning)
+        #[arg(long)]
+        no_hidden_service: bool,
+
+        /// Use experimental Arti for hidden service instead of C-Tor
+        /// (requires allow_potentially_insecure_circuits in config)
+        #[arg(long)]
+        use_arti: bool,
     },
 
     /// Refresh metadata for existing documents (server date, original filename)
@@ -893,8 +902,21 @@ pub async fn run() -> anyhow::Result<()> {
             backends,
             deepseek_path,
         } => analyze::cmd_analyze_compare(&file, pages.as_deref(), &backends, deepseek_path).await,
-        Commands::Serve { bind, no_migrate } => {
-            serve::cmd_serve(&settings, &bind, no_migrate).await
+        Commands::Serve {
+            bind,
+            no_migrate,
+            no_hidden_service,
+            use_arti,
+        } => {
+            serve::cmd_serve(
+                &settings,
+                &config,
+                &bind,
+                no_migrate,
+                no_hidden_service,
+                use_arti,
+            )
+            .await
         }
         Commands::Refresh {
             source_id,

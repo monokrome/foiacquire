@@ -21,14 +21,12 @@ pub async fn list_tags(State(state): State<AppState>) -> impl IntoResponse {
                 title: "Error",
                 message: &msg,
             };
-            return Html(template.render().unwrap_or_else(|_| msg));
+            return Html(template.render().unwrap_or(msg));
         }
     };
 
-    let tags_with_counts: Vec<TagWithCount> = tags
-        .into_iter()
-        .map(|t| TagWithCount::new(t, 0))
-        .collect();
+    let tags_with_counts: Vec<TagWithCount> =
+        tags.into_iter().map(|t| TagWithCount::new(t, 0)).collect();
 
     let template = TagsTemplate {
         title: "Tags",
@@ -36,7 +34,11 @@ pub async fn list_tags(State(state): State<AppState>) -> impl IntoResponse {
         tags: tags_with_counts,
     };
 
-    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(
+        template
+            .render()
+            .unwrap_or_else(|e| format!("Template error: {}", e)),
+    )
 }
 
 /// List documents with a specific tag.
@@ -56,7 +58,7 @@ pub async fn list_tag_documents(
                 title: "Error",
                 message: &msg,
             };
-            return Html(template.render().unwrap_or_else(|_| msg));
+            return Html(template.render().unwrap_or(msg));
         }
     };
 
@@ -93,7 +95,11 @@ pub async fn list_tag_documents(
         documents: doc_rows,
     };
 
-    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(
+        template
+            .render()
+            .unwrap_or_else(|e| format!("Template error: {}", e)),
+    )
 }
 
 /// API endpoint to get all tags as JSON.

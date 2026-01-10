@@ -169,6 +169,7 @@ impl AnalysisBackend for CustomBackend {
         &self.name
     }
 
+    #[allow(clippy::unnecessary_lazy_evaluations)] // Lazy eval needed - spawning processes
     fn is_available(&self) -> bool {
         // Check if command exists
         Command::new(&self.config.command)

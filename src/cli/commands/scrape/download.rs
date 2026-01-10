@@ -123,7 +123,11 @@ pub async fn cmd_download(
                         progress.finish_download(worker_id, true).await;
                     }
                 }
-                DownloadEvent::Failed { worker_id, url, error } => {
+                DownloadEvent::Failed {
+                    worker_id,
+                    url,
+                    error,
+                } => {
                     if let Some(ref progress) = progress_clone {
                         progress.println(&format!(
                             "{} Failed to download {}: {}",

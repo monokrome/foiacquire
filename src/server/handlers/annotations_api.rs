@@ -9,6 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use super::super::AppState;
+use crate::repository::diesel_document::BrowseParams;
 
 /// Query params for annotations listing.
 #[derive(Debug, Deserialize)]
@@ -59,17 +60,12 @@ pub async fn list_annotations(
         let offset = page.saturating_sub(1) * per_page;
         state
             .doc_repo
-            .browse(
-                params.source.as_deref(),
-                None,
-                &[],
-                &[],
-                None,
-                None,
-                None,
-                per_page as u32,
-                offset as u32,
-            )
+            .browse(BrowseParams {
+                source_id: params.source.as_deref(),
+                limit: per_page as u32,
+                offset: offset as u32,
+                ..Default::default()
+            })
             .await
             .unwrap_or_default()
     };

@@ -120,6 +120,9 @@ shellexpand = "3"
 # Home directory
 dirs = "5"
 
+# Find executables in PATH
+which = "7"
+
 # Browser automation (optional, for JS-heavy sites)
 # Using git version for compatibility with newer Chrome versions (fixes WS message parsing)
 # Tested with Alpine 3.21 chromium package (~v131)

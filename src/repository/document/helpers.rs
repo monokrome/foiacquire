@@ -12,7 +12,6 @@ pub struct DocumentNavigation {
     pub total: u64,
 }
 
-
 /// Extract filename parts (basename and extension) from URL, title, or mime type.
 pub fn extract_filename_parts(url: &str, title: &str, mime_type: &str) -> (String, String) {
     // Try to get filename from URL path
@@ -42,7 +41,6 @@ pub fn extract_filename_parts(url: &str, title: &str, mime_type: &str) -> (Strin
     let basename = if title.is_empty() { "document" } else { title };
     (basename.to_string(), ext.to_string())
 }
-
 
 /// Sanitize a string for use as a filename.
 pub fn sanitize_filename(name: &str) -> String {

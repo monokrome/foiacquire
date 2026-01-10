@@ -32,11 +32,17 @@
 //! ```
 
 mod config;
+mod ctor;
 
 #[cfg(feature = "embedded-tor")]
 mod arti;
 
-pub use config::{PrivacyConfig, PrivacyMode, SourcePrivacyConfig};
+#[allow(unused_imports)] // HiddenServiceSecurityLevel is public API
+pub use config::{
+    HiddenServiceConfig, HiddenServiceProvider, HiddenServiceSecurityLevel, PrivacyConfig,
+    PrivacyMode, SourcePrivacyConfig,
+};
+pub use ctor::CTorHiddenService;
 
 #[cfg(feature = "embedded-tor")]
 #[allow(unused_imports)] // Public API for embedded Tor integration

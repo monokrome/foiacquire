@@ -182,5 +182,4 @@ mod tests {
         assert!(!is_youtube_url("https://example.com/video.mp4"));
         assert!(!is_youtube_url("https://vimeo.com/123456"));
     }
-
 }

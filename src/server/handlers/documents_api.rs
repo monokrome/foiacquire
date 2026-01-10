@@ -9,6 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use super::super::AppState;
+use crate::repository::diesel_document::BrowseParams;
 
 /// Query parameters for document search/listing.
 #[derive(Debug, Deserialize)]
@@ -105,17 +106,17 @@ pub async fn list_documents(
     // Get documents with filters
     let documents = match state
         .doc_repo
-        .browse(
-            params.source.as_deref(),
-            params.status.as_deref(),
-            &types,
-            &tags,
-            params.q.as_deref(),
-            params.sort.as_deref(),
-            params.order.as_deref(),
-            per_page as u32,
-            offset as u32,
-        )
+        .browse(BrowseParams {
+            source_id: params.source.as_deref(),
+            status: params.status.as_deref(),
+            categories: &types,
+            tags: &tags,
+            search_query: params.q.as_deref(),
+            sort_field: params.sort.as_deref(),
+            sort_order: params.order.as_deref(),
+            limit: per_page as u32,
+            offset: offset as u32,
+        })
         .await
     {
         Ok(docs) => docs,

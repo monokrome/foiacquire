@@ -37,7 +37,11 @@ pub async fn document_detail(
                 title: "Not Found",
                 message: "Document not found.",
             };
-            return Html(template.render().unwrap_or_else(|_| "Not found".to_string()));
+            return Html(
+                template
+                    .render()
+                    .unwrap_or_else(|_| "Not found".to_string()),
+            );
         }
         Err(e) => {
             let msg = format!("Failed to load document: {}", e);
@@ -45,7 +49,7 @@ pub async fn document_detail(
                 title: "Error",
                 message: &msg,
             };
-            return Html(template.render().unwrap_or_else(|_| msg));
+            return Html(template.render().unwrap_or(msg));
         }
     };
 
@@ -179,14 +183,13 @@ pub async fn document_detail(
         other_sources,
         has_other_sources: !doc.versions.is_empty()
             && doc.current_version().is_some()
-            && find_sources_with_hash(
+            && !find_sources_with_hash(
                 &state,
                 &doc.current_version().unwrap().content_hash,
                 &doc.source_id,
             )
             .await
-            .len()
-                > 0,
+            .is_empty(),
         has_extracted_text: doc.extracted_text.is_some(),
         extracted_text_val: doc.extracted_text.clone().unwrap_or_default(),
         virtual_files: virtual_files.clone(),
@@ -208,7 +211,11 @@ pub async fn document_detail(
         version_id_val: current_version_id.unwrap_or(0),
     };
 
-    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(
+        template
+            .render()
+            .unwrap_or_else(|e| format!("Template error: {}", e)),
+    )
 }
 
 /// Get document versions as JSON.

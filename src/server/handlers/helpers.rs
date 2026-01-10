@@ -60,4 +60,3 @@ pub async fn find_sources_with_hash(
         Err(_) => vec![],
     }
 }
-

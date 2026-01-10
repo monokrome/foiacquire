@@ -14,6 +14,8 @@ mod pages;
 mod queries;
 mod versions;
 
+pub use queries::BrowseParams;
+
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};

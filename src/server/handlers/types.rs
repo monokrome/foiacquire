@@ -30,7 +30,7 @@ pub async fn list_types(State(state): State<AppState>) -> impl IntoResponse {
                 title: "Error",
                 message: &msg,
             };
-            return Html(template.render().unwrap_or_else(|_| msg));
+            return Html(template.render().unwrap_or(msg));
         }
     };
 
@@ -74,7 +74,11 @@ pub async fn list_types(State(state): State<AppState>) -> impl IntoResponse {
         type_stats: stats_with_category,
     };
 
-    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(
+        template
+            .render()
+            .unwrap_or_else(|e| format!("Template error: {}", e)),
+    )
 }
 
 /// List documents filtered by type.
@@ -98,7 +102,7 @@ pub async fn list_by_type(
                 title: "Error",
                 message: &msg,
             };
-            return Html(template.render().unwrap_or_else(|_| msg));
+            return Html(template.render().unwrap_or(msg));
         }
     };
 
@@ -165,5 +169,9 @@ pub async fn list_by_type(
         documents: doc_rows,
     };
 
-    Html(template.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(
+        template
+            .render()
+            .unwrap_or_else(|e| format!("Template error: {}", e)),
+    )
 }
