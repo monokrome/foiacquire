@@ -11,7 +11,7 @@ use crate::llm::LlmConfig;
 use crate::privacy::PrivacyConfig;
 use crate::repository::diesel_context::DieselDbContext;
 use crate::repository::util::{is_postgres_url, validate_database_url};
-use crate::scrapers::ScraperConfig;
+use crate::scrapers::{ScraperConfig, ViaMode};
 
 /// Default refresh TTL in days (14 days).
 pub const DEFAULT_REFRESH_TTL_DAYS: u64 = 14;
@@ -339,9 +339,27 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "PrivacyConfig::is_default")]
     pub privacy: PrivacyConfig,
 
+    /// URL rewriting for caching proxies (CDN bypass).
+    /// Maps original base URLs to proxy URLs.
+    /// Example: "https://www.cia.gov" = "https://cia.monokro.me"
+    /// Requests to cia.gov will be fetched via the CloudFront proxy instead.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub via: HashMap<String, String>,
+
+    /// Via proxy mode - controls when via mappings are used for requests.
+    /// - "strict" (default): Never use via for requests, only for URL detection
+    /// - "fallback": Use via as fallback when rate limited (429/503)
+    /// - "priority": Use via first, fall back to original URL on failure
+    #[serde(default, skip_serializing_if = "is_via_mode_default")]
+    pub via_mode: ViaMode,
+
     /// Path to the config file this was loaded from (not serialized).
     #[serde(skip)]
     pub source_path: Option<PathBuf>,
+}
+
+fn is_via_mode_default(mode: &ViaMode) -> bool {
+    *mode == ViaMode::default()
 }
 
 impl Config {
@@ -375,6 +393,9 @@ impl Config {
                     .await
                     .unwrap_or_default()
                     .with_env_overrides();
+                let via: HashMap<String, String> =
+                    pref_config.get("via").await.unwrap_or_default();
+                let via_mode: ViaMode = pref_config.get("via_mode").await.unwrap_or_default();
 
                 // Get the source path from prefer
                 let source_path = pref_config.source_path().cloned();
@@ -392,6 +413,8 @@ impl Config {
                     llm,
                     analysis,
                     privacy,
+                    via,
+                    via_mode,
                     source_path,
                 }
             }

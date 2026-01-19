@@ -525,6 +525,13 @@ async fn cmd_scrape_single_tui(
     )
     .map_err(|e| anyhow::anyhow!("Failed to create scraper: {}", e))?;
 
+    // Apply via mappings for caching proxy support if configured
+    let scraper = if !config.via.is_empty() {
+        scraper.with_via_config(config.via.clone(), config.via_mode)
+    } else {
+        scraper
+    };
+
     let stream = scraper.scrape_stream(workers).await;
     let mut rx = stream.receiver;
 

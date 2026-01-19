@@ -6,7 +6,7 @@ use console::style;
 
 use super::helpers::{process_get_response_for_refresh, RefreshResult};
 use crate::cli::commands::helpers::truncate;
-use crate::config::Settings;
+use crate::config::{Config, Settings};
 use crate::privacy::PrivacyConfig;
 
 /// Refresh metadata for documents.
@@ -57,6 +57,11 @@ pub async fn cmd_refresh(
         return Ok(());
     }
 
+    // Load config for via mappings
+    let config = Config::load().await;
+    let via_mappings = Arc::new(config.via);
+    let via_mode = config.via_mode;
+
     println!(
         "{} Refreshing metadata for {} documents using {} workers",
         style("→").cyan(),
@@ -96,6 +101,8 @@ pub async fn cmd_refresh(
         let semaphore = semaphore.clone();
         let pb = pb.clone();
         let privacy = privacy_config.clone();
+        let via = via_mappings.clone();
+        let via_mode = via_mode;
 
         let handle = tokio::spawn(async move {
             let client = match crate::scrapers::HttpClient::with_privacy(
@@ -110,6 +117,13 @@ pub async fn cmd_refresh(
                     tracing::error!("Failed to create HTTP client: {}", e);
                     return;
                 }
+            };
+
+            // Apply via mappings for caching proxy support
+            let client = if !via.is_empty() {
+                client.with_via_config((*via).clone(), via_mode)
+            } else {
+                client
             };
 
             loop {

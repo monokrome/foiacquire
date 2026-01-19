@@ -1,6 +1,6 @@
 //! HTML-based discovery methods (BFS crawl).
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use regex::Regex;
@@ -24,6 +24,17 @@ use crate::models::{CrawlUrl, DiscoveryMethod};
 use crate::repository::DieselCrawlRepository;
 #[cfg(feature = "browser")]
 use tracing::debug;
+
+/// Normalize a URL using via mappings for detection purposes.
+/// Returns the canonical URL (what it would become after via rewriting).
+fn normalize_url_for_detection(url: &str, via_mappings: &HashMap<String, String>) -> String {
+    for (from_prefix, to_prefix) in via_mappings {
+        if url.starts_with(from_prefix) {
+            return format!("{}{}", to_prefix, &url[from_prefix.len()..]);
+        }
+    }
+    url.to_string()
+}
 
 /// Configuration for the BFS HTML crawler, parsed from ScraperConfig.
 struct CrawlerConfig {
@@ -178,9 +189,20 @@ async fn fetch_page_html(
 }
 
 /// Process Google Drive folder URLs and return direct file download URLs.
-async fn enumerate_google_drive_folder(folder_url: &str, client: &HttpClient) -> Vec<String> {
-    info!("Detected Google Drive folder: {}", folder_url);
-    match DriveFolder::from_url(folder_url, client.clone()) {
+/// The folder_url may be a remapped URL that needs via rewriting before fetching.
+async fn enumerate_google_drive_folder(
+    folder_url: &str,
+    client: &HttpClient,
+    via_mappings: &HashMap<String, String>,
+) -> Vec<String> {
+    // Normalize URL to get the actual Google Drive URL for fetching
+    let actual_url = normalize_url_for_detection(folder_url, via_mappings);
+    info!(
+        "Detected Google Drive folder: {} (actual: {})",
+        folder_url, actual_url
+    );
+
+    match DriveFolder::from_url(&actual_url, client.clone()) {
         Ok(folder) => match folder.list_files_recursive().await {
             Ok(files) => {
                 info!("Enumerated {} files from Google Drive folder", files.len());
@@ -196,7 +218,7 @@ async fn enumerate_google_drive_folder(folder_url: &str, client: &HttpClient) ->
             }
         },
         Err(e) => {
-            warn!("Invalid Google Drive folder URL {}: {}", folder_url, e);
+            warn!("Invalid Google Drive folder URL {}: {}", actual_url, e);
             Vec::new()
         }
     }
@@ -246,16 +268,20 @@ async fn send_document_url(
 }
 
 /// Process Google Drive folder URLs, returning (gdrive_doc_urls, filtered_page_urls).
+/// Normalizes URLs using via mappings before detecting Google Drive folders.
 async fn process_google_drive_folders(
     page_urls: Vec<String>,
     client: &HttpClient,
+    via_mappings: &HashMap<String, String>,
 ) -> (Vec<String>, Vec<String>) {
     let mut gdrive_doc_urls: Vec<String> = Vec::new();
     let mut filtered_page_urls: Vec<String> = Vec::new();
 
     for url in page_urls {
-        if is_google_drive_folder_url(&url) {
-            let files = enumerate_google_drive_folder(&url, client).await;
+        // Normalize URL to check what it really points to
+        let normalized = normalize_url_for_detection(&url, via_mappings);
+        if is_google_drive_folder_url(&normalized) {
+            let files = enumerate_google_drive_folder(&url, client, via_mappings).await;
             gdrive_doc_urls.extend(files);
         } else {
             filtered_page_urls.push(url);
@@ -400,7 +426,7 @@ impl ConfigurableScraper {
 
             // Process Google Drive folders and filter them from page URLs
             let (gdrive_doc_urls, page_urls) =
-                process_google_drive_folders(page_urls, client).await;
+                process_google_drive_folders(page_urls, client, client.via_mappings()).await;
 
             // Convert Google Drive file URLs to proper download URLs
             let doc_urls: Vec<String> = doc_urls

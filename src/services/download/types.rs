@@ -1,9 +1,11 @@
 //! Download service types and events.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::privacy::PrivacyConfig;
+use crate::scrapers::ViaMode;
 
 /// Events emitted during download operations.
 /// Fields are populated when events are created, even if consumers don't read all of them.
@@ -63,4 +65,8 @@ pub struct DownloadConfig {
     pub request_delay: Duration,
     /// Privacy configuration for HTTP requests.
     pub privacy: PrivacyConfig,
+    /// URL rewriting for caching proxies.
+    pub via: HashMap<String, String>,
+    /// Via mode controlling when via mappings are used.
+    pub via_mode: ViaMode,
 }

@@ -21,7 +21,7 @@ pub use archive::{ArchiveError, ArchiveRegistry, ArchiveSource, SnapshotInfo, Wa
 pub use browser::BrowserFetcher;
 #[cfg(feature = "browser")]
 pub use browser::{BrowserEngineConfig, BrowserEngineType};
-pub use config::ScraperConfig;
+pub use config::{ScraperConfig, ViaMode};
 pub use configurable::ConfigurableScraper;
 pub use http_client::{HttpClient, HttpResponse};
 

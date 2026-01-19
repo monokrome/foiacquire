@@ -29,6 +29,7 @@ use reqwest::{Client, Proxy, StatusCode};
 #[cfg(feature = "browser")]
 use tracing::debug;
 
+use super::config::ViaMode;
 use super::rate_limiter::RateLimiter;
 use super::InMemoryRateLimitBackend;
 use crate::models::{CrawlRequest, CrawlUrl, UrlStatus};
@@ -48,6 +49,11 @@ use super::browser::{BrowserPool, BrowserPoolConfig};
 /// - When `SOCKS_PROXY` is set, routes through that proxy
 /// - When privacy config specifies Tor, routes through embedded Arti (if available)
 /// - When direct mode is enabled, makes direct connections (with security warning)
+///
+/// URL rewriting (via):
+/// - When `via_mappings` is configured, URLs matching a key prefix are rewritten
+///   to fetch through a caching proxy (e.g., CloudFront, Cloudflare)
+/// - The original URL is preserved in metadata for accurate record-keeping
 #[derive(Clone)]
 pub struct HttpClient {
     client: Client,
@@ -57,11 +63,37 @@ pub struct HttpClient {
     referer: Option<String>,
     rate_limiter: RateLimiter,
     privacy_mode: PrivacyMode,
+    /// URL rewriting mappings for caching proxies.
+    /// Maps original base URLs to proxy URLs (e.g., "https://cia.gov" -> "https://cia.monokro.me")
+    via_mappings: Arc<HashMap<String, String>>,
+    /// Via mode controlling when via mappings are used for requests.
+    via_mode: ViaMode,
     #[cfg(feature = "browser")]
     browser_pool: Option<Arc<BrowserPool>>,
 }
 
 impl HttpClient {
+    /// Rewrite a URL using via mappings if a matching prefix is found.
+    /// Returns the rewritten URL (for fetching) and whether it was rewritten.
+    ///
+    /// The original URL should be stored in metadata for accurate record-keeping,
+    /// while the rewritten URL is used for the actual HTTP request.
+    fn apply_via_rewrite(&self, url: &str) -> (String, bool) {
+        for (from_prefix, to_prefix) in self.via_mappings.iter() {
+            if url.starts_with(from_prefix) {
+                let rewritten = format!("{}{}", to_prefix, &url[from_prefix.len()..]);
+                tracing::debug!(
+                    "Via rewrite: {} -> {} (via {})",
+                    url,
+                    rewritten,
+                    to_prefix
+                );
+                return (rewritten, true);
+            }
+        }
+        (url.to_string(), false)
+    }
+
     /// Create browser pool from BROWSER_URL env var.
     /// Supports comma-separated URLs for multiple browsers.
     #[cfg(feature = "browser")]
@@ -204,6 +236,8 @@ impl HttpClient {
             referer: None,
             rate_limiter: RateLimiter::new(backend),
             privacy_mode,
+            via_mappings: Arc::new(HashMap::new()),
+            via_mode: ViaMode::default(),
             #[cfg(feature = "browser")]
             browser_pool: Self::create_browser_pool(),
         }
@@ -239,6 +273,65 @@ impl HttpClient {
             referer: None,
             rate_limiter: RateLimiter::new(backend),
             privacy_mode,
+            via_mappings: Arc::new(HashMap::new()),
+            via_mode: ViaMode::default(),
+            #[cfg(feature = "browser")]
+            browser_pool: Self::create_browser_pool(),
+        })
+    }
+
+    /// Create a new HTTP client with via URL rewriting for caching proxies.
+    ///
+    /// # Arguments
+    /// * `source_id` - Identifier for this source (for logging/rate limiting)
+    /// * `timeout` - Request timeout
+    /// * `request_delay` - Delay between requests
+    /// * `user_agent_config` - User agent configuration
+    /// * `privacy_config` - Privacy/proxy configuration
+    /// * `via_mappings` - URL prefix mappings for caching proxies
+    /// * `via_mode` - Controls when via mappings are used for requests
+    ///
+    /// # Errors
+    /// Returns an error if Tor mode is requested but Tor is not available.
+    pub fn with_via(
+        source_id: &str,
+        timeout: Duration,
+        request_delay: Duration,
+        user_agent_config: Option<&str>,
+        privacy_config: &PrivacyConfig,
+        via_mappings: HashMap<String, String>,
+        via_mode: ViaMode,
+    ) -> Result<Self, String> {
+        let user_agent = resolve_user_agent(user_agent_config);
+        let (client, privacy_mode) =
+            Self::build_client(&user_agent, timeout, Some(privacy_config))?;
+
+        // Default in-memory backend with request_delay as base
+        let backend = Arc::new(InMemoryRateLimitBackend::new(
+            request_delay.as_millis() as u64,
+        ));
+
+        if !via_mappings.is_empty() {
+            tracing::info!(
+                "HTTP client configured with {} via mapping(s) for caching proxy (mode: {:?})",
+                via_mappings.len(),
+                via_mode
+            );
+            for (from, to) in &via_mappings {
+                tracing::debug!("  Via: {} -> {}", from, to);
+            }
+        }
+
+        Ok(Self {
+            client,
+            crawl_repo: None,
+            source_id: source_id.to_string(),
+            request_delay,
+            referer: None,
+            rate_limiter: RateLimiter::new(backend),
+            privacy_mode,
+            via_mappings: Arc::new(via_mappings),
+            via_mode,
             #[cfg(feature = "browser")]
             browser_pool: Self::create_browser_pool(),
         })
@@ -292,6 +385,8 @@ impl HttpClient {
             referer: None,
             rate_limiter,
             privacy_mode,
+            via_mappings: Arc::new(HashMap::new()),
+            via_mode: ViaMode::default(),
             #[cfg(feature = "browser")]
             browser_pool: Self::create_browser_pool(),
         }
@@ -321,9 +416,49 @@ impl HttpClient {
             referer: None,
             rate_limiter,
             privacy_mode,
+            via_mappings: Arc::new(HashMap::new()),
+            via_mode: ViaMode::default(),
             #[cfg(feature = "browser")]
             browser_pool: Self::create_browser_pool(),
         })
+    }
+
+    /// Set the via mappings and mode for URL rewriting (caching proxy support).
+    pub fn with_via_config(
+        mut self,
+        via: HashMap<String, String>,
+        via_mode: ViaMode,
+    ) -> Self {
+        if !via.is_empty() {
+            tracing::info!(
+                "HTTP client configured with {} via mapping(s) for caching proxy (mode: {:?})",
+                via.len(),
+                via_mode
+            );
+            for (from, to) in &via {
+                tracing::debug!("  Via: {} -> {}", from, to);
+            }
+        }
+        self.via_mappings = Arc::new(via);
+        self.via_mode = via_mode;
+        self
+    }
+
+    /// Set the via mappings for URL rewriting (caching proxy support).
+    /// Uses default via_mode (Strict).
+    #[deprecated(note = "Use with_via_config instead to also set via_mode")]
+    pub fn with_via_mappings(mut self, via: HashMap<String, String>) -> Self {
+        if !via.is_empty() {
+            tracing::info!(
+                "HTTP client configured with {} via mapping(s) for caching proxy",
+                via.len()
+            );
+            for (from, to) in &via {
+                tracing::debug!("  Via: {} -> {}", from, to);
+            }
+        }
+        self.via_mappings = Arc::new(via);
+        self
     }
 
     /// Set the crawl repository for request logging.
@@ -353,6 +488,12 @@ impl HttpClient {
         !matches!(self.privacy_mode, PrivacyMode::Direct)
     }
 
+    /// Get the via mappings for URL rewriting detection.
+    /// Useful for detecting when URLs will be rewritten to specific domains.
+    pub fn via_mappings(&self) -> &HashMap<String, String> {
+        &self.via_mappings
+    }
+
     /// Make a GET request with optional conditional headers.
     /// Uses adaptive rate limiting per domain.
     /// When BROWSER_URL is configured, routes through browser pool.
@@ -372,39 +513,99 @@ impl HttpClient {
     }
 
     /// Fetch via browser pool (with load balancing and failover).
+    /// Respects via_mode setting for URL rewriting behavior.
     #[cfg(feature = "browser")]
     async fn get_via_browser_pool(
         &self,
         pool: &Arc<BrowserPool>,
         url: &str,
     ) -> Result<HttpResponse, reqwest::Error> {
-        // Wait for rate limiter
-        let domain = self.rate_limiter.acquire(url).await;
+        let (via_url, has_via) = self.apply_via_rewrite(url);
 
+        // Determine initial URL based on via_mode
+        let (initial_url, can_fallback) = match self.via_mode {
+            ViaMode::Strict => (url.to_string(), false),
+            ViaMode::Fallback => (url.to_string(), has_via),
+            ViaMode::Priority => {
+                if has_via {
+                    (via_url.clone(), true)
+                } else {
+                    (url.to_string(), false)
+                }
+            }
+        };
+
+        // Make first browser request
+        if let Some(response) = self.do_browser_fetch(pool, &initial_url, url).await {
+            let status = response.status.as_u16();
+            let should_retry = can_fallback && (status == 429 || status == 503);
+
+            if should_retry {
+                let alternate_url = match self.via_mode {
+                    ViaMode::Fallback => &via_url,
+                    ViaMode::Priority => url,
+                    ViaMode::Strict => return Ok(response),
+                };
+
+                tracing::info!(
+                    "Via {:?} mode: retrying {} with alternate URL {}",
+                    self.via_mode,
+                    url,
+                    alternate_url
+                );
+
+                tokio::time::sleep(self.request_delay).await;
+
+                // Try alternate URL via browser
+                if let Some(retry_response) =
+                    self.do_browser_fetch(pool, alternate_url, url).await
+                {
+                    return Ok(retry_response);
+                }
+                // Browser retry failed, fall back to reqwest
+                return self.get_via_reqwest(url, None, None).await;
+            }
+
+            return Ok(response);
+        }
+
+        // Browser failed completely, fall back to reqwest
+        debug!("Browser pool exhausted, falling back to reqwest for {}", url);
+        self.get_via_reqwest(url, None, None).await
+    }
+
+    /// Internal: perform a single browser fetch and handle logging/rate limiting.
+    /// Returns None if browser fetch fails (caller should fall back to reqwest).
+    #[cfg(feature = "browser")]
+    async fn do_browser_fetch(
+        &self,
+        pool: &Arc<BrowserPool>,
+        fetch_url: &str,
+        original_url: &str,
+    ) -> Option<HttpResponse> {
+        let domain = self.rate_limiter.acquire(original_url).await;
         let start = Instant::now();
 
-        // Fetch via browser pool (handles selection and failover internally)
-        let result = pool.fetch(url).await;
-
+        let result = pool.fetch(fetch_url).await;
         let duration = start.elapsed();
 
         match result {
             Ok(browser_response) => {
                 let status_code = browser_response.status;
 
-                // Create request log
-                let mut request_log =
-                    CrawlRequest::new(self.source_id.clone(), url.to_string(), "GET".to_string());
+                let mut request_log = CrawlRequest::new(
+                    self.source_id.clone(),
+                    original_url.to_string(),
+                    "GET".to_string(),
+                );
                 request_log.response_at = Some(Utc::now());
                 request_log.duration_ms = Some(duration.as_millis() as u64);
                 request_log.response_status = Some(status_code);
 
-                // Log the request
                 if let Some(repo) = &self.crawl_repo {
                     let _ = repo.log_request(&request_log).await;
                 }
 
-                // Report success to rate limiter
                 if let Some(ref domain) = domain {
                     if (200..400).contains(&status_code) {
                         self.rate_limiter.report_success(domain).await;
@@ -415,48 +616,101 @@ impl HttpClient {
                     }
                 }
 
-                // Apply base delay
                 tokio::time::sleep(self.request_delay).await;
 
-                // Build response headers
                 let mut headers = HashMap::new();
                 headers.insert("content-type".to_string(), browser_response.content_type);
 
-                Ok(HttpResponse::from_bytes(
+                Some(HttpResponse::from_bytes(
                     StatusCode::from_u16(status_code).unwrap_or(StatusCode::OK),
                     headers,
                     browser_response.content.into_bytes(),
                 ))
             }
             Err(e) => {
-                // All browsers in pool failed - log and fall back to reqwest
                 debug!(
-                    "Browser pool fetch failed for {}: {}, falling back to reqwest",
-                    url, e
+                    "Browser pool fetch failed for {}: {}",
+                    original_url, e
                 );
 
-                // Report to rate limiter
                 if let Some(ref domain) = domain {
                     self.rate_limiter.report_server_error(domain).await;
                 }
 
-                // Fall back to direct request
-                self.get_via_reqwest(url, None, None).await
+                None
             }
         }
     }
 
     /// Fetch via reqwest (direct HTTP).
+    /// Respects via_mode setting for URL rewriting behavior.
     async fn get_via_reqwest(
         &self,
         url: &str,
         etag: Option<&str>,
         last_modified: Option<&str>,
     ) -> Result<HttpResponse, reqwest::Error> {
-        // Wait for rate limiter before making request
-        let domain = self.rate_limiter.acquire(url).await;
+        let (via_url, has_via) = self.apply_via_rewrite(url);
 
-        let mut request = self.client.get(url);
+        // Determine initial URL based on via_mode
+        let (initial_url, can_fallback) = match self.via_mode {
+            ViaMode::Strict => (url.to_string(), false),
+            ViaMode::Fallback => (url.to_string(), has_via),
+            ViaMode::Priority => {
+                if has_via {
+                    (via_url.clone(), true)
+                } else {
+                    (url.to_string(), false)
+                }
+            }
+        };
+
+        // Make first request
+        let result = self
+            .do_get_reqwest(&initial_url, url, etag, last_modified)
+            .await?;
+
+        // Check if we should retry with alternate URL
+        let status = result.status.as_u16();
+        let should_retry = can_fallback && (status == 429 || status == 503);
+
+        if should_retry {
+            let alternate_url = match self.via_mode {
+                ViaMode::Fallback => &via_url, // Rate limited on original, try via
+                ViaMode::Priority => url,      // Failed on via, try original
+                ViaMode::Strict => return Ok(result), // Never retry in strict
+            };
+
+            tracing::info!(
+                "Via {:?} mode: retrying {} with alternate URL {}",
+                self.via_mode,
+                url,
+                alternate_url
+            );
+
+            // Small delay before retry
+            tokio::time::sleep(self.request_delay).await;
+
+            return self
+                .do_get_reqwest(alternate_url, url, etag, last_modified)
+                .await;
+        }
+
+        Ok(result)
+    }
+
+    /// Internal: perform a single GET request and handle logging/rate limiting.
+    async fn do_get_reqwest(
+        &self,
+        fetch_url: &str,
+        original_url: &str,
+        etag: Option<&str>,
+        last_modified: Option<&str>,
+    ) -> Result<HttpResponse, reqwest::Error> {
+        // Wait for rate limiter before making request (use original URL for rate limiting)
+        let domain = self.rate_limiter.acquire(original_url).await;
+
+        let mut request = self.client.get(fetch_url);
 
         let mut headers = HashMap::new();
 
@@ -472,9 +726,12 @@ impl HttpClient {
 
         let was_conditional = etag.is_some() || last_modified.is_some();
 
-        // Create request log
-        let mut request_log =
-            CrawlRequest::new(self.source_id.clone(), url.to_string(), "GET".to_string());
+        // Create request log (always log original URL for accurate records)
+        let mut request_log = CrawlRequest::new(
+            self.source_id.clone(),
+            original_url.to_string(),
+            "GET".to_string(),
+        );
         request_log.request_headers = headers;
         request_log.was_conditional = was_conditional;
 
@@ -516,7 +773,7 @@ impl HttpClient {
             } else if status_code == 403 {
                 // Possible rate limit - needs pattern detection
                 self.rate_limiter
-                    .report_403(domain, url, has_retry_after)
+                    .report_403(domain, original_url, has_retry_after)
                     .await;
             } else if status_code >= 500 {
                 // Server error - mild backoff
@@ -549,10 +806,13 @@ impl HttpClient {
         url: &str,
         headers: HashMap<String, String>,
     ) -> Result<HttpResponse, reqwest::Error> {
-        // Wait for rate limiter before making request
+        // Apply via rewriting if configured (fetch via caching proxy)
+        let (fetch_url, _via_rewritten) = self.apply_via_rewrite(url);
+
+        // Wait for rate limiter before making request (use original URL for rate limiting)
         let domain = self.rate_limiter.acquire(url).await;
 
-        let mut request = self.client.get(url);
+        let mut request = self.client.get(&fetch_url);
         for (name, value) in &headers {
             request = request.header(name, value);
         }
@@ -639,15 +899,18 @@ impl HttpClient {
         json: &T,
         headers: HashMap<String, String>,
     ) -> Result<HttpResponse, reqwest::Error> {
-        // Wait for rate limiter before making request
+        // Apply via rewriting if configured (fetch via caching proxy)
+        let (fetch_url, _via_rewritten) = self.apply_via_rewrite(url);
+
+        // Wait for rate limiter before making request (use original URL for rate limiting)
         let domain = self.rate_limiter.acquire(url).await;
 
-        let mut request = self.client.post(url).json(json);
+        let mut request = self.client.post(&fetch_url).json(json);
         for (name, value) in &headers {
             request = request.header(name, value);
         }
 
-        // Create request log
+        // Create request log (log original URL, not the via-rewritten one)
         let mut request_log =
             CrawlRequest::new(self.source_id.clone(), url.to_string(), "POST".to_string());
         request_log.request_headers = headers.clone();
@@ -706,10 +969,13 @@ impl HttpClient {
         url: &str,
         form: &T,
     ) -> Result<HttpResponse, reqwest::Error> {
-        // Wait for rate limiter before making request
+        // Apply via rewriting if configured (fetch via caching proxy)
+        let (fetch_url, _via_rewritten) = self.apply_via_rewrite(url);
+
+        // Wait for rate limiter before making request (use original URL for rate limiting)
         let domain = self.rate_limiter.acquire(url).await;
 
-        let request = self.client.post(url).form(form);
+        let request = self.client.post(&fetch_url).form(form);
 
         // Create request log
         let mut request_log =
@@ -779,10 +1045,13 @@ impl HttpClient {
         url: &str,
         json: &T,
     ) -> Result<HttpResponse, reqwest::Error> {
-        // Wait for rate limiter before making request
+        // Apply via rewriting if configured (fetch via caching proxy)
+        let (fetch_url, _via_rewritten) = self.apply_via_rewrite(url);
+
+        // Wait for rate limiter before making request (use original URL for rate limiting)
         let domain = self.rate_limiter.acquire(url).await;
 
-        let request = self.client.post(url).json(json);
+        let request = self.client.post(&fetch_url).json(json);
 
         // Create request log
         let mut request_log =
@@ -854,10 +1123,13 @@ impl HttpClient {
         etag: Option<&str>,
         last_modified: Option<&str>,
     ) -> Result<HeadResponse, reqwest::Error> {
-        // Wait for rate limiter before making request
+        // Apply via rewriting if configured (fetch via caching proxy)
+        let (fetch_url, _via_rewritten) = self.apply_via_rewrite(url);
+
+        // Wait for rate limiter before making request (use original URL for rate limiting)
         let domain = self.rate_limiter.acquire(url).await;
 
-        let mut request = self.client.head(url);
+        let mut request = self.client.head(&fetch_url);
 
         let mut headers = HashMap::new();
 

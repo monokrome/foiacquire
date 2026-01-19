@@ -6,12 +6,13 @@
 
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(feature = "browser")]
 use super::browser::BrowserEngineConfig;
-use super::config::ScraperConfig;
+use super::config::{ScraperConfig, ViaMode};
 use super::rate_limiter::RateLimiter;
 use super::HttpClient;
 use crate::models::Source;
@@ -165,5 +166,27 @@ impl ConfigurableScraper {
         {
             false
         }
+    }
+
+    /// Configure URL rewriting for caching proxies with mode.
+    ///
+    /// The via mappings allow routing requests through a CDN (like Cloudflare)
+    /// while preserving the original URL for metadata and rate limiting.
+    ///
+    /// Example: mapping "https://cia.gov" -> "https://cia.monokro.me" will
+    /// fetch URLs starting with cia.gov through the Cloudflare proxy instead.
+    pub fn with_via_config(mut self, via: HashMap<String, String>, via_mode: ViaMode) -> Self {
+        self.client = self.client.with_via_config(via, via_mode);
+        self
+    }
+
+    /// Configure URL rewriting for caching proxies (uses Strict mode).
+    #[deprecated(note = "Use with_via_config instead to also set via_mode")]
+    pub fn with_via_mappings(mut self, via: HashMap<String, String>) -> Self {
+        #[allow(deprecated)]
+        {
+            self.client = self.client.with_via_mappings(via);
+        }
+        self
     }
 }

@@ -223,6 +223,13 @@ pub async fn cmd_crawl(settings: &Settings, source_id: &str, _limit: usize) -> a
         refresh_ttl_days,
     );
 
+    // Apply via mappings for caching proxy support if configured
+    let scraper = if !config.via.is_empty() {
+        scraper.with_via_config(config.via.clone(), config.via_mode)
+    } else {
+        scraper
+    };
+
     let pb = ProgressBar::new_spinner();
     pb.set_style(
         ProgressStyle::default_spinner()

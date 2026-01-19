@@ -67,6 +67,8 @@ impl DownloadService {
             let timeout = self.config.request_timeout;
             let delay = self.config.request_delay;
             let privacy = self.config.privacy.clone();
+            let via = self.config.via.clone();
+            let via_mode = self.config.via_mode;
             let source_id = source_id.map(|s| s.to_string());
             let downloaded = downloaded.clone();
             let deduplicated = deduplicated.clone();
@@ -83,6 +85,13 @@ impl DownloadService {
                             return;
                         }
                     };
+
+                // Apply via mappings for caching proxy support
+                let client = if !via.is_empty() {
+                    client.with_via_config(via, via_mode)
+                } else {
+                    client
+                };
 
                 loop {
                     // Check limit

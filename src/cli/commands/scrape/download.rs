@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use console::style;
 
-use crate::config::Settings;
+use crate::config::{Config, Settings};
 use crate::privacy::PrivacyConfig;
 use crate::repository::diesel_context::DieselDbContext;
 
@@ -50,6 +50,9 @@ pub async fn cmd_download(
         initial_pending
     );
 
+    // Load config for via mappings
+    let config = Config::load().await;
+
     // Create service
     let service = DownloadService::new(
         doc_repo,
@@ -59,6 +62,8 @@ pub async fn cmd_download(
             request_timeout: Duration::from_secs(settings.request_timeout),
             request_delay: Duration::from_millis(settings.request_delay_ms),
             privacy: privacy_config.clone(),
+            via: config.via,
+            via_mode: config.via_mode,
         },
     );
 

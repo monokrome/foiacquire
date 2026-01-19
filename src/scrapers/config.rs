@@ -13,6 +13,36 @@ use super::browser::{
 use crate::discovery::config::ExternalDiscoveryConfig;
 use crate::privacy::SourcePrivacyConfig;
 
+/// Via proxy mode - controls how URL rewriting through caching proxies works.
+///
+/// Via mappings rewrite URLs to fetch through CDN/caching proxies (e.g., Cloudflare).
+/// This setting controls when those proxies are used.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ViaMode {
+    /// Never send requests over via proxy. Via mappings are only used for
+    /// URL normalization/detection (e.g., recognizing Google Drive URLs).
+    #[default]
+    Strict,
+    /// Use via proxy as fallback when rate limited (429/503).
+    /// Primary requests go to the original URL.
+    Fallback,
+    /// Use via proxy as primary, fall back to original URL on failure.
+    Priority,
+}
+
+impl ViaMode {
+    /// Check if this mode allows using via for requests (not just detection).
+    pub fn allows_via_requests(&self) -> bool {
+        !matches!(self, ViaMode::Strict)
+    }
+
+    /// Check if via should be tried first (priority mode).
+    pub fn via_first(&self) -> bool {
+        matches!(self, ViaMode::Priority)
+    }
+}
+
 /// Scraper configuration from JSON.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScraperConfig {
