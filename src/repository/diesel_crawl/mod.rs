@@ -28,31 +28,75 @@ use super::pool::DbPool;
 use super::{parse_datetime, parse_datetime_opt};
 use crate::models::{CrawlRequest, CrawlUrl, DiscoveryMethod, UrlStatus};
 
+/// Common fields for crawl URL database records.
+trait CrawlUrlFields {
+    fn url(&self) -> &str;
+    fn source_id(&self) -> &str;
+    fn status(&self) -> &str;
+    fn discovery_method(&self) -> &str;
+    fn parent_url(&self) -> Option<&str>;
+    fn discovery_context(&self) -> &str;
+    fn depth(&self) -> i32;
+    fn discovered_at(&self) -> &str;
+    fn fetched_at(&self) -> Option<&str>;
+    fn retry_count(&self) -> i32;
+    fn last_error(&self) -> Option<&str>;
+    fn next_retry_at(&self) -> Option<&str>;
+    fn etag(&self) -> Option<&str>;
+    fn last_modified(&self) -> Option<&str>;
+    fn content_hash(&self) -> Option<&str>;
+    fn document_id(&self) -> Option<&str>;
+}
+
+/// Convert any crawl URL record to a CrawlUrl model.
+fn crawl_url_from_record<T: CrawlUrlFields>(record: &T) -> CrawlUrl {
+    let discovery_context: HashMap<String, serde_json::Value> =
+        serde_json::from_str(record.discovery_context()).unwrap_or_default();
+
+    CrawlUrl {
+        url: record.url().to_string(),
+        source_id: record.source_id().to_string(),
+        status: UrlStatus::from_str(record.status()).unwrap_or(UrlStatus::Discovered),
+        discovery_method: DiscoveryMethod::from_str(record.discovery_method())
+            .unwrap_or(DiscoveryMethod::Seed),
+        parent_url: record.parent_url().map(ToString::to_string),
+        discovery_context,
+        depth: record.depth() as u32,
+        discovered_at: parse_datetime(record.discovered_at()),
+        fetched_at: record.fetched_at().map(parse_datetime),
+        retry_count: record.retry_count() as u32,
+        last_error: record.last_error().map(ToString::to_string),
+        next_retry_at: record.next_retry_at().map(parse_datetime),
+        etag: record.etag().map(ToString::to_string),
+        last_modified: record.last_modified().map(ToString::to_string),
+        content_hash: record.content_hash().map(ToString::to_string),
+        document_id: record.document_id().map(ToString::to_string),
+    }
+}
+
+impl CrawlUrlFields for CrawlUrlRecord {
+    fn url(&self) -> &str { &self.url }
+    fn source_id(&self) -> &str { &self.source_id }
+    fn status(&self) -> &str { &self.status }
+    fn discovery_method(&self) -> &str { &self.discovery_method }
+    fn parent_url(&self) -> Option<&str> { self.parent_url.as_deref() }
+    fn discovery_context(&self) -> &str { &self.discovery_context }
+    fn depth(&self) -> i32 { self.depth }
+    fn discovered_at(&self) -> &str { &self.discovered_at }
+    fn fetched_at(&self) -> Option<&str> { self.fetched_at.as_deref() }
+    fn retry_count(&self) -> i32 { self.retry_count }
+    fn last_error(&self) -> Option<&str> { self.last_error.as_deref() }
+    fn next_retry_at(&self) -> Option<&str> { self.next_retry_at.as_deref() }
+    fn etag(&self) -> Option<&str> { self.etag.as_deref() }
+    fn last_modified(&self) -> Option<&str> { self.last_modified.as_deref() }
+    fn content_hash(&self) -> Option<&str> { self.content_hash.as_deref() }
+    fn document_id(&self) -> Option<&str> { self.document_id.as_deref() }
+}
+
 /// Convert a database record to a domain model.
 impl From<CrawlUrlRecord> for CrawlUrl {
     fn from(record: CrawlUrlRecord) -> Self {
-        let discovery_context: HashMap<String, serde_json::Value> =
-            serde_json::from_str(&record.discovery_context).unwrap_or_default();
-
-        CrawlUrl {
-            url: record.url,
-            source_id: record.source_id,
-            status: UrlStatus::from_str(&record.status).unwrap_or(UrlStatus::Discovered),
-            discovery_method: DiscoveryMethod::from_str(&record.discovery_method)
-                .unwrap_or(DiscoveryMethod::Seed),
-            parent_url: record.parent_url,
-            discovery_context,
-            depth: record.depth as u32,
-            discovered_at: parse_datetime(&record.discovered_at),
-            fetched_at: parse_datetime_opt(record.fetched_at),
-            retry_count: record.retry_count as u32,
-            last_error: record.last_error,
-            next_retry_at: parse_datetime_opt(record.next_retry_at),
-            etag: record.etag,
-            last_modified: record.last_modified,
-            content_hash: record.content_hash,
-            document_id: record.document_id,
-        }
+        crawl_url_from_record(&record)
     }
 }
 
@@ -200,30 +244,28 @@ pub(crate) struct CrawlUrlRecordRaw {
     pub document_id: Option<String>,
 }
 
+impl CrawlUrlFields for CrawlUrlRecordRaw {
+    fn url(&self) -> &str { &self.url }
+    fn source_id(&self) -> &str { &self.source_id }
+    fn status(&self) -> &str { &self.status }
+    fn discovery_method(&self) -> &str { &self.discovery_method }
+    fn parent_url(&self) -> Option<&str> { self.parent_url.as_deref() }
+    fn discovery_context(&self) -> &str { &self.discovery_context }
+    fn depth(&self) -> i32 { self.depth }
+    fn discovered_at(&self) -> &str { &self.discovered_at }
+    fn fetched_at(&self) -> Option<&str> { self.fetched_at.as_deref() }
+    fn retry_count(&self) -> i32 { self.retry_count }
+    fn last_error(&self) -> Option<&str> { self.last_error.as_deref() }
+    fn next_retry_at(&self) -> Option<&str> { self.next_retry_at.as_deref() }
+    fn etag(&self) -> Option<&str> { self.etag.as_deref() }
+    fn last_modified(&self) -> Option<&str> { self.last_modified.as_deref() }
+    fn content_hash(&self) -> Option<&str> { self.content_hash.as_deref() }
+    fn document_id(&self) -> Option<&str> { self.document_id.as_deref() }
+}
+
 impl From<CrawlUrlRecordRaw> for CrawlUrl {
     fn from(record: CrawlUrlRecordRaw) -> Self {
-        let discovery_context: HashMap<String, serde_json::Value> =
-            serde_json::from_str(&record.discovery_context).unwrap_or_default();
-
-        CrawlUrl {
-            url: record.url,
-            source_id: record.source_id,
-            status: UrlStatus::from_str(&record.status).unwrap_or(UrlStatus::Discovered),
-            discovery_method: DiscoveryMethod::from_str(&record.discovery_method)
-                .unwrap_or(DiscoveryMethod::Seed),
-            parent_url: record.parent_url,
-            discovery_context,
-            depth: record.depth as u32,
-            discovered_at: parse_datetime(&record.discovered_at),
-            fetched_at: parse_datetime_opt(record.fetched_at),
-            retry_count: record.retry_count as u32,
-            last_error: record.last_error,
-            next_retry_at: parse_datetime_opt(record.next_retry_at),
-            etag: record.etag,
-            last_modified: record.last_modified,
-            content_hash: record.content_hash,
-            document_id: record.document_id,
-        }
+        crawl_url_from_record(&record)
     }
 }
 

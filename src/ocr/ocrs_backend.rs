@@ -6,13 +6,16 @@
 //! Models are automatically downloaded on first use from:
 //! https://ocrs-models.s3-accelerate.amazonaws.com/
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::OnceLock;
 use std::time::Instant;
 use tempfile::TempDir;
 
 use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError, OcrResult};
-use super::model_utils::{ensure_model_file, ModelDirConfig, ModelSpec};
+use super::model_utils::{
+    build_ocr_result, ensure_models_present, find_model_dir, model_availability_hint,
+    ModelDirConfig, ModelSpec,
+};
 use super::pdf_utils;
 
 /// Global cached OcrEngine instance (initialized once, reused for all OCR calls).
@@ -57,35 +60,13 @@ impl OcrsBackend {
         Self { config }
     }
 
-    /// Find the model directory, checking config path and standard locations.
-    fn find_model_dir(&self) -> Option<PathBuf> {
-        // Check config path first
-        if let Some(ref path) = self.config.model_path {
-            if MODEL_CONFIG.has_required_files(path) {
-                return Some(path.clone());
-            }
-        }
-
-        // Check standard locations
-        MODEL_CONFIG
-            .candidate_dirs()
-            .into_iter()
-            .find(|dir| MODEL_CONFIG.has_required_files(dir))
-    }
-
     /// Ensure models are downloaded, downloading them if necessary.
-    fn ensure_models(&self) -> Result<PathBuf, OcrError> {
-        if let Some(dir) = self.find_model_dir() {
-            return Ok(dir);
-        }
-
-        let model_dir = MODEL_CONFIG.default_dir();
-        std::fs::create_dir_all(&model_dir).map_err(OcrError::Io)?;
-
-        ensure_model_file(&DETECTION_MODEL, &model_dir)?;
-        ensure_model_file(&RECOGNITION_MODEL, &model_dir)?;
-
-        Ok(model_dir)
+    fn ensure_models(&self) -> Result<std::path::PathBuf, OcrError> {
+        ensure_models_present(
+            self.config.model_path.as_ref(),
+            &MODEL_CONFIG,
+            &[&DETECTION_MODEL, &RECOGNITION_MODEL],
+        )
     }
 
     /// Get or initialize the cached OCR engine.
@@ -170,46 +151,25 @@ impl OcrBackend for OcrsBackend {
     }
 
     fn availability_hint(&self) -> String {
-        match self.find_model_dir() {
-            Some(path) => format!("OCRS models found at {:?}", path),
-            None => {
-                format!(
-                    "OCRS models will be auto-downloaded on first use (~12 MB total) to {:?}",
-                    MODEL_CONFIG.default_dir()
-                )
-            }
-        }
+        model_availability_hint(
+            self.config.model_path.as_ref(),
+            &MODEL_CONFIG,
+            "OCRS",
+            "12 MB",
+        )
     }
 
     fn ocr_image(&self, image_path: &Path) -> Result<OcrResult, OcrError> {
         let start = Instant::now();
         let text = self.run_ocrs(image_path)?;
-        let elapsed = start.elapsed();
-
-        Ok(OcrResult {
-            text,
-            confidence: None,
-            backend: OcrBackendType::Ocrs,
-            processing_time_ms: elapsed.as_millis() as u64,
-        })
+        Ok(build_ocr_result(text, OcrBackendType::Ocrs, start))
     }
 
     fn ocr_pdf_page(&self, pdf_path: &Path, page: u32) -> Result<OcrResult, OcrError> {
         let start = Instant::now();
-
-        // Create temp directory for the image
         let temp_dir = TempDir::new()?;
         let image_path = pdf_utils::pdf_page_to_image(pdf_path, page, temp_dir.path())?;
-
-        // Run OCR on the image
         let text = self.run_ocrs(&image_path)?;
-        let elapsed = start.elapsed();
-
-        Ok(OcrResult {
-            text,
-            confidence: None,
-            backend: OcrBackendType::Ocrs,
-            processing_time_ms: elapsed.as_millis() as u64,
-        })
+        Ok(build_ocr_result(text, OcrBackendType::Ocrs, start))
     }
 }

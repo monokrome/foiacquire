@@ -116,30 +116,24 @@ pub struct ServiceStatus {
 impl ServiceStatus {
     /// Create a new scraper status.
     pub fn new_scraper(source_id: &str) -> Self {
-        Self {
-            id: format!("scraper:{}", source_id),
-            service_type: ServiceType::Scraper,
-            source_id: Some(source_id.to_string()),
-            status: ServiceState::Starting,
-            last_heartbeat: Utc::now(),
-            last_activity: None,
-            current_task: None,
-            stats: serde_json::json!({}),
-            started_at: Utc::now(),
-            host: get_hostname(),
-            version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            last_error: None,
-            last_error_at: None,
-            error_count: 0,
-        }
+        Self::new_service(
+            format!("scraper:{}", source_id),
+            ServiceType::Scraper,
+            Some(source_id.to_string()),
+        )
     }
 
     /// Create a new server status.
     pub fn new_server() -> Self {
+        Self::new_service("server:main".to_string(), ServiceType::Server, None)
+    }
+
+    /// Create a new service status with the given parameters.
+    fn new_service(id: String, service_type: ServiceType, source_id: Option<String>) -> Self {
         Self {
-            id: "server:main".to_string(),
-            service_type: ServiceType::Server,
-            source_id: None,
+            id,
+            service_type,
+            source_id,
             status: ServiceState::Starting,
             last_heartbeat: Utc::now(),
             last_activity: None,

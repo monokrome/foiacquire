@@ -13,12 +13,15 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::cli::helpers::content_storage_path_with_name;
-use crate::models::{Document, DocumentVersion, UrlStatus};
+use crate::models::{DocumentVersion, UrlStatus};
 use crate::repository::{extract_filename_parts, DieselCrawlRepository, DieselDocumentRepository};
 use crate::scrapers::{extract_title_from_url, HttpClient};
 use crate::services::youtube;
 
 pub use types::{DownloadConfig, DownloadEvent, DownloadResult};
+use types::{
+    handle_download_failure, handle_unchanged, save_or_update_document, send_failure_event,
+};
 use youtube_download::download_youtube_video;
 
 /// Service for downloading documents from the crawl queue.
@@ -162,49 +165,37 @@ impl DownloadService {
                     {
                         Ok(r) => r,
                         Err(e) => {
-                            let mut failed_url = crawl_url.clone();
-                            failed_url.status = UrlStatus::Failed;
-                            failed_url.last_error = Some(e.to_string());
-                            failed_url.retry_count += 1;
-                            let _ = crawl_repo.update_url(&failed_url).await;
-                            failed.fetch_add(1, Ordering::Relaxed);
-                            let _ = event_tx
-                                .send(DownloadEvent::Failed {
-                                    worker_id,
-                                    url,
-                                    error: e.to_string(),
-                                })
-                                .await;
+                            handle_download_failure(
+                                &crawl_url,
+                                &crawl_repo,
+                                &failed,
+                                &event_tx,
+                                worker_id,
+                                &e.to_string(),
+                                true,
+                            )
+                            .await;
                             continue;
                         }
                     };
 
                     if response.is_not_modified() {
-                        let mut fetched_url = crawl_url.clone();
-                        fetched_url.status = UrlStatus::Fetched;
-                        fetched_url.fetched_at = Some(chrono::Utc::now());
-                        let _ = crawl_repo.update_url(&fetched_url).await;
-                        skipped.fetch_add(1, Ordering::Relaxed);
-                        let _ = event_tx
-                            .send(DownloadEvent::Unchanged { worker_id, url })
+                        handle_unchanged(&crawl_url, &crawl_repo, &skipped, &event_tx, worker_id)
                             .await;
                         continue;
                     }
 
                     if !response.is_success() {
-                        let mut failed_url = crawl_url.clone();
-                        failed_url.status = UrlStatus::Failed;
-                        failed_url.last_error = Some(format!("HTTP {}", response.status));
-                        failed_url.retry_count += 1;
-                        let _ = crawl_repo.update_url(&failed_url).await;
-                        failed.fetch_add(1, Ordering::Relaxed);
-                        let _ = event_tx
-                            .send(DownloadEvent::Failed {
-                                worker_id,
-                                url,
-                                error: format!("HTTP {}", response.status),
-                            })
-                            .await;
+                        handle_download_failure(
+                            &crawl_url,
+                            &crawl_repo,
+                            &failed,
+                            &event_tx,
+                            worker_id,
+                            &format!("HTTP {}", response.status),
+                            true,
+                        )
+                        .await;
                         continue;
                     }
 
@@ -228,18 +219,16 @@ impl DownloadService {
                     let content = match response.bytes().await {
                         Ok(b) => b,
                         Err(e) => {
-                            let mut failed_url = crawl_url.clone();
-                            failed_url.status = UrlStatus::Failed;
-                            failed_url.last_error = Some(e.to_string());
-                            let _ = crawl_repo.update_url(&failed_url).await;
-                            failed.fetch_add(1, Ordering::Relaxed);
-                            let _ = event_tx
-                                .send(DownloadEvent::Failed {
-                                    worker_id,
-                                    url,
-                                    error: e.to_string(),
-                                })
-                                .await;
+                            handle_download_failure(
+                                &crawl_url,
+                                &crawl_repo,
+                                &failed,
+                                &event_tx,
+                                worker_id,
+                                &e.to_string(),
+                                false,
+                            )
+                            .await;
                             continue;
                         }
                     };
@@ -287,26 +276,12 @@ impl DownloadService {
                             if let Err(e) =
                                 tokio::fs::create_dir_all(new_path.parent().unwrap()).await
                             {
-                                failed.fetch_add(1, Ordering::Relaxed);
-                                let _ = event_tx
-                                    .send(DownloadEvent::Failed {
-                                        worker_id,
-                                        url,
-                                        error: e.to_string(),
-                                    })
-                                    .await;
+                                send_failure_event(&url, &failed, &event_tx, worker_id, &e.to_string()).await;
                                 continue;
                             }
 
                             if let Err(e) = tokio::fs::write(&new_path, &content).await {
-                                failed.fetch_add(1, Ordering::Relaxed);
-                                let _ = event_tx
-                                    .send(DownloadEvent::Failed {
-                                        worker_id,
-                                        url,
-                                        error: e.to_string(),
-                                    })
-                                    .await;
+                                send_failure_event(&url, &failed, &event_tx, worker_id, &e.to_string()).await;
                                 continue;
                             }
                             (new_path, false)
@@ -323,30 +298,17 @@ impl DownloadService {
                         server_date,
                     );
 
-                    // Check for existing document
-                    let existing = doc_repo
-                        .get_by_url(&url)
-                        .await
-                        .ok()
-                        .and_then(|v| v.into_iter().next());
-                    let new_document = existing.is_none();
-
-                    if let Some(mut doc) = existing {
-                        if doc.add_version(version) {
-                            let _ = doc_repo.save(&doc).await;
-                        }
-                    } else {
-                        let doc = Document::with_discovery_method(
-                            uuid::Uuid::new_v4().to_string(),
-                            crawl_url.source_id.clone(),
-                            title,
-                            url.clone(),
-                            version,
-                            serde_json::json!({}),
-                            "crawl".to_string(),
-                        );
-                        let _ = doc_repo.save(&doc).await;
-                    }
+                    // Save or update document
+                    let new_document = save_or_update_document(
+                        &doc_repo,
+                        &url,
+                        &crawl_url.source_id,
+                        title,
+                        version,
+                        serde_json::json!({}),
+                        "crawl",
+                    )
+                    .await;
 
                     // Mark URL as fetched
                     let mut fetched_url = crawl_url.clone();

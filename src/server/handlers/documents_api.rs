@@ -9,6 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use super::super::AppState;
+use super::helpers::{paginate, parse_csv_param};
 use crate::repository::diesel_document::BrowseParams;
 
 /// Query parameters for document search/listing.
@@ -77,31 +78,9 @@ pub async fn list_documents(
     State(state): State<AppState>,
     Query(params): Query<DocumentsQuery>,
 ) -> impl IntoResponse {
-    let per_page = params.per_page.unwrap_or(50).clamp(1, 200);
-    let page = params.page.unwrap_or(1).clamp(1, 100_000);
-    let offset = page.saturating_sub(1) * per_page;
-
-    let types: Vec<String> = params
-        .types
-        .as_ref()
-        .map(|t| {
-            t.split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let tags: Vec<String> = params
-        .tags
-        .as_ref()
-        .map(|t| {
-            t.split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
+    let (page, per_page, offset) = paginate(params.page, params.per_page);
+    let types = parse_csv_param(params.types.as_ref());
+    let tags = parse_csv_param(params.tags.as_ref());
 
     // Get documents with filters
     let documents = match state

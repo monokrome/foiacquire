@@ -7,11 +7,11 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
-use crate::models::{CrawlUrl, Document, DocumentVersion, UrlStatus};
+use crate::models::{CrawlUrl, DocumentVersion, UrlStatus};
 use crate::repository::{DieselCrawlRepository, DieselDocumentRepository};
 use crate::services::youtube;
 
-use super::types::DownloadEvent;
+use super::types::{handle_download_failure, save_or_update_document, DownloadEvent};
 
 /// Download a YouTube video and store it as a document.
 /// Returns true if handled (success or failure), false if should fall back to HTTP.
@@ -40,18 +40,16 @@ pub async fn download_youtube_video(
                 Ok(c) => c,
                 Err(e) => {
                     warn!("Failed to read downloaded video: {}", e);
-                    let mut failed_url = crawl_url.clone();
-                    failed_url.status = UrlStatus::Failed;
-                    failed_url.last_error = Some(format!("Failed to read video: {}", e));
-                    let _ = crawl_repo.update_url(&failed_url).await;
-                    failed.fetch_add(1, Ordering::Relaxed);
-                    let _ = event_tx
-                        .send(DownloadEvent::Failed {
-                            worker_id,
-                            url: url.to_string(),
-                            error: e.to_string(),
-                        })
-                        .await;
+                    handle_download_failure(
+                        crawl_url,
+                        crawl_repo,
+                        failed,
+                        event_tx,
+                        worker_id,
+                        &format!("Failed to read video: {}", e),
+                        false,
+                    )
+                    .await;
                     return true;
                 }
             };
@@ -95,30 +93,17 @@ pub async fn download_youtube_video(
                 metadata["description"] = serde_json::Value::String(desc.clone());
             }
 
-            // Check for existing document
-            let existing = doc_repo
-                .get_by_url(url)
-                .await
-                .ok()
-                .and_then(|v| v.into_iter().next());
-            let new_document = existing.is_none();
-
-            if let Some(mut doc) = existing {
-                if doc.add_version(version) {
-                    let _ = doc_repo.save(&doc).await;
-                }
-            } else {
-                let doc = Document::with_discovery_method(
-                    uuid::Uuid::new_v4().to_string(),
-                    crawl_url.source_id.clone(),
-                    yt_result.metadata.title.clone(),
-                    url.to_string(),
-                    version,
-                    metadata,
-                    "youtube".to_string(),
-                );
-                let _ = doc_repo.save(&doc).await;
-            }
+            // Save or update document
+            let new_document = save_or_update_document(
+                doc_repo,
+                url,
+                &crawl_url.source_id,
+                yt_result.metadata.title.clone(),
+                version,
+                metadata,
+                "youtube",
+            )
+            .await;
 
             // Mark URL as fetched
             let mut fetched_url = crawl_url.clone();
@@ -140,19 +125,16 @@ pub async fn download_youtube_video(
         }
         Err(e) => {
             warn!("YouTube download failed for {}: {}", url, e);
-            let mut failed_url = crawl_url.clone();
-            failed_url.status = UrlStatus::Failed;
-            failed_url.last_error = Some(format!("yt-dlp: {}", e));
-            failed_url.retry_count += 1;
-            let _ = crawl_repo.update_url(&failed_url).await;
-            failed.fetch_add(1, Ordering::Relaxed);
-            let _ = event_tx
-                .send(DownloadEvent::Failed {
-                    worker_id,
-                    url: url.to_string(),
-                    error: format!("yt-dlp: {}", e),
-                })
-                .await;
+            handle_download_failure(
+                crawl_url,
+                crawl_repo,
+                failed,
+                event_tx,
+                worker_id,
+                &format!("yt-dlp: {}", e),
+                true,
+            )
+            .await;
             true
         }
     }

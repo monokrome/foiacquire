@@ -13,6 +13,7 @@ use super::super::template_structs::{
     TagWithCount,
 };
 use super::super::AppState;
+use super::helpers::{paginate, parse_csv_param_limit};
 use crate::utils::MimeCategory;
 
 /// Query params for the unified browse page.
@@ -31,32 +32,9 @@ pub async fn browse_documents(
     State(state): State<AppState>,
     Query(params): Query<BrowseParams>,
 ) -> impl IntoResponse {
-    let per_page = params.per_page.unwrap_or(50).clamp(1, 200);
-    let page = params.page.unwrap_or(1).clamp(1, 100_000);
-
-    let types: Vec<String> = params
-        .types
-        .as_ref()
-        .map(|t| {
-            t.split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .take(20)
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let tags: Vec<String> = params
-        .tags
-        .as_ref()
-        .map(|t| {
-            t.split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .take(50)
-                .collect()
-        })
-        .unwrap_or_default();
+    let (page, per_page, _offset) = paginate(params.page, params.per_page);
+    let types = parse_csv_param_limit(params.types.as_ref(), Some(20));
+    let tags = parse_csv_param_limit(params.tags.as_ref(), Some(50));
 
     let (cached_total, skip_count) = if types.is_empty() && tags.is_empty() && params.q.is_none() {
         let count = if let Some(source_id) = params.source.as_deref() {

@@ -2,9 +2,15 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
+use tokio::sync::mpsc;
+
+use crate::models::{CrawlUrl, Document, DocumentVersion, UrlStatus};
 use crate::privacy::PrivacyConfig;
+use crate::repository::{DieselCrawlRepository, DieselDocumentRepository};
 use crate::scrapers::ViaMode;
 
 /// Events emitted during download operations.
@@ -69,4 +75,109 @@ pub struct DownloadConfig {
     pub via: HashMap<String, String>,
     /// Via mode controlling when via mappings are used.
     pub via_mode: ViaMode,
+}
+
+/// Handle a download failure: update status, increment counter, send event.
+pub async fn handle_download_failure(
+    crawl_url: &CrawlUrl,
+    crawl_repo: &Arc<DieselCrawlRepository>,
+    failed: &Arc<AtomicUsize>,
+    event_tx: &mpsc::Sender<DownloadEvent>,
+    worker_id: usize,
+    error: &str,
+    increment_retry: bool,
+) {
+    let mut failed_url = crawl_url.clone();
+    failed_url.status = UrlStatus::Failed;
+    failed_url.last_error = Some(error.to_string());
+    if increment_retry {
+        failed_url.retry_count += 1;
+    }
+    let _ = crawl_repo.update_url(&failed_url).await;
+    failed.fetch_add(1, Ordering::Relaxed);
+    let _ = event_tx
+        .send(DownloadEvent::Failed {
+            worker_id,
+            url: crawl_url.url.clone(),
+            error: error.to_string(),
+        })
+        .await;
+}
+
+/// Send a failure event without updating crawl status (for local errors like IO).
+pub async fn send_failure_event(
+    url: &str,
+    failed: &Arc<AtomicUsize>,
+    event_tx: &mpsc::Sender<DownloadEvent>,
+    worker_id: usize,
+    error: &str,
+) {
+    failed.fetch_add(1, Ordering::Relaxed);
+    let _ = event_tx
+        .send(DownloadEvent::Failed {
+            worker_id,
+            url: url.to_string(),
+            error: error.to_string(),
+        })
+        .await;
+}
+
+/// Mark a URL as unchanged (304 Not Modified).
+pub async fn handle_unchanged(
+    crawl_url: &CrawlUrl,
+    crawl_repo: &Arc<DieselCrawlRepository>,
+    skipped: &Arc<AtomicUsize>,
+    event_tx: &mpsc::Sender<DownloadEvent>,
+    worker_id: usize,
+) {
+    let mut fetched_url = crawl_url.clone();
+    fetched_url.status = UrlStatus::Fetched;
+    fetched_url.fetched_at = Some(chrono::Utc::now());
+    let _ = crawl_repo.update_url(&fetched_url).await;
+    skipped.fetch_add(1, Ordering::Relaxed);
+    let _ = event_tx
+        .send(DownloadEvent::Unchanged {
+            worker_id,
+            url: crawl_url.url.clone(),
+        })
+        .await;
+}
+
+/// Save a document version, either adding to existing document or creating new.
+/// Returns whether this created a new document.
+#[allow(clippy::too_many_arguments)]
+pub async fn save_or_update_document(
+    doc_repo: &Arc<DieselDocumentRepository>,
+    url: &str,
+    source_id: &str,
+    title: String,
+    version: DocumentVersion,
+    metadata: serde_json::Value,
+    discovery_method: &str,
+) -> bool {
+    let existing = doc_repo
+        .get_by_url(url)
+        .await
+        .ok()
+        .and_then(|v| v.into_iter().next());
+    let new_document = existing.is_none();
+
+    if let Some(mut doc) = existing {
+        if doc.add_version(version) {
+            let _ = doc_repo.save(&doc).await;
+        }
+    } else {
+        let doc = Document::with_discovery_method(
+            uuid::Uuid::new_v4().to_string(),
+            source_id.to_string(),
+            title,
+            url.to_string(),
+            version,
+            metadata,
+            discovery_method.to_string(),
+        );
+        let _ = doc_repo.save(&doc).await;
+    }
+
+    new_document
 }

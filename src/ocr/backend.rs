@@ -180,36 +180,39 @@ impl OcrManager {
             .map(|b| b.as_ref())
     }
 
-    /// Run OCR using the primary backend.
-    pub fn ocr_image(&self, image_path: &Path) -> Result<OcrResult, OcrError> {
+    /// Get the primary backend, validated and ready to use.
+    fn get_ready_primary(&self) -> Result<&dyn OcrBackend, OcrError> {
         let backend = self.primary().ok_or_else(|| {
             OcrError::BackendNotAvailable(format!(
                 "Primary backend {:?} not registered",
                 self.primary
             ))
         })?;
-
         if !backend.is_available() {
             return Err(OcrError::BackendNotAvailable(backend.availability_hint()));
         }
+        Ok(backend)
+    }
 
-        backend.ocr_image(image_path)
+    /// Get a specific backend, validated and ready to use.
+    fn get_ready_backend(&self, backend_type: OcrBackendType) -> Result<&dyn OcrBackend, OcrError> {
+        let backend = self.get(backend_type).ok_or_else(|| {
+            OcrError::BackendNotAvailable(format!("Backend {:?} not registered", backend_type))
+        })?;
+        if !backend.is_available() {
+            return Err(OcrError::BackendNotAvailable(backend.availability_hint()));
+        }
+        Ok(backend)
+    }
+
+    /// Run OCR using the primary backend.
+    pub fn ocr_image(&self, image_path: &Path) -> Result<OcrResult, OcrError> {
+        self.get_ready_primary()?.ocr_image(image_path)
     }
 
     /// Run OCR on a PDF page using the primary backend.
     pub fn ocr_pdf_page(&self, pdf_path: &Path, page: u32) -> Result<OcrResult, OcrError> {
-        let backend = self.primary().ok_or_else(|| {
-            OcrError::BackendNotAvailable(format!(
-                "Primary backend {:?} not registered",
-                self.primary
-            ))
-        })?;
-
-        if !backend.is_available() {
-            return Err(OcrError::BackendNotAvailable(backend.availability_hint()));
-        }
-
-        backend.ocr_pdf_page(pdf_path, page)
+        self.get_ready_primary()?.ocr_pdf_page(pdf_path, page)
     }
 
     /// Run OCR using a specific backend.
@@ -218,15 +221,7 @@ impl OcrManager {
         image_path: &Path,
         backend_type: OcrBackendType,
     ) -> Result<OcrResult, OcrError> {
-        let backend = self.get(backend_type).ok_or_else(|| {
-            OcrError::BackendNotAvailable(format!("Backend {:?} not registered", backend_type))
-        })?;
-
-        if !backend.is_available() {
-            return Err(OcrError::BackendNotAvailable(backend.availability_hint()));
-        }
-
-        backend.ocr_image(image_path)
+        self.get_ready_backend(backend_type)?.ocr_image(image_path)
     }
 
     /// Run OCR on a PDF page using a specific backend.
@@ -236,14 +231,7 @@ impl OcrManager {
         page: u32,
         backend_type: OcrBackendType,
     ) -> Result<OcrResult, OcrError> {
-        let backend = self.get(backend_type).ok_or_else(|| {
-            OcrError::BackendNotAvailable(format!("Backend {:?} not registered", backend_type))
-        })?;
-
-        if !backend.is_available() {
-            return Err(OcrError::BackendNotAvailable(backend.availability_hint()));
-        }
-
-        backend.ocr_pdf_page(pdf_path, page)
+        self.get_ready_backend(backend_type)?
+            .ocr_pdf_page(pdf_path, page)
     }
 }

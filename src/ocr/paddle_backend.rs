@@ -14,7 +14,9 @@ use tempfile::TempDir;
 use paddle_ocr_rs::ocr_lite::OcrLite;
 
 use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError, OcrResult};
-use super::model_utils::{ensure_model_file, ModelDirConfig, ModelSpec};
+use super::model_utils::{
+    build_ocr_result, ensure_models_present, model_availability_hint, ModelDirConfig, ModelSpec,
+};
 use super::pdf_utils;
 
 /// Global cached OcrLite instance (initialized once, reused for all OCR calls).
@@ -70,31 +72,31 @@ impl PaddleBackend {
         Self { config }
     }
 
-    /// Find the model directory, checking config path and standard locations.
+    /// Find model directory, checking config path, standard locations, and legacy names.
     fn find_model_dir(&self) -> Option<PathBuf> {
         // Check config path first
         if let Some(ref path) = self.config.model_path {
-            if MODEL_CONFIG.has_required_files(path) {
+            if MODEL_CONFIG.has_required_files(path) || Self::has_legacy_models(path) {
                 return Some(path.clone());
             }
         }
 
         // Check standard locations
         for candidate in MODEL_CONFIG.candidate_dirs() {
-            // Check for our standardized v4 model names first
-            if MODEL_CONFIG.has_required_files(&candidate) {
+            if MODEL_CONFIG.has_required_files(&candidate) || Self::has_legacy_models(&candidate) {
                 return Some(candidate);
-            }
-            // Also check legacy naming patterns
-            for version in ["v5", "v4", "v3"] {
-                let det_model = format!("ch_PP-OCR{}_mobile_det.onnx", version);
-                if candidate.join(&det_model).exists() {
-                    return Some(candidate);
-                }
             }
         }
 
         None
+    }
+
+    /// Check for legacy PaddleOCR model naming patterns.
+    fn has_legacy_models(dir: &Path) -> bool {
+        ["v5", "v4", "v3"].iter().any(|version| {
+            dir.join(format!("ch_PP-OCR{}_mobile_det.onnx", version))
+                .exists()
+        })
     }
 
     /// Ensure models are downloaded, downloading them if necessary.
@@ -103,14 +105,11 @@ impl PaddleBackend {
             return Ok(dir);
         }
 
-        let model_dir = MODEL_CONFIG.default_dir();
-        std::fs::create_dir_all(&model_dir).map_err(OcrError::Io)?;
-
-        ensure_model_file(&DET_MODEL, &model_dir)?;
-        ensure_model_file(&REC_MODEL, &model_dir)?;
-        ensure_model_file(&CLS_MODEL, &model_dir)?;
-
-        Ok(model_dir)
+        ensure_models_present(
+            self.config.model_path.as_ref(),
+            &MODEL_CONFIG,
+            &[&DET_MODEL, &REC_MODEL, &CLS_MODEL],
+        )
     }
 
     /// Find model files in the model directory.
@@ -223,44 +222,25 @@ impl OcrBackend for PaddleBackend {
     }
 
     fn availability_hint(&self) -> String {
-        match self.find_model_dir() {
-            Some(path) => format!("PaddleOCR models found at {:?}", path),
-            None => {
-                format!(
-                    "PaddleOCR models will be auto-downloaded on first use (~15 MB total) to {:?}",
-                    MODEL_CONFIG.default_dir()
-                )
-            }
-        }
+        model_availability_hint(
+            self.config.model_path.as_ref(),
+            &MODEL_CONFIG,
+            "PaddleOCR",
+            "15 MB",
+        )
     }
 
     fn ocr_image(&self, image_path: &Path) -> Result<OcrResult, OcrError> {
         let start = Instant::now();
         let text = self.run_paddle(image_path)?;
-        let elapsed = start.elapsed();
-
-        Ok(OcrResult {
-            text,
-            confidence: None,
-            backend: OcrBackendType::PaddleOcr,
-            processing_time_ms: elapsed.as_millis() as u64,
-        })
+        Ok(build_ocr_result(text, OcrBackendType::PaddleOcr, start))
     }
 
     fn ocr_pdf_page(&self, pdf_path: &Path, page: u32) -> Result<OcrResult, OcrError> {
         let start = Instant::now();
-
         let temp_dir = TempDir::new()?;
         let image_path = pdf_utils::pdf_page_to_image(pdf_path, page, temp_dir.path())?;
-
         let text = self.run_paddle(&image_path)?;
-        let elapsed = start.elapsed();
-
-        Ok(OcrResult {
-            text,
-            confidence: None,
-            backend: OcrBackendType::PaddleOcr,
-            processing_time_ms: elapsed.as_millis() as u64,
-        })
+        Ok(build_ocr_result(text, OcrBackendType::PaddleOcr, start))
     }
 }

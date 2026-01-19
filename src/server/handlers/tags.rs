@@ -64,27 +64,7 @@ pub async fn list_tag_documents(
 
     let doc_rows: Vec<DocumentRow> = documents
         .iter()
-        .filter_map(|doc| {
-            let version = doc.current_version()?;
-            let display_name = version
-                .original_filename
-                .clone()
-                .unwrap_or_else(|| doc.title.clone());
-
-            Some(
-                DocumentRow::new(
-                    doc.id.clone(),
-                    display_name,
-                    doc.source_id.clone(),
-                    version.mime_type.clone(),
-                    version.file_size,
-                    version.acquired_at,
-                    doc.synopsis.clone(),
-                    doc.tags.clone(),
-                )
-                .with_other_tags(&tag),
-            )
-        })
+        .filter_map(|doc| DocumentRow::from_document(doc).map(|row| row.with_other_tags(&tag)))
         .collect();
 
     let title = format!("Tag: {}", tag);
