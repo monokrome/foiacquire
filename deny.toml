@@ -5,7 +5,19 @@
 version = 2
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-ignore = []
+# Ignore unmaintained crate advisories for transitive dependencies
+# These are not security vulnerabilities, just maintenance status warnings
+ignore = [
+    # instant - transitive dep via lapin -> async-io -> futures-lite -> fastrand
+    # Recommended replacement (web-time) requires upstream updates
+    "RUSTSEC-2024-0384",
+    # paste - transitive dep via image -> rav1e, imageproc -> nalgebra -> simba
+    # Recommended replacement (pastey) requires upstream updates
+    "RUSTSEC-2024-0436",
+    # rustls-pemfile - transitive dep via lapin -> tcp-stream -> rustls-native-certs
+    # Recommended replacement (rustls-pki-types) requires upstream updates
+    "RUSTSEC-2025-0134",
+]
 
 [licenses]
 version = 2
