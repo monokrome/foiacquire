@@ -21,6 +21,5 @@ RUN if [ -n "$FEATURES" ]; then \
     fi \
     && strip target/release/foia
 
-# Output stage - just the binary for easy extraction
-FROM scratch AS export
-COPY --from=builder /build/target/release/foia /foia
+# Dummy command for container creation
+CMD ["true"]
