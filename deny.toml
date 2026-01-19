@@ -27,6 +27,9 @@ allow = [
     "Unlicense",
     # CDLA-Permissive-2.0 - used by webpki-roots (TLS CA certificates)
     "CDLA-Permissive-2.0",
+    # NCSA - University of Illinois/NCSA Open Source License (OSI approved, FSF Free)
+    # Used by libfuzzer-sys (transitive dep via image -> ravif -> rav1e)
+    "NCSA",
 ]
 confidence-threshold = 0.8
 
