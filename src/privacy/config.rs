@@ -424,7 +424,7 @@ pub struct PrivacyConfig {
     pub warning_delay: u64,
 
     /// Show Tor legality warning (default: true).
-    /// Can be disabled via `--no-tor-warning` or `FOIACQUIRE_NO_TOR_WARNING=1`.
+    /// Can be disabled via `--no-tor-warning`.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub tor_legal_warning: bool,
 
@@ -496,14 +496,6 @@ impl PrivacyConfig {
             .unwrap_or(false)
         {
             self.obfuscation = false;
-        }
-
-        // FOIACQUIRE_NO_TOR_WARNING=1 disables Tor legality warning
-        if env::var("FOIACQUIRE_NO_TOR_WARNING")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
-        {
-            self.tor_legal_warning = false;
         }
 
         // Apply hidden service env overrides
@@ -607,9 +599,7 @@ impl PrivacyConfig {
         eprintln!();
         eprintln!("Note: Tor may be illegal or monitored in some jurisdictions.");
         eprintln!("      Know your local laws before proceeding.");
-        eprintln!(
-            "      Disable this warning with --no-tor-warning or FOIACQUIRE_NO_TOR_WARNING=1"
-        );
+        eprintln!("      Disable this warning with --no-tor-warning");
         eprintln!();
     }
 
@@ -629,7 +619,14 @@ impl PrivacyConfig {
     /// Display mandatory security warning and countdown if insecure.
     /// The warning is always shown; the countdown can be adjusted with warning_delay.
     /// Set warning_delay to 0 to skip the countdown (warning still shown).
+    ///
+    /// When compiled with `unsafe-dev` feature, warnings are skipped entirely.
     pub async fn enforce_security_warning(&self) {
+        // Skip all warnings in unsafe-dev mode (for development only)
+        #[cfg(feature = "unsafe-dev")]
+        return;
+
+        #[cfg(not(feature = "unsafe-dev"))]
         match self.security_level() {
             SecurityLevel::Secure => {}
             SecurityLevel::NoObfuscation => {
@@ -656,6 +653,7 @@ impl PrivacyConfig {
     }
 
     /// Display a warning with configurable countdown.
+    #[cfg_attr(feature = "unsafe-dev", allow(dead_code))]
     async fn display_warning(&self, message: &str, details: &[&str]) {
         use std::io::{self, Write};
 
@@ -683,6 +681,7 @@ impl PrivacyConfig {
 
 /// Security level indicating how protected the user is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "unsafe-dev", allow(dead_code))]
 pub enum SecurityLevel {
     /// Fully secure: Tor with obfuscation or external proxy.
     Secure,

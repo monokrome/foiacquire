@@ -151,7 +151,7 @@ serde_yaml = "0.9.34"
 hostname = "0.4.2"
 
 [features]
-default = ["browser"]
+default = ["browser", "tor"]
 browser = ["chromiumoxide"]
 # Note: diesel-async/postgres enables diesel/postgres_backend (types only, no libpq/OpenSSL needed)
 postgres = ["diesel-async/postgres", "dep:tokio-postgres", "dep:futures-util", "dep:bytes"]
@@ -160,8 +160,12 @@ amqp-broker = ["lapin"]
 ocr-ocrs = ["ocrs", "rten", "rten-imageproc", "image"]
 ocr-paddle = ["paddle-ocr-rs", "image"]
 ocr-all = ["ocr-ocrs", "ocr-paddle"]
+# Tor/privacy features
+tor = ["embedded-tor"]
 # Embedded Tor via Arti for privacy-by-default networking
 embedded-tor = ["arti-client", "tor-rtcompat"]
+# Development only: skip security warnings and delays (NEVER use in production)
+unsafe-dev = []
 
 [profile.release]
 lto = true
