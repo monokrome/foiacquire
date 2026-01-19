@@ -22,4 +22,5 @@ dist/*
 !.git*
 !.env.example
 !.jscpd.json
+!.cargo/
 report/

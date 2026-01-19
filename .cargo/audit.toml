@@ -1,0 +1,21 @@
+# cargo-audit configuration for foiacquire
+# https://rustsec.org/advisories/
+
+[advisories]
+ignore = [
+    # RSA timing attack (Marvin Attack) - only affects embedded-tor feature
+    # which is disabled. We use C-Tor instead until arti updates to a fixed version.
+    "RUSTSEC-2023-0071",
+
+    # Unmaintained crate advisories (not security vulnerabilities)
+    # These are transitive dependencies that require upstream updates
+
+    # instant - transitive dep via lapin -> async-io -> futures-lite -> fastrand
+    "RUSTSEC-2024-0384",
+    # paste - transitive dep via image -> rav1e, imageproc -> nalgebra -> simba
+    "RUSTSEC-2024-0436",
+    # rustls-pemfile - transitive dep via lapin -> tcp-stream -> rustls-native-certs
+    "RUSTSEC-2025-0134",
+    # bincode - transitive dep, unmaintained but not a security issue
+    "RUSTSEC-2025-0141",
+]

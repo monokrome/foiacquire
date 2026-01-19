@@ -17,6 +17,9 @@ ignore = [
     # rustls-pemfile - transitive dep via lapin -> tcp-stream -> rustls-native-certs
     # Recommended replacement (rustls-pki-types) requires upstream updates
     "RUSTSEC-2025-0134",
+    # bincode - transitive dep, unmaintained but not a security issue
+    # Recommended replacement requires upstream updates
+    "RUSTSEC-2025-0141",
 ]
 
 [licenses]
