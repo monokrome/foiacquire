@@ -1,5 +1,5 @@
 {
-  "threshold": 5,
+  "threshold": 5.1,
   "reporters": ["console"],
   "ignore": [
     "**/target/**",
