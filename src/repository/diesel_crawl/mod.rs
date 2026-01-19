@@ -75,22 +75,54 @@ fn crawl_url_from_record<T: CrawlUrlFields>(record: &T) -> CrawlUrl {
 }
 
 impl CrawlUrlFields for CrawlUrlRecord {
-    fn url(&self) -> &str { &self.url }
-    fn source_id(&self) -> &str { &self.source_id }
-    fn status(&self) -> &str { &self.status }
-    fn discovery_method(&self) -> &str { &self.discovery_method }
-    fn parent_url(&self) -> Option<&str> { self.parent_url.as_deref() }
-    fn discovery_context(&self) -> &str { &self.discovery_context }
-    fn depth(&self) -> i32 { self.depth }
-    fn discovered_at(&self) -> &str { &self.discovered_at }
-    fn fetched_at(&self) -> Option<&str> { self.fetched_at.as_deref() }
-    fn retry_count(&self) -> i32 { self.retry_count }
-    fn last_error(&self) -> Option<&str> { self.last_error.as_deref() }
-    fn next_retry_at(&self) -> Option<&str> { self.next_retry_at.as_deref() }
-    fn etag(&self) -> Option<&str> { self.etag.as_deref() }
-    fn last_modified(&self) -> Option<&str> { self.last_modified.as_deref() }
-    fn content_hash(&self) -> Option<&str> { self.content_hash.as_deref() }
-    fn document_id(&self) -> Option<&str> { self.document_id.as_deref() }
+    fn url(&self) -> &str {
+        &self.url
+    }
+    fn source_id(&self) -> &str {
+        &self.source_id
+    }
+    fn status(&self) -> &str {
+        &self.status
+    }
+    fn discovery_method(&self) -> &str {
+        &self.discovery_method
+    }
+    fn parent_url(&self) -> Option<&str> {
+        self.parent_url.as_deref()
+    }
+    fn discovery_context(&self) -> &str {
+        &self.discovery_context
+    }
+    fn depth(&self) -> i32 {
+        self.depth
+    }
+    fn discovered_at(&self) -> &str {
+        &self.discovered_at
+    }
+    fn fetched_at(&self) -> Option<&str> {
+        self.fetched_at.as_deref()
+    }
+    fn retry_count(&self) -> i32 {
+        self.retry_count
+    }
+    fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
+    }
+    fn next_retry_at(&self) -> Option<&str> {
+        self.next_retry_at.as_deref()
+    }
+    fn etag(&self) -> Option<&str> {
+        self.etag.as_deref()
+    }
+    fn last_modified(&self) -> Option<&str> {
+        self.last_modified.as_deref()
+    }
+    fn content_hash(&self) -> Option<&str> {
+        self.content_hash.as_deref()
+    }
+    fn document_id(&self) -> Option<&str> {
+        self.document_id.as_deref()
+    }
 }
 
 /// Convert a database record to a domain model.
@@ -245,22 +277,54 @@ pub(crate) struct CrawlUrlRecordRaw {
 }
 
 impl CrawlUrlFields for CrawlUrlRecordRaw {
-    fn url(&self) -> &str { &self.url }
-    fn source_id(&self) -> &str { &self.source_id }
-    fn status(&self) -> &str { &self.status }
-    fn discovery_method(&self) -> &str { &self.discovery_method }
-    fn parent_url(&self) -> Option<&str> { self.parent_url.as_deref() }
-    fn discovery_context(&self) -> &str { &self.discovery_context }
-    fn depth(&self) -> i32 { self.depth }
-    fn discovered_at(&self) -> &str { &self.discovered_at }
-    fn fetched_at(&self) -> Option<&str> { self.fetched_at.as_deref() }
-    fn retry_count(&self) -> i32 { self.retry_count }
-    fn last_error(&self) -> Option<&str> { self.last_error.as_deref() }
-    fn next_retry_at(&self) -> Option<&str> { self.next_retry_at.as_deref() }
-    fn etag(&self) -> Option<&str> { self.etag.as_deref() }
-    fn last_modified(&self) -> Option<&str> { self.last_modified.as_deref() }
-    fn content_hash(&self) -> Option<&str> { self.content_hash.as_deref() }
-    fn document_id(&self) -> Option<&str> { self.document_id.as_deref() }
+    fn url(&self) -> &str {
+        &self.url
+    }
+    fn source_id(&self) -> &str {
+        &self.source_id
+    }
+    fn status(&self) -> &str {
+        &self.status
+    }
+    fn discovery_method(&self) -> &str {
+        &self.discovery_method
+    }
+    fn parent_url(&self) -> Option<&str> {
+        self.parent_url.as_deref()
+    }
+    fn discovery_context(&self) -> &str {
+        &self.discovery_context
+    }
+    fn depth(&self) -> i32 {
+        self.depth
+    }
+    fn discovered_at(&self) -> &str {
+        &self.discovered_at
+    }
+    fn fetched_at(&self) -> Option<&str> {
+        self.fetched_at.as_deref()
+    }
+    fn retry_count(&self) -> i32 {
+        self.retry_count
+    }
+    fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
+    }
+    fn next_retry_at(&self) -> Option<&str> {
+        self.next_retry_at.as_deref()
+    }
+    fn etag(&self) -> Option<&str> {
+        self.etag.as_deref()
+    }
+    fn last_modified(&self) -> Option<&str> {
+        self.last_modified.as_deref()
+    }
+    fn content_hash(&self) -> Option<&str> {
+        self.content_hash.as_deref()
+    }
+    fn document_id(&self) -> Option<&str> {
+        self.document_id.as_deref()
+    }
 }
 
 impl From<CrawlUrlRecordRaw> for CrawlUrl {

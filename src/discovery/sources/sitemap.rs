@@ -29,7 +29,11 @@ impl SitemapSource {
     }
 
     /// Parse robots.txt to find sitemap URLs.
-    async fn parse_robots_txt(&self, base_url: &str, config: &DiscoverySourceConfig) -> Vec<String> {
+    async fn parse_robots_txt(
+        &self,
+        base_url: &str,
+        config: &DiscoverySourceConfig,
+    ) -> Vec<String> {
         let robots_url = format!("{}/robots.txt", base_url.trim_end_matches('/'));
         debug!("Checking robots.txt at {}", robots_url);
 
@@ -72,7 +76,11 @@ impl SitemapSource {
     /// Fetch and parse a sitemap XML file (non-recursive).
     ///
     /// Uses a work queue to handle sitemap indexes without recursion.
-    async fn parse_sitemap(&self, url: &str, config: &DiscoverySourceConfig) -> Result<Vec<String>, DiscoveryError> {
+    async fn parse_sitemap(
+        &self,
+        url: &str,
+        config: &DiscoverySourceConfig,
+    ) -> Result<Vec<String>, DiscoveryError> {
         // Create HTTP client with privacy configuration
         let client = HttpClient::with_privacy(
             "sitemap",

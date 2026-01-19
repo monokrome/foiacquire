@@ -156,20 +156,17 @@ impl WaybackSource {
         )
         .map_err(|e| ArchiveError::Parse(format!("Failed to create HTTP client: {}", e)))?;
 
-        let body = client
-            .get_text(&query_url)
-            .await
-            .map_err(|e| {
-                // Check if it's a rate limit or server error based on error message
-                let err_str = e.to_string();
-                if err_str.contains("429") {
-                    ArchiveError::RateLimited
-                } else if err_str.contains("5") && err_str.contains("status") {
-                    ArchiveError::Unavailable
-                } else {
-                    ArchiveError::Http(e)
-                }
-            })?;
+        let body = client.get_text(&query_url).await.map_err(|e| {
+            // Check if it's a rate limit or server error based on error message
+            let err_str = e.to_string();
+            if err_str.contains("429") {
+                ArchiveError::RateLimited
+            } else if err_str.contains("5") && err_str.contains("status") {
+                ArchiveError::Unavailable
+            } else {
+                ArchiveError::Http(e)
+            }
+        })?;
 
         // CDX with output=json returns array of arrays
         // First row is headers, rest are data

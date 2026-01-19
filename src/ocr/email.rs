@@ -113,10 +113,7 @@ fn mime_type_from_content_type(ct: Option<&mail_parser::ContentType>) -> String 
 }
 
 /// Build an EmailAttachment from attachment metadata.
-fn build_attachment_info(
-    filename: &str,
-    attachment: &mail_parser::MessagePart,
-) -> EmailAttachment {
+fn build_attachment_info(filename: &str, attachment: &mail_parser::MessagePart) -> EmailAttachment {
     let mime_type = mime_type_from_content_type(attachment.content_type());
     let size = attachment.contents().len() as u64;
     let content_id = attachment.content_id().map(|s| s.to_string());

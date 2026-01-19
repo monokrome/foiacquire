@@ -462,8 +462,13 @@ async fn cmd_scrape_single_tui(
         update_status(&format!("{} running discovery...", source_id));
 
         if let Some(base_url) = &scraper_config.base_url {
-            let discovery_urls =
-                run_external_discovery(base_url, &scraper_config.discovery, source_id, privacy_config).await;
+            let discovery_urls = run_external_discovery(
+                base_url,
+                &scraper_config.discovery,
+                source_id,
+                privacy_config,
+            )
+            .await;
 
             if !discovery_urls.is_empty() {
                 let mut added = 0usize;

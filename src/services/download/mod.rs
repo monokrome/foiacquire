@@ -18,10 +18,10 @@ use crate::repository::{extract_filename_parts, DieselCrawlRepository, DieselDoc
 use crate::scrapers::{extract_title_from_url, HttpClient};
 use crate::services::youtube;
 
-pub use types::{DownloadConfig, DownloadEvent, DownloadResult};
 use types::{
     handle_download_failure, handle_unchanged, save_or_update_document, send_failure_event,
 };
+pub use types::{DownloadConfig, DownloadEvent, DownloadResult};
 use youtube_download::download_youtube_video;
 
 /// Service for downloading documents from the crawl queue.
@@ -276,12 +276,26 @@ impl DownloadService {
                             if let Err(e) =
                                 tokio::fs::create_dir_all(new_path.parent().unwrap()).await
                             {
-                                send_failure_event(&url, &failed, &event_tx, worker_id, &e.to_string()).await;
+                                send_failure_event(
+                                    &url,
+                                    &failed,
+                                    &event_tx,
+                                    worker_id,
+                                    &e.to_string(),
+                                )
+                                .await;
                                 continue;
                             }
 
                             if let Err(e) = tokio::fs::write(&new_path, &content).await {
-                                send_failure_event(&url, &failed, &event_tx, worker_id, &e.to_string()).await;
+                                send_failure_event(
+                                    &url,
+                                    &failed,
+                                    &event_tx,
+                                    worker_id,
+                                    &e.to_string(),
+                                )
+                                .await;
                                 continue;
                             }
                             (new_path, false)

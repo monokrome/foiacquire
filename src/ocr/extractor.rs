@@ -289,7 +289,11 @@ impl TextExtractor {
             .arg("-") // Output to stdout
             .output();
 
-        handle_cmd_output(output, "pdftotext (install poppler-utils)", "pdftotext failed")
+        handle_cmd_output(
+            output,
+            "pdftotext (install poppler-utils)",
+            "pdftotext failed",
+        )
     }
 
     /// Run pdftotext on a single page of a PDF file.
@@ -406,7 +410,11 @@ impl TextExtractor {
             .args(["-l", &self.tesseract_lang])
             .output();
 
-        handle_cmd_output(output, "tesseract (install tesseract-ocr)", "tesseract failed")
+        handle_cmd_output(
+            output,
+            "tesseract (install tesseract-ocr)",
+            "tesseract failed",
+        )
     }
 
     /// OCR a single page of a PDF file.

@@ -17,15 +17,15 @@
 //! - Per-source circuit isolation
 //! - Automatic fallback to direct Tor if PTs unavailable
 
+// Module is scaffolding for embedded Tor integration - public API not yet consumed
+#![allow(dead_code)]
+
 // SECURITY: Emit compile-time warning when this feature is enabled
 #[deprecated(
     since = "0.7.2",
     note = "embedded-tor disabled due to RUSTSEC-2023-0071 (Marvin Attack in rsa crate). Use C-Tor with SOCKS_PROXY instead."
 )]
 const _ARTI_SECURITY_WARNING: () = ();
-
-// Module is scaffolding for embedded Tor integration - public API not yet consumed
-#![allow(dead_code)]
 
 use std::net::SocketAddr;
 

@@ -82,12 +82,7 @@ impl HttpClient {
         for (from_prefix, to_prefix) in self.via_mappings.iter() {
             if url.starts_with(from_prefix) {
                 let rewritten = format!("{}{}", to_prefix, &url[from_prefix.len()..]);
-                tracing::debug!(
-                    "Via rewrite: {} -> {} (via {})",
-                    url,
-                    rewritten,
-                    to_prefix
-                );
+                tracing::debug!("Via rewrite: {} -> {} (via {})", url, rewritten, to_prefix);
                 return (rewritten, true);
             }
         }
@@ -216,9 +211,12 @@ impl HttpClient {
 
         // Build client with env privacy config
         // If SOCKS_PROXY is set but invalid, fall back to direct mode with warning
-        let (client, privacy_mode) = Self::build_client(&user_agent, timeout, Some(&default_privacy))
-            .unwrap_or_else(|e| {
-                eprintln!("Warning: Failed to configure privacy from environment: {}", e);
+        let (client, privacy_mode) =
+            Self::build_client(&user_agent, timeout, Some(&default_privacy)).unwrap_or_else(|e| {
+                eprintln!(
+                    "Warning: Failed to configure privacy from environment: {}",
+                    e
+                );
                 eprintln!("         Falling back to direct connections (no privacy)");
                 Self::build_client(&user_agent, timeout, None)
                     .expect("Direct mode fallback should never fail")
@@ -308,7 +306,7 @@ impl HttpClient {
 
         // Default in-memory backend with request_delay as base
         let backend = Arc::new(InMemoryRateLimitBackend::new(
-            request_delay.as_millis() as u64,
+            request_delay.as_millis() as u64
         ));
 
         if !via_mappings.is_empty() {
@@ -369,9 +367,12 @@ impl HttpClient {
         let default_privacy = PrivacyConfig::default().with_env_overrides();
 
         // Build client with env privacy config
-        let (client, privacy_mode) = Self::build_client(&user_agent, timeout, Some(&default_privacy))
-            .unwrap_or_else(|e| {
-                eprintln!("Warning: Failed to configure privacy from environment: {}", e);
+        let (client, privacy_mode) =
+            Self::build_client(&user_agent, timeout, Some(&default_privacy)).unwrap_or_else(|e| {
+                eprintln!(
+                    "Warning: Failed to configure privacy from environment: {}",
+                    e
+                );
                 eprintln!("         Falling back to direct connections (no privacy)");
                 Self::build_client(&user_agent, timeout, None)
                     .expect("Direct mode fallback should never fail")
@@ -424,11 +425,7 @@ impl HttpClient {
     }
 
     /// Set the via mappings and mode for URL rewriting (caching proxy support).
-    pub fn with_via_config(
-        mut self,
-        via: HashMap<String, String>,
-        via_mode: ViaMode,
-    ) -> Self {
+    pub fn with_via_config(mut self, via: HashMap<String, String>, via_mode: ViaMode) -> Self {
         if !via.is_empty() {
             tracing::info!(
                 "HTTP client configured with {} via mapping(s) for caching proxy (mode: {:?})",
@@ -557,8 +554,7 @@ impl HttpClient {
                 tokio::time::sleep(self.request_delay).await;
 
                 // Try alternate URL via browser
-                if let Some(retry_response) =
-                    self.do_browser_fetch(pool, alternate_url, url).await
+                if let Some(retry_response) = self.do_browser_fetch(pool, alternate_url, url).await
                 {
                     return Ok(retry_response);
                 }
@@ -570,7 +566,10 @@ impl HttpClient {
         }
 
         // Browser failed completely, fall back to reqwest
-        debug!("Browser pool exhausted, falling back to reqwest for {}", url);
+        debug!(
+            "Browser pool exhausted, falling back to reqwest for {}",
+            url
+        );
         self.get_via_reqwest(url, None, None).await
     }
 
@@ -628,10 +627,7 @@ impl HttpClient {
                 ))
             }
             Err(e) => {
-                debug!(
-                    "Browser pool fetch failed for {}: {}",
-                    original_url, e
-                );
+                debug!("Browser pool fetch failed for {}: {}", original_url, e);
 
                 if let Some(ref domain) = domain {
                     self.rate_limiter.report_server_error(domain).await;

@@ -625,16 +625,12 @@ impl PrivacyConfig {
         #[cfg(not(feature = "embedded-tor"))]
         {
             let addr = format!("127.0.0.1:{}", Self::DEFAULT_TOR_SOCKS_PORT);
-            match TcpStream::connect_timeout(
-                &addr.parse().unwrap(),
-                Duration::from_secs(2),
-            ) {
+            match TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_secs(2)) {
                 Ok(_) => {
                     // C-Tor is running, auto-configure SOCKS proxy
                     Ok(())
                 }
-                Err(_) => Err(
-                    r#"Tor is required but not available.
+                Err(_) => Err(r#"Tor is required but not available.
 
 The embedded Tor client (Arti) is disabled due to a security vulnerability
 (RUSTSEC-2023-0071: Marvin Attack in rsa crate).
@@ -653,8 +649,8 @@ To use Tor, please set up C-Tor:
 
 Alternatively, use --direct flag to skip Tor (not recommended for sensitive work).
 
-See https://rustsec.org/advisories/RUSTSEC-2023-0071 for details."#.to_string()
-                ),
+See https://rustsec.org/advisories/RUSTSEC-2023-0071 for details."#
+                    .to_string()),
             }
         }
     }
@@ -681,7 +677,10 @@ See https://rustsec.org/advisories/RUSTSEC-2023-0071 for details."#.to_string()
         // Fall back to default C-Tor port
         #[cfg(not(feature = "embedded-tor"))]
         {
-            Some(format!("socks5://127.0.0.1:{}", Self::DEFAULT_TOR_SOCKS_PORT))
+            Some(format!(
+                "socks5://127.0.0.1:{}",
+                Self::DEFAULT_TOR_SOCKS_PORT
+            ))
         }
     }
 

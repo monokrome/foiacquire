@@ -393,8 +393,7 @@ impl Config {
                     .await
                     .unwrap_or_default()
                     .with_env_overrides();
-                let via: HashMap<String, String> =
-                    pref_config.get("via").await.unwrap_or_default();
+                let via: HashMap<String, String> = pref_config.get("via").await.unwrap_or_default();
                 let via_mode: ViaMode = pref_config.get("via_mode").await.unwrap_or_default();
 
                 // Get the source path from prefer

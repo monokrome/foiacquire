@@ -54,9 +54,10 @@ impl DuckDuckGoSource {
             )));
         }
 
-        let html = response.text().await.map_err(|e| {
-            DiscoveryError::Parse(format!("Failed to read response text: {}", e))
-        })?;
+        let html = response
+            .text()
+            .await
+            .map_err(|e| DiscoveryError::Parse(format!("Failed to read response text: {}", e)))?;
         self.parse_results(&html)
     }
 
