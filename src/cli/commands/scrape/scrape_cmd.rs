@@ -10,9 +10,36 @@ use crate::config::{Config, Settings};
 use crate::llm::LlmClient;
 use crate::models::{ScraperStats, ServiceStatus, Source, SourceType};
 use crate::privacy::PrivacyConfig;
+use crate::repository::DieselServiceStatusRepository;
 use crate::scrapers::{
     ConfigurableScraper, DieselRateLimitBackend, InMemoryRateLimitBackend, RateLimiter,
 };
+
+/// Update service heartbeat if interval has elapsed.
+async fn maybe_update_heartbeat(
+    last_heartbeat: &mut std::time::Instant,
+    heartbeat_interval: Duration,
+    service_status: &mut ServiceStatus,
+    service_status_repo: &DieselServiceStatusRepository,
+    source_id: &str,
+    count: u64,
+    new_this_session: u64,
+    errors_this_session: u64,
+) {
+    if last_heartbeat.elapsed() >= heartbeat_interval {
+        service_status.update_scraper_stats(ScraperStats {
+            session_processed: count,
+            session_new: new_this_session,
+            session_errors: errors_this_session,
+            rate_per_min: None,
+            queue_size: None,
+            browser_failures: None,
+        });
+        service_status.current_task = Some(format!("Processing {}", source_id));
+        let _ = service_status_repo.upsert(service_status).await;
+        *last_heartbeat = std::time::Instant::now();
+    }
+}
 
 /// Reload mode for daemon operation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
@@ -547,19 +574,17 @@ async fn cmd_scrape_single_tui(
             update_status(&format!("{} {} processed", source_id, count));
 
             // Periodic heartbeat update
-            if last_heartbeat.elapsed() >= heartbeat_interval {
-                service_status.update_scraper_stats(ScraperStats {
-                    session_processed: count,
-                    session_new: new_this_session,
-                    session_errors: errors_this_session,
-                    rate_per_min: None,
-                    queue_size: None,
-                    browser_failures: None,
-                });
-                service_status.current_task = Some(format!("Processing {}", source_id));
-                let _ = service_status_repo.upsert(&service_status).await;
-                last_heartbeat = std::time::Instant::now();
-            }
+            maybe_update_heartbeat(
+                &mut last_heartbeat,
+                heartbeat_interval,
+                &mut service_status,
+                &service_status_repo,
+                source_id,
+                count,
+                new_this_session,
+                errors_this_session,
+            )
+            .await;
             continue;
         }
 
@@ -593,19 +618,17 @@ async fn cmd_scrape_single_tui(
         ));
 
         // Periodic heartbeat update (every 15 seconds)
-        if last_heartbeat.elapsed() >= heartbeat_interval {
-            service_status.update_scraper_stats(ScraperStats {
-                session_processed: count,
-                session_new: new_this_session,
-                session_errors: errors_this_session,
-                rate_per_min: None,
-                queue_size: None,
-                browser_failures: None,
-            });
-            service_status.current_task = Some(format!("Processing {}", source_id));
-            let _ = service_status_repo.upsert(&service_status).await;
-            last_heartbeat = std::time::Instant::now();
-        }
+        maybe_update_heartbeat(
+            &mut last_heartbeat,
+            heartbeat_interval,
+            &mut service_status,
+            &service_status_repo,
+            source_id,
+            count,
+            new_this_session,
+            errors_this_session,
+        )
+        .await;
 
         if limit > 0 && new_this_session as usize >= limit {
             break;

@@ -91,6 +91,44 @@ pub struct ParsedEmail {
 /// Email parser for RFC822 (.eml) files.
 pub struct EmailExtractor;
 
+/// Read and parse an email file into a mail_parser Message.
+fn read_and_parse_email(email_path: &Path) -> Result<Vec<u8>, EmailError> {
+    let mut file = File::open(email_path).map_err(|e| EmailError::ReadFailed(e.to_string()))?;
+    let mut raw_email = Vec::new();
+    file.read_to_end(&mut raw_email)
+        .map_err(|e| EmailError::ReadFailed(e.to_string()))?;
+    Ok(raw_email)
+}
+
+/// Extract MIME type from a content type, defaulting to octet-stream.
+fn mime_type_from_content_type(ct: Option<&mail_parser::ContentType>) -> String {
+    ct.map(|ct| {
+        if let Some(subtype) = ct.subtype() {
+            format!("{}/{}", ct.ctype(), subtype)
+        } else {
+            ct.ctype().to_string()
+        }
+    })
+    .unwrap_or_else(|| "application/octet-stream".to_string())
+}
+
+/// Build an EmailAttachment from attachment metadata.
+fn build_attachment_info(
+    filename: &str,
+    attachment: &mail_parser::MessagePart,
+) -> EmailAttachment {
+    let mime_type = mime_type_from_content_type(attachment.content_type());
+    let size = attachment.contents().len() as u64;
+    let content_id = attachment.content_id().map(|s| s.to_string());
+
+    EmailAttachment {
+        filename: filename.to_string(),
+        mime_type,
+        size,
+        content_id,
+    }
+}
+
 impl EmailExtractor {
     /// Check if a MIME type represents an email format.
     pub fn is_email(mime_type: &str) -> bool {
@@ -99,12 +137,7 @@ impl EmailExtractor {
 
     /// Parse an email file and return its metadata and attachment list.
     pub fn parse_email(email_path: &Path) -> Result<ParsedEmail, EmailError> {
-        let mut file = File::open(email_path).map_err(|e| EmailError::ReadFailed(e.to_string()))?;
-
-        let mut raw_email = Vec::new();
-        file.read_to_end(&mut raw_email)
-            .map_err(|e| EmailError::ReadFailed(e.to_string()))?;
-
+        let raw_email = read_and_parse_email(email_path)?;
         let message = MessageParser::default()
             .parse(&raw_email)
             .ok_or_else(|| EmailError::ParseFailed("Failed to parse email".to_string()))?;
@@ -138,31 +171,14 @@ impl EmailExtractor {
         let body_html = message.body_html(0).map(|s| s.to_string());
 
         // Extract attachment info
-        let mut attachments = Vec::new();
-        for attachment in message.attachments() {
-            if let Some(filename) = attachment.attachment_name() {
-                let mime_type = attachment
-                    .content_type()
-                    .map(|ct| {
-                        if let Some(subtype) = ct.subtype() {
-                            format!("{}/{}", ct.ctype(), subtype)
-                        } else {
-                            ct.ctype().to_string()
-                        }
-                    })
-                    .unwrap_or_else(|| "application/octet-stream".to_string());
-
-                let size = attachment.contents().len() as u64;
-                let content_id = attachment.content_id().map(|s| s.to_string());
-
-                attachments.push(EmailAttachment {
-                    filename: filename.to_string(),
-                    mime_type,
-                    size,
-                    content_id,
-                });
-            }
-        }
+        let attachments: Vec<EmailAttachment> = message
+            .attachments()
+            .filter_map(|attachment| {
+                attachment
+                    .attachment_name()
+                    .map(|filename| build_attachment_info(filename, attachment))
+            })
+            .collect();
 
         Ok(ParsedEmail {
             subject,
@@ -186,12 +202,7 @@ impl EmailExtractor {
         email_path: &Path,
         attachment_filename: &str,
     ) -> Result<ExtractedAttachment, EmailError> {
-        let mut file = File::open(email_path).map_err(|e| EmailError::ReadFailed(e.to_string()))?;
-
-        let mut raw_email = Vec::new();
-        file.read_to_end(&mut raw_email)
-            .map_err(|e| EmailError::ReadFailed(e.to_string()))?;
-
+        let raw_email = read_and_parse_email(email_path)?;
         let message = MessageParser::default()
             .parse(&raw_email)
             .ok_or_else(|| EmailError::ParseFailed("Failed to parse email".to_string()))?;
@@ -200,40 +211,7 @@ impl EmailExtractor {
         for attachment in message.attachments() {
             if let Some(filename) = attachment.attachment_name() {
                 if filename == attachment_filename {
-                    let mime_type = attachment
-                        .content_type()
-                        .map(|ct| {
-                            if let Some(subtype) = ct.subtype() {
-                                format!("{}/{}", ct.ctype(), subtype)
-                            } else {
-                                ct.ctype().to_string()
-                            }
-                        })
-                        .unwrap_or_else(|| "application/octet-stream".to_string());
-
-                    let contents = attachment.contents();
-                    let size = contents.len() as u64;
-                    let content_id = attachment.content_id().map(|s| s.to_string());
-
-                    // Create temp directory and write file
-                    let temp_dir = TempDir::new()?;
-                    let file_path = temp_dir.path().join(filename);
-
-                    let mut outfile = File::create(&file_path)?;
-                    outfile.write_all(contents)?;
-
-                    let attachment_info = EmailAttachment {
-                        filename: filename.to_string(),
-                        mime_type,
-                        size,
-                        content_id,
-                    };
-
-                    return Ok(ExtractedAttachment {
-                        attachment: attachment_info,
-                        temp_dir,
-                        file_path,
-                    });
+                    return Self::extract_attachment_to_temp(filename, attachment);
                 }
             }
         }
@@ -244,58 +222,40 @@ impl EmailExtractor {
         )))
     }
 
+    /// Extract an attachment part to a temporary file.
+    fn extract_attachment_to_temp(
+        filename: &str,
+        attachment: &mail_parser::MessagePart,
+    ) -> Result<ExtractedAttachment, EmailError> {
+        let attachment_info = build_attachment_info(filename, attachment);
+        let contents = attachment.contents();
+
+        let temp_dir = TempDir::new()?;
+        let file_path = temp_dir.path().join(filename);
+
+        let mut outfile = File::create(&file_path)?;
+        outfile.write_all(contents)?;
+
+        Ok(ExtractedAttachment {
+            attachment: attachment_info,
+            temp_dir,
+            file_path,
+        })
+    }
+
     /// Extract all attachments from an email.
     pub fn extract_all_attachments(
         email_path: &Path,
     ) -> Result<Vec<ExtractedAttachment>, EmailError> {
-        let mut file = File::open(email_path).map_err(|e| EmailError::ReadFailed(e.to_string()))?;
-
-        let mut raw_email = Vec::new();
-        file.read_to_end(&mut raw_email)
-            .map_err(|e| EmailError::ReadFailed(e.to_string()))?;
-
+        let raw_email = read_and_parse_email(email_path)?;
         let message = MessageParser::default()
             .parse(&raw_email)
             .ok_or_else(|| EmailError::ParseFailed("Failed to parse email".to_string()))?;
 
         let mut extracted = Vec::new();
-
         for attachment in message.attachments() {
             if let Some(filename) = attachment.attachment_name() {
-                let mime_type = attachment
-                    .content_type()
-                    .map(|ct| {
-                        if let Some(subtype) = ct.subtype() {
-                            format!("{}/{}", ct.ctype(), subtype)
-                        } else {
-                            ct.ctype().to_string()
-                        }
-                    })
-                    .unwrap_or_else(|| "application/octet-stream".to_string());
-
-                let contents = attachment.contents();
-                let size = contents.len() as u64;
-                let content_id = attachment.content_id().map(|s| s.to_string());
-
-                // Create temp directory and write file
-                let temp_dir = TempDir::new()?;
-                let file_path = temp_dir.path().join(filename);
-
-                let mut outfile = File::create(&file_path)?;
-                outfile.write_all(contents)?;
-
-                let attachment_info = EmailAttachment {
-                    filename: filename.to_string(),
-                    mime_type,
-                    size,
-                    content_id,
-                };
-
-                extracted.push(ExtractedAttachment {
-                    attachment: attachment_info,
-                    temp_dir,
-                    file_path,
-                });
+                extracted.push(Self::extract_attachment_to_temp(filename, attachment)?);
             }
         }
 

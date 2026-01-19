@@ -145,3 +145,74 @@ pub fn ensure_model_file(spec: &ModelSpec, model_dir: &Path) -> Result<(), OcrEr
     }
     Ok(())
 }
+
+/// Find model directory by checking config path first, then standard locations.
+pub fn find_model_dir(
+    config_path: Option<&std::path::PathBuf>,
+    model_config: &ModelDirConfig,
+) -> Option<PathBuf> {
+    // Check config path first
+    if let Some(path) = config_path {
+        if model_config.has_required_files(path) {
+            return Some(path.clone());
+        }
+    }
+
+    // Check standard locations
+    model_config
+        .candidate_dirs()
+        .into_iter()
+        .find(|dir| model_config.has_required_files(dir))
+}
+
+/// Ensure models are present, downloading if necessary.
+pub fn ensure_models_present(
+    config_path: Option<&std::path::PathBuf>,
+    model_config: &ModelDirConfig,
+    model_specs: &[&ModelSpec],
+) -> Result<PathBuf, OcrError> {
+    if let Some(dir) = find_model_dir(config_path, model_config) {
+        return Ok(dir);
+    }
+
+    let model_dir = model_config.default_dir();
+    std::fs::create_dir_all(&model_dir).map_err(OcrError::Io)?;
+
+    for spec in model_specs {
+        ensure_model_file(spec, &model_dir)?;
+    }
+
+    Ok(model_dir)
+}
+
+/// Build an OcrResult from text and timing info.
+pub fn build_ocr_result(
+    text: String,
+    backend: super::backend::OcrBackendType,
+    start: std::time::Instant,
+) -> super::backend::OcrResult {
+    super::backend::OcrResult {
+        text,
+        confidence: None,
+        backend,
+        processing_time_ms: start.elapsed().as_millis() as u64,
+    }
+}
+
+/// Format availability hint for a model-based backend.
+pub fn model_availability_hint(
+    config_path: Option<&std::path::PathBuf>,
+    model_config: &ModelDirConfig,
+    backend_name: &str,
+    total_size: &str,
+) -> String {
+    match find_model_dir(config_path, model_config) {
+        Some(path) => format!("{} models found at {:?}", backend_name, path),
+        None => format!(
+            "{} models will be auto-downloaded on first use (~{}) to {:?}",
+            backend_name,
+            total_size,
+            model_config.default_dir()
+        ),
+    }
+}

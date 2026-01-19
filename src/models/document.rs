@@ -113,22 +113,7 @@ impl DocumentVersion {
         mime_type: String,
         source_url: Option<String>,
     ) -> Self {
-        let hashes = Self::compute_dual_hashes(content);
-        Self {
-            id: 0, // Set by database
-            content_hash: hashes.sha256,
-            content_hash_blake3: Some(hashes.blake3),
-            file_path,
-            file_size: content.len() as u64,
-            mime_type,
-            acquired_at: Utc::now(),
-            source_url,
-            original_filename: None,
-            server_date: None,
-            page_count: None,
-            archive_snapshot_id: None,
-            earliest_archived_at: None,
-        }
+        Self::new_with_metadata(content, file_path, mime_type, source_url, None, None)
     }
 
     /// Create a new document version with original filename and server date.

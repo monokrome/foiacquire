@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 
 use super::super::AppState;
+use super::helpers::parse_csv_param;
 use crate::repository::diesel_document::BrowseParams;
 
 /// Export format options.
@@ -68,28 +69,8 @@ pub async fn export_documents(
     Query(params): Query<ExportQuery>,
 ) -> impl IntoResponse {
     let limit = params.limit.unwrap_or(10_000).min(100_000);
-
-    let types: Vec<String> = params
-        .types
-        .as_ref()
-        .map(|t| {
-            t.split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let tags: Vec<String> = params
-        .tags
-        .as_ref()
-        .map(|t| {
-            t.split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
+    let types = parse_csv_param(params.types.as_ref());
+    let tags = parse_csv_param(params.tags.as_ref());
 
     // Fetch documents
     let documents = match state

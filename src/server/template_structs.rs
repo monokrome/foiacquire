@@ -5,7 +5,7 @@
 
 use askama::Template;
 
-use crate::models::{VirtualFile, VirtualFileStatus};
+use crate::models::{Document, VirtualFile, VirtualFileStatus};
 use crate::repository::diesel_document::BrowseRow;
 use crate::repository::parse_datetime;
 use crate::utils::{format_size, mime_icon};
@@ -351,6 +351,26 @@ impl DocumentRow {
             tags: tags.iter().map(|t| TagRef::new(t.clone())).collect(),
             other_tags: Vec::new(),
         }
+    }
+
+    /// Create from a Document model (returns None if document has no versions).
+    pub fn from_document(doc: &Document) -> Option<Self> {
+        let version = doc.current_version()?;
+        let display_name = version
+            .original_filename
+            .clone()
+            .unwrap_or_else(|| doc.title.clone());
+
+        Some(Self::new(
+            doc.id.clone(),
+            display_name,
+            doc.source_id.clone(),
+            version.mime_type.clone(),
+            version.file_size,
+            version.acquired_at,
+            doc.synopsis.clone(),
+            doc.tags.clone(),
+        ))
     }
 }
 

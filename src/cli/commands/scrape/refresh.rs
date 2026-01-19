@@ -1,13 +1,86 @@
 //! Refresh metadata for documents.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use console::style;
+use indicatif::ProgressBar;
 
 use super::helpers::{process_get_response_for_refresh, RefreshResult};
 use crate::cli::commands::helpers::truncate;
 use crate::config::{Config, Settings};
+use crate::models::Document;
 use crate::privacy::PrivacyConfig;
+use crate::repository::DieselDocumentRepository;
+
+/// Shared GET request handling for refresh.
+/// Returns (should_continue, should_skip_increment).
+async fn try_get_refresh(
+    client: &crate::scrapers::HttpClient,
+    url: &str,
+    doc: &Document,
+    current_version: &crate::models::DocumentVersion,
+    documents_dir: &std::path::Path,
+    doc_repo: &Arc<DieselDocumentRepository>,
+    pb: &ProgressBar,
+    updated: &Arc<AtomicUsize>,
+    redownloaded: &Arc<AtomicUsize>,
+    skipped: &Arc<AtomicUsize>,
+) -> bool {
+    match client.get(url, None, None).await {
+        Ok(response) if response.is_success() => {
+            let result =
+                process_get_response_for_refresh(response, doc, current_version, documents_dir)
+                    .await;
+            handle_refresh_result(result, doc_repo, doc, pb, updated, redownloaded).await
+        }
+        _ => {
+            skipped.fetch_add(1, Ordering::Relaxed);
+            false
+        }
+    }
+}
+
+/// Handle a RefreshResult by saving the document and updating counters.
+/// Returns true if processing should continue (skip), false otherwise.
+async fn handle_refresh_result(
+    result: RefreshResult,
+    doc_repo: &Arc<DieselDocumentRepository>,
+    doc: &Document,
+    pb: &ProgressBar,
+    updated: &Arc<AtomicUsize>,
+    redownloaded: &Arc<AtomicUsize>,
+) -> bool {
+    match result {
+        RefreshResult::Updated(updated_doc) => {
+            if let Err(e) = doc_repo.save(&updated_doc).await {
+                pb.println(format!(
+                    "{} Failed to save {}: {}",
+                    style("✗").red(),
+                    truncate(&doc.title, 30),
+                    e
+                ));
+            } else {
+                updated.fetch_add(1, Ordering::Relaxed);
+            }
+            false
+        }
+        RefreshResult::Redownloaded(updated_doc) => {
+            if let Err(e) = doc_repo.save(&updated_doc).await {
+                pb.println(format!(
+                    "{} Failed to save {}: {}",
+                    style("✗").red(),
+                    truncate(&doc.title, 30),
+                    e
+                ));
+            } else {
+                redownloaded.fetch_add(1, Ordering::Relaxed);
+            }
+            false
+        }
+        RefreshResult::Skipped => true,
+    }
+}
 
 /// Refresh metadata for documents.
 pub async fn cmd_refresh(
@@ -18,7 +91,6 @@ pub async fn cmd_refresh(
     force: bool,
     privacy_config: &PrivacyConfig,
 ) -> anyhow::Result<()> {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::sync::Semaphore;
 
     let ctx = settings.create_db_context()?;
@@ -198,97 +270,43 @@ pub async fn cmd_refresh(
                             }
                         } else {
                             // Need to do full GET to get metadata
-                            match client.get(url, None, None).await {
-                                Ok(response) if response.is_success() => {
-                                    match process_get_response_for_refresh(
-                                        response,
-                                        &doc,
-                                        current_version,
-                                        &documents_dir,
-                                    )
-                                    .await
-                                    {
-                                        RefreshResult::Updated(updated_doc) => {
-                                            if let Err(e) = doc_repo.save(&updated_doc).await {
-                                                pb.println(format!(
-                                                    "{} Failed to save {}: {}",
-                                                    style("✗").red(),
-                                                    truncate(&doc.title, 30),
-                                                    e
-                                                ));
-                                            } else {
-                                                updated.fetch_add(1, Ordering::Relaxed);
-                                            }
-                                        }
-                                        RefreshResult::Redownloaded(updated_doc) => {
-                                            if let Err(e) = doc_repo.save(&updated_doc).await {
-                                                pb.println(format!(
-                                                    "{} Failed to save {}: {}",
-                                                    style("✗").red(),
-                                                    truncate(&doc.title, 30),
-                                                    e
-                                                ));
-                                            } else {
-                                                redownloaded.fetch_add(1, Ordering::Relaxed);
-                                            }
-                                        }
-                                        RefreshResult::Skipped => {
-                                            pb.inc(1);
-                                            continue;
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    skipped.fetch_add(1, Ordering::Relaxed);
-                                }
+                            if try_get_refresh(
+                                &client,
+                                url,
+                                &doc,
+                                current_version,
+                                &documents_dir,
+                                &doc_repo,
+                                &pb,
+                                &updated,
+                                &redownloaded,
+                                &skipped,
+                            )
+                            .await
+                            {
+                                pb.inc(1);
+                                continue;
                             }
                         }
                     }
                     _ => {
                         // HEAD failed or not supported, try GET
-                        match client.get(url, None, None).await {
-                            Ok(response) if response.is_success() => {
-                                match process_get_response_for_refresh(
-                                    response,
-                                    &doc,
-                                    current_version,
-                                    &documents_dir,
-                                )
-                                .await
-                                {
-                                    RefreshResult::Updated(updated_doc) => {
-                                        if let Err(e) = doc_repo.save(&updated_doc).await {
-                                            pb.println(format!(
-                                                "{} Failed to save {}: {}",
-                                                style("✗").red(),
-                                                truncate(&doc.title, 30),
-                                                e
-                                            ));
-                                        } else {
-                                            updated.fetch_add(1, Ordering::Relaxed);
-                                        }
-                                    }
-                                    RefreshResult::Redownloaded(updated_doc) => {
-                                        if let Err(e) = doc_repo.save(&updated_doc).await {
-                                            pb.println(format!(
-                                                "{} Failed to save {}: {}",
-                                                style("✗").red(),
-                                                truncate(&doc.title, 30),
-                                                e
-                                            ));
-                                        } else {
-                                            redownloaded.fetch_add(1, Ordering::Relaxed);
-                                        }
-                                    }
-                                    RefreshResult::Skipped => {
-                                        pb.inc(1);
-                                        continue;
-                                    }
-                                }
-                            }
-                            _ => {
-                                skipped.fetch_add(1, Ordering::Relaxed);
-                            }
+                        if try_get_refresh(
+                            &client,
+                            url,
+                            &doc,
+                            current_version,
+                            &documents_dir,
+                            &doc_repo,
+                            &pb,
+                            &updated,
+                            &redownloaded,
+                            &skipped,
+                        )
+                        .await
+                        {
+                            pb.inc(1);
+                            continue;
                         }
                     }
                 }

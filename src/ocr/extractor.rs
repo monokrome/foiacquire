@@ -9,6 +9,47 @@ use thiserror::Error;
 
 use super::model_utils::check_binary;
 
+/// Handle command output, extracting stdout on success or returning appropriate error.
+fn handle_cmd_output(
+    result: std::io::Result<std::process::Output>,
+    tool_name: &str,
+    error_prefix: &str,
+) -> Result<String, ExtractionError> {
+    match result {
+        Ok(output) => {
+            if output.status.success() {
+                Ok(String::from_utf8_lossy(&output.stdout).to_string())
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Err(ExtractionError::ExtractionFailed(format!(
+                    "{}: {}",
+                    error_prefix, stderr
+                )))
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Err(ExtractionError::ToolNotFound(tool_name.to_string()))
+        }
+        Err(e) => Err(ExtractionError::Io(e)),
+    }
+}
+
+/// Check command status, returning appropriate error on failure.
+fn check_cmd_status(
+    result: std::io::Result<std::process::ExitStatus>,
+    tool_name: &str,
+    error_msg: &str,
+) -> Result<(), ExtractionError> {
+    match result {
+        Ok(s) if s.success() => Ok(()),
+        Ok(_) => Err(ExtractionError::ExtractionFailed(error_msg.to_string())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Err(ExtractionError::ToolNotFound(tool_name.to_string()))
+        }
+        Err(e) => Err(ExtractionError::Io(e)),
+    }
+}
+
 /// Errors that can occur during text extraction.
 #[derive(Debug, Error)]
 pub enum ExtractionError {
@@ -248,23 +289,7 @@ impl TextExtractor {
             .arg("-") // Output to stdout
             .output();
 
-        match output {
-            Ok(output) => {
-                if output.status.success() {
-                    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-                } else {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    Err(ExtractionError::ExtractionFailed(format!(
-                        "pdftotext failed: {}",
-                        stderr
-                    )))
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(
-                ExtractionError::ToolNotFound("pdftotext (install poppler-utils)".to_string()),
-            ),
-            Err(e) => Err(ExtractionError::Io(e)),
-        }
+        handle_cmd_output(output, "pdftotext (install poppler-utils)", "pdftotext failed")
     }
 
     /// Run pdftotext on a single page of a PDF file.
@@ -280,23 +305,11 @@ impl TextExtractor {
             .arg("-") // Output to stdout
             .output();
 
-        match output {
-            Ok(output) => {
-                if output.status.success() {
-                    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-                } else {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    Err(ExtractionError::ExtractionFailed(format!(
-                        "pdftotext failed on page {}: {}",
-                        page, stderr
-                    )))
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(
-                ExtractionError::ToolNotFound("pdftotext (install poppler-utils)".to_string()),
-            ),
-            Err(e) => Err(ExtractionError::Io(e)),
-        }
+        handle_cmd_output(
+            output,
+            "pdftotext (install poppler-utils)",
+            &format!("pdftotext failed on page {}", page),
+        )
     }
 
     /// Get the page count of a PDF.
@@ -328,20 +341,11 @@ impl TextExtractor {
             .arg(temp_path.join("page"))
             .status();
 
-        match status {
-            Ok(s) if s.success() => {}
-            Ok(_) => {
-                return Err(ExtractionError::ExtractionFailed(
-                    "pdftoppm failed to convert PDF".to_string(),
-                ))
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(ExtractionError::ToolNotFound(
-                    "pdftoppm (install poppler-utils)".to_string(),
-                ))
-            }
-            Err(e) => return Err(ExtractionError::Io(e)),
-        }
+        check_cmd_status(
+            status,
+            "pdftoppm (install poppler-utils)",
+            "pdftoppm failed to convert PDF",
+        )?;
 
         // Find all generated images
         let mut images: Vec<_> = std::fs::read_dir(temp_path)?
@@ -402,23 +406,7 @@ impl TextExtractor {
             .args(["-l", &self.tesseract_lang])
             .output();
 
-        match output {
-            Ok(output) => {
-                if output.status.success() {
-                    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-                } else {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    Err(ExtractionError::ExtractionFailed(format!(
-                        "tesseract failed: {}",
-                        stderr
-                    )))
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(
-                ExtractionError::ToolNotFound("tesseract (install tesseract-ocr)".to_string()),
-            ),
-            Err(e) => Err(ExtractionError::Io(e)),
-        }
+        handle_cmd_output(output, "tesseract (install tesseract-ocr)", "tesseract failed")
     }
 
     /// OCR a single page of a PDF file.
@@ -436,21 +424,11 @@ impl TextExtractor {
             .arg(&output_prefix)
             .status();
 
-        match status {
-            Ok(s) if s.success() => {}
-            Ok(_) => {
-                return Err(ExtractionError::ExtractionFailed(format!(
-                    "pdftoppm failed to convert page {}",
-                    page
-                )))
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(ExtractionError::ToolNotFound(
-                    "pdftoppm (install poppler-utils)".to_string(),
-                ))
-            }
-            Err(e) => return Err(ExtractionError::Io(e)),
-        }
+        check_cmd_status(
+            status,
+            "pdftoppm (install poppler-utils)",
+            &format!("pdftoppm failed to convert page {}", page),
+        )?;
 
         // Find the generated image
         if let Some(image_path) = self.find_page_image(temp_path, page) {

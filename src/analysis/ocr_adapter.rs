@@ -27,6 +27,17 @@ impl OcrAnalysisAdapter {
     pub fn from_arc(backend: Arc<dyn OcrBackend>) -> Self {
         Self { backend }
     }
+
+    /// Convert OcrResult to AnalysisResult.
+    fn ocr_to_analysis(&self, result: crate::ocr::OcrResult) -> AnalysisResult {
+        AnalysisResult {
+            text: result.text,
+            confidence: result.confidence,
+            backend: self.backend_id().to_string(),
+            processing_time_ms: result.processing_time_ms,
+            metadata: None,
+        }
+    }
 }
 
 impl AnalysisBackend for OcrAnalysisAdapter {
@@ -76,32 +87,16 @@ impl AnalysisBackend for OcrAnalysisAdapter {
     }
 
     fn analyze_page(&self, file_path: &Path, page: u32) -> Result<AnalysisResult, AnalysisError> {
-        let result = self
-            .backend
+        self.backend
             .ocr_pdf_page(file_path, page)
-            .map_err(|e| AnalysisError::AnalysisFailed(e.to_string()))?;
-
-        Ok(AnalysisResult {
-            text: result.text,
-            confidence: result.confidence,
-            backend: self.backend_id().to_string(),
-            processing_time_ms: result.processing_time_ms,
-            metadata: None,
-        })
+            .map(|r| self.ocr_to_analysis(r))
+            .map_err(|e| AnalysisError::AnalysisFailed(e.to_string()))
     }
 
     fn analyze_image(&self, image_path: &Path) -> Result<AnalysisResult, AnalysisError> {
-        let result = self
-            .backend
+        self.backend
             .ocr_image(image_path)
-            .map_err(|e| AnalysisError::AnalysisFailed(e.to_string()))?;
-
-        Ok(AnalysisResult {
-            text: result.text,
-            confidence: result.confidence,
-            backend: self.backend_id().to_string(),
-            processing_time_ms: result.processing_time_ms,
-            metadata: None,
-        })
+            .map(|r| self.ocr_to_analysis(r))
+            .map_err(|e| AnalysisError::AnalysisFailed(e.to_string()))
     }
 }

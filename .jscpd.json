@@ -6,12 +6,14 @@
     "**/node_modules/**",
     "**/*.lock",
     "**/.sqlx/**",
-    "**/migrations/**"
+    "**/migrations/**",
+    "**/tests/**"
   ],
   "format": ["rust"],
   "absolute": true,
   "gitignore": true,
   "minLines": 10,
   "minTokens": 50,
-  "skipLocal": false
+  "skipLocal": false,
+  "ignorePattern": ["#\\[cfg\\(test\\)\\][\\s\\S]*?\\n\\}"]
 }

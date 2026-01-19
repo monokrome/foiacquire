@@ -158,6 +158,54 @@ impl CustomBackend {
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
         }
     }
+
+    /// Execute command and return result with timing.
+    fn run_command(
+        &self,
+        file_path: &Path,
+        page: Option<u32>,
+    ) -> Result<AnalysisResult, AnalysisError> {
+        let start = Instant::now();
+        let args = self.build_args(file_path, page);
+
+        let mut cmd = Command::new(&self.config.command);
+        cmd.args(&args);
+        self.apply_privacy_env(&mut cmd);
+
+        let output = cmd
+            .output()
+            .map_err(|e| AnalysisError::CommandFailed(format!("Failed to run command: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let page_info = page.map(|p| format!(" on page {}", p)).unwrap_or_default();
+            return Err(AnalysisError::CommandFailed(format!(
+                "{} failed{} (exit code {:?}): {}",
+                self.config.command,
+                page_info,
+                output.status.code(),
+                stderr.lines().take(5).collect::<Vec<_>>().join("\n")
+            )));
+        }
+
+        let text = self.read_output(&output, file_path)?;
+
+        let mut metadata = serde_json::json!({
+            "command": self.config.command,
+            "args": args,
+        });
+        if let Some(p) = page {
+            metadata["page"] = serde_json::Value::from(p);
+        }
+
+        Ok(AnalysisResult {
+            text,
+            confidence: None,
+            backend: self.name.clone(),
+            processing_time_ms: start.elapsed().as_millis() as u64,
+            metadata: Some(metadata),
+        })
+    }
 }
 
 impl AnalysisBackend for CustomBackend {
@@ -228,42 +276,7 @@ impl AnalysisBackend for CustomBackend {
                 "This is a page-level backend. Use analyze_page() instead.".to_string(),
             ));
         }
-
-        let start = Instant::now();
-        let args = self.build_args(file_path, None);
-
-        let mut cmd = Command::new(&self.config.command);
-        cmd.args(&args);
-        self.apply_privacy_env(&mut cmd);
-
-        let output = cmd
-            .output()
-            .map_err(|e| AnalysisError::CommandFailed(format!("Failed to run command: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(AnalysisError::CommandFailed(format!(
-                "{} failed (exit code {:?}): {}",
-                self.config.command,
-                output.status.code(),
-                stderr.lines().take(5).collect::<Vec<_>>().join("\n")
-            )));
-        }
-
-        let text = self.read_output(&output, file_path)?;
-
-        let metadata = serde_json::json!({
-            "command": self.config.command,
-            "args": args,
-        });
-
-        Ok(AnalysisResult {
-            text,
-            confidence: None,
-            backend: self.name.clone(),
-            processing_time_ms: start.elapsed().as_millis() as u64,
-            metadata: Some(metadata),
-        })
+        self.run_command(file_path, None)
     }
 
     fn analyze_page(&self, file_path: &Path, page: u32) -> Result<AnalysisResult, AnalysisError> {
@@ -272,44 +285,7 @@ impl AnalysisBackend for CustomBackend {
                 "This is a document-level backend. Use analyze_file() instead.".to_string(),
             ));
         }
-
-        let start = Instant::now();
-        let args = self.build_args(file_path, Some(page));
-
-        let mut cmd = Command::new(&self.config.command);
-        cmd.args(&args);
-        self.apply_privacy_env(&mut cmd);
-
-        let output = cmd
-            .output()
-            .map_err(|e| AnalysisError::CommandFailed(format!("Failed to run command: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(AnalysisError::CommandFailed(format!(
-                "{} failed on page {} (exit code {:?}): {}",
-                self.config.command,
-                page,
-                output.status.code(),
-                stderr.lines().take(5).collect::<Vec<_>>().join("\n")
-            )));
-        }
-
-        let text = self.read_output(&output, file_path)?;
-
-        let metadata = serde_json::json!({
-            "command": self.config.command,
-            "page": page,
-            "args": args,
-        });
-
-        Ok(AnalysisResult {
-            text,
-            confidence: None,
-            backend: self.name.clone(),
-            processing_time_ms: start.elapsed().as_millis() as u64,
-            metadata: Some(metadata),
-        })
+        self.run_command(file_path, Some(page))
     }
 }
 
