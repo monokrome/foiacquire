@@ -8,7 +8,7 @@ on:
       - main
     paths:
       - 'Dockerfile*'
-      - 'bin/entrypoint*.sh'
+      - 'bin/*entrypoint*.sh'
       - 'src/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -183,9 +183,54 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  foiacquire:
-    name: Build FOIAcquire Image
+  # Build binaries first - only 2 unique feature sets needed
+  build-binary:
+    name: Build Binary (${{ matrix.name }})
     needs: lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: standard
+            features: "browser,postgres"
+          - name: redis
+            features: "browser,postgres,redis-backend"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build binary
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.builder
+          push: false
+          load: true
+          tags: foiacquire-builder:${{ matrix.name }}
+          platforms: linux/amd64
+          build-args: |
+            FEATURES=${{ matrix.features }}
+          cache-from: type=gha,scope=builder-${{ matrix.name }}
+          cache-to: type=gha,scope=builder-${{ matrix.name }},mode=max
+
+      - name: Extract binary
+        run: |
+          docker create --name extract foiacquire-builder:${{ matrix.name }}
+          docker cp extract:/build/target/release/foia ./foia-${{ matrix.name }}
+          docker rm extract
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.name }}
+          path: ./foia-${{ matrix.name }}
+          retention-days: 1
+
+  foiacquire:
+    name: Build FOIAcquire Image (${{ matrix.tag }})
+    needs: build-binary
     runs-on: ubuntu-latest
     environment: release
     strategy:
@@ -193,32 +238,40 @@ jobs:
         include:
           # Tor-enabled variants (default)
           - tag: latest
-            features: "browser,postgres"
+            binary: standard
             tesseract: "false"
             tor: "true"
           - tag: tesseract
-            features: "browser,postgres"
+            binary: standard
             tesseract: "true"
             tor: "true"
           - tag: redis
-            features: "browser,postgres,redis-backend"
+            binary: redis
             tesseract: "false"
             tor: "true"
           # Clearnet variants (no Tor)
           - tag: clearnet
-            features: "browser,postgres"
+            binary: standard
             tesseract: "false"
             tor: "false"
           - tag: tesseract-clearnet
-            features: "browser,postgres"
+            binary: standard
             tesseract: "true"
             tor: "false"
           - tag: redis-clearnet
-            features: "browser,postgres,redis-backend"
+            binary: redis
             tesseract: "false"
             tor: "false"
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ matrix.binary }}
+
+      - name: Prepare binary
+        run: mv foia-${{ matrix.binary }} foia
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -242,14 +295,13 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile
+          file: ./Dockerfile.runtime
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           build-args: |
-            FEATURES=${{ matrix.features }}
             WITH_TESSERACT=${{ matrix.tesseract }}
             WITH_TOR=${{ matrix.tor }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=runtime-${{ matrix.tag }}
+          cache-to: type=gha,scope=runtime-${{ matrix.tag }},mode=max
