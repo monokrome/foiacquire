@@ -62,23 +62,24 @@ pub async fn cmd_annotate(
     let mut service = AnnotationService::new(doc_repo.clone(), llm_config.clone());
     let config_history = ctx.config_history();
 
-    // Check if LLM service is available
-    if !service.is_available().await {
-        println!(
-            "{} LLM service not available at {}",
-            style("✗").red(),
-            llm_config.endpoint
-        );
-        println!("  Make sure Ollama is running: ollama serve");
-        return Ok(());
-    }
-
     println!(
-        "{} Connected to LLM at {} (model: {})",
+        "{} Using LLM at {} (model: {})",
         style("✓").green(),
         llm_config.endpoint,
         llm_config.model
     );
+
+    // Check if LLM service is available
+    // TODO: Establish whether this makes sense any more
+    // if !service.is_available().await {
+    //     println!(
+    //         "{} LLM service not available at {}",
+    //         style("✗").red(),
+    //         llm_config.endpoint
+    //     );
+    //     println!("  Make sure Ollama is running: ollama serve");
+    //     return Ok(());
+    // }
 
     // If specific doc_id provided, process just that document (no daemon mode)
     if let Some(id) = doc_id {

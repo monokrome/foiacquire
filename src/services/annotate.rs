@@ -59,10 +59,10 @@ impl AnnotationService {
         }
     }
 
-    /// Check if LLM service is available.
-    pub async fn is_available(&self) -> bool {
-        self.llm_client.is_available().await
-    }
+    //// Check if LLM service is available.
+    // pub async fn is_available(&self) -> bool {
+    //     self.llm_client.is_available().await
+    // }
 
     /// Get count of documents needing annotation.
     pub async fn count_needing_annotation(&self, source_id: Option<&str>) -> anyhow::Result<u64> {
