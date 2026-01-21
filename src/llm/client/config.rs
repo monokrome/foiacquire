@@ -88,6 +88,13 @@ fn default_max_content_chars() -> usize {
 
 impl Default for LlmConfig {
     fn default() -> Self {
+        Self::base_default().with_env_overrides()
+    }
+}
+
+impl LlmConfig {
+    /// Base default without env overrides (used internally to avoid recursion).
+    fn base_default() -> Self {
         Self {
             enabled: default_enabled(),
             provider: LlmProvider::default(),
@@ -101,12 +108,10 @@ impl Default for LlmConfig {
             max_content_chars: default_max_content_chars(),
         }
     }
-}
 
-impl LlmConfig {
     /// Check if the config equals the default (for skip_serializing_if).
     pub fn is_default(&self) -> bool {
-        *self == Self::default()
+        *self == Self::base_default()
     }
 
     /// Apply environment variable overrides.

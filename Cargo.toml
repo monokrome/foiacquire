@@ -161,7 +161,6 @@ ocr-ocrs = ["ocrs", "rten", "rten-imageproc", "image"]
 ocr-paddle = ["paddle-ocr-rs", "image"]
 ocr-all = ["ocr-ocrs", "ocr-paddle"]
 # Tor/privacy features
-tor = ["embedded-tor"]
 # SECURITY: Embedded Tor via Arti is DISABLED by default due to RUSTSEC-2023-0071
 # (Marvin Attack timing side-channel in rsa crate). Use C-Tor for hidden services
 # and external SOCKS proxy for outbound Tor until arti updates to a fixed rsa version.

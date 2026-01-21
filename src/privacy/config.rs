@@ -322,6 +322,7 @@ async fn display_hs_warning(message: &str, details: &[&str], warning_delay: u64)
     eprintln!();
     eprintln!("For security reasons, this message cannot be disabled.");
     eprintln!();
+    let _ = io::stderr().flush();
 
     if warning_delay > 0 {
         for i in (1..=warning_delay).rev() {
@@ -330,6 +331,7 @@ async fn display_hs_warning(message: &str, details: &[&str], warning_delay: u64)
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
         eprintln!();
+        let _ = io::stderr().flush();
     }
 }
 
@@ -452,6 +454,13 @@ fn is_default_warning_delay(v: &u64) -> bool {
 
 impl Default for PrivacyConfig {
     fn default() -> Self {
+        Self::base_default().with_env_overrides()
+    }
+}
+
+impl PrivacyConfig {
+    /// Base default without env overrides (used internally to avoid recursion).
+    fn base_default() -> Self {
         Self {
             direct: false,
             obfuscation: true,
@@ -463,9 +472,7 @@ impl Default for PrivacyConfig {
             hidden_service: HiddenServiceConfig::default(),
         }
     }
-}
 
-impl PrivacyConfig {
     /// Check if this is the default config.
     pub fn is_default(&self) -> bool {
         !self.direct
@@ -690,6 +697,8 @@ See https://rustsec.org/advisories/RUSTSEC-2023-0071 for details."#
 
     /// Display Tor legality warning if enabled and Tor is in use.
     pub fn show_tor_legal_warning(&self) {
+        use std::io::{self, Write};
+
         if !self.tor_legal_warning || !self.uses_tor() {
             return;
         }
@@ -699,6 +708,7 @@ See https://rustsec.org/advisories/RUSTSEC-2023-0071 for details."#
         eprintln!("      Know your local laws before proceeding.");
         eprintln!("      Disable this warning with --no-tor-warning");
         eprintln!();
+        let _ = io::stderr().flush();
     }
 
     /// Check if any insecure configuration is active.
@@ -766,6 +776,7 @@ See https://rustsec.org/advisories/RUSTSEC-2023-0071 for details."#
         eprintln!();
         eprintln!("For security reasons, this message cannot be disabled.");
         eprintln!();
+        let _ = io::stderr().flush();
 
         if self.warning_delay > 0 {
             for i in (1..=self.warning_delay).rev() {
@@ -774,6 +785,7 @@ See https://rustsec.org/advisories/RUSTSEC-2023-0071 for details."#
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
             eprintln!();
+            let _ = io::stderr().flush();
         }
     }
 }

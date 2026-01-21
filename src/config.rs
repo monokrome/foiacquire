@@ -418,10 +418,17 @@ impl Config {
                 }
             }
             Err(_) => {
-                // No config file found, use defaults
-                Self::default()
+                // No config file found, use defaults with env overrides
+                Self::default_with_env()
             }
         }
+    }
+
+    /// Create a default config with environment variable overrides applied.
+    /// Note: This is now equivalent to `Self::default()` since sub-configs
+    /// apply env overrides in their own Default implementations.
+    pub fn default_with_env() -> Self {
+        Self::default()
     }
 
     /// Load configuration from a specific file path.
@@ -751,7 +758,7 @@ async fn load_config_from_sources(
     if let Some(ref config_path) = options.config_path {
         return Config::load_from_path(config_path)
             .await
-            .unwrap_or_default();
+            .unwrap_or_else(|_| Config::default_with_env());
     }
 
     // Priority 2-3: Config next to target, or from database history
@@ -760,7 +767,7 @@ async fn load_config_from_sources(
             tracing::debug!("Found config next to target: {}", config_path.display());
             return Config::load_from_path(&config_path)
                 .await
-                .unwrap_or_default();
+                .unwrap_or_else(|_| Config::default_with_env());
         }
 
         if let Some(resolved) = resolved_target {
