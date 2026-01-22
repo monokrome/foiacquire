@@ -359,15 +359,55 @@ impl PostgresMigrator {
                 rate_limit_hits INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             )"#,
+            r#"CREATE TABLE IF NOT EXISTS page_ocr_results (
+                id SERIAL PRIMARY KEY,
+                page_id INTEGER NOT NULL REFERENCES document_pages(id) ON DELETE CASCADE,
+                backend TEXT NOT NULL,
+                text TEXT,
+                confidence REAL,
+                quality_score REAL,
+                char_count INTEGER,
+                word_count INTEGER,
+                processing_time_ms INTEGER,
+                error_message TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(page_id, backend)
+            )"#,
             "CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_id)",
             "CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)",
             "CREATE INDEX IF NOT EXISTS idx_documents_url ON documents(source_url)",
             "CREATE INDEX IF NOT EXISTS idx_document_versions_doc ON document_versions(document_id)",
             "CREATE INDEX IF NOT EXISTS idx_crawl_urls_source_status ON crawl_urls(source_id, status)",
             "CREATE INDEX IF NOT EXISTS idx_crawl_requests_source ON crawl_requests(source_id, request_at)",
+            "CREATE INDEX IF NOT EXISTS idx_page_ocr_results_page ON page_ocr_results(page_id)",
+            "CREATE INDEX IF NOT EXISTS idx_page_ocr_results_backend ON page_ocr_results(backend)",
+            "CREATE INDEX IF NOT EXISTS idx_page_ocr_results_page_quality ON page_ocr_results(page_id, quality_score DESC NULLS LAST)",
         ];
 
         for stmt in statements {
+            diesel::sql_query(stmt).execute(&mut conn).await?;
+        }
+
+        // Migrate existing OCR data from document_pages if not already migrated
+        // This is idempotent due to ON CONFLICT DO NOTHING
+        let data_migrations = [
+            r#"INSERT INTO page_ocr_results (page_id, backend, text, char_count, word_count, created_at)
+               SELECT id, 'tesseract', ocr_text, LENGTH(ocr_text),
+                      array_length(regexp_split_to_array(ocr_text, '\s+'), 1),
+                      COALESCE(updated_at::timestamptz, created_at::timestamptz, NOW())
+               FROM document_pages
+               WHERE ocr_text IS NOT NULL AND ocr_text != ''
+               ON CONFLICT (page_id, backend) DO NOTHING"#,
+            r#"INSERT INTO page_ocr_results (page_id, backend, text, char_count, word_count, created_at)
+               SELECT id, 'pdftotext', pdf_text, LENGTH(pdf_text),
+                      array_length(regexp_split_to_array(pdf_text, '\s+'), 1),
+                      COALESCE(updated_at::timestamptz, created_at::timestamptz, NOW())
+               FROM document_pages
+               WHERE pdf_text IS NOT NULL AND pdf_text != ''
+               ON CONFLICT (page_id, backend) DO NOTHING"#,
+        ];
+
+        for stmt in data_migrations {
             diesel::sql_query(stmt).execute(&mut conn).await?;
         }
 

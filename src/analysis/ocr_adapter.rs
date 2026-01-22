@@ -51,6 +51,8 @@ impl AnalysisBackend for OcrAnalysisAdapter {
             OcrBackendType::Ocrs => "ocrs",
             OcrBackendType::PaddleOcr => "paddleocr",
             OcrBackendType::DeepSeek => "deepseek",
+            OcrBackendType::Gemini => "gemini",
+            OcrBackendType::Groq => "groq",
         }
     }
 

@@ -212,6 +212,9 @@ enum Commands {
         /// Extract URLs from documents and add to crawl queue
         #[arg(long)]
         extract_urls: bool,
+        /// Filter by mime type (e.g., application/pdf)
+        #[arg(long)]
+        mime_type: Option<String>,
         /// Run continuously, checking for new work
         #[arg(long)]
         daemon: bool,
@@ -889,6 +892,7 @@ pub async fn run() -> anyhow::Result<()> {
             method,
             workers,
             limit,
+            mime_type,
             daemon,
             interval,
             reload,
@@ -901,6 +905,7 @@ pub async fn run() -> anyhow::Result<()> {
                 method.as_deref(),
                 workers,
                 limit,
+                mime_type.as_deref(),
                 daemon,
                 interval,
                 reload,

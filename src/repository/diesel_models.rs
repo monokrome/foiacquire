@@ -240,6 +240,40 @@ pub struct NewDocumentPage<'a> {
     pub updated_at: &'a str,
 }
 
+/// Page OCR result record from the database.
+#[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
+#[diesel(table_name = schema::page_ocr_results)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct PageOcrResultRecord {
+    pub id: i32,
+    pub page_id: i32,
+    pub backend: String,
+    pub text: Option<String>,
+    pub confidence: Option<f32>,
+    pub quality_score: Option<f32>,
+    pub char_count: Option<i32>,
+    pub word_count: Option<i32>,
+    pub processing_time_ms: Option<i32>,
+    pub error_message: Option<String>,
+    pub created_at: String,
+}
+
+/// New page OCR result for insertion.
+#[derive(Insertable, Debug)]
+#[diesel(table_name = schema::page_ocr_results)]
+pub struct NewPageOcrResult<'a> {
+    pub page_id: i32,
+    pub backend: &'a str,
+    pub text: Option<&'a str>,
+    pub confidence: Option<f32>,
+    pub quality_score: Option<f32>,
+    pub char_count: Option<i32>,
+    pub word_count: Option<i32>,
+    pub processing_time_ms: Option<i32>,
+    pub error_message: Option<&'a str>,
+    pub created_at: &'a str,
+}
+
 /// Config history record from the database.
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::configuration_history)]

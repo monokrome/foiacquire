@@ -417,6 +417,34 @@ pub async fn cmd_analyze_compare(
                     had_error = true;
                     break;
                 }
+                OcrBackendType::Gemini => {
+                    use crate::ocr::GeminiBackend;
+                    let backend = GeminiBackend::new();
+                    if !backend.is_available() {
+                        errors.insert(backend_name.clone(), backend.availability_hint());
+                        had_error = true;
+                        break;
+                    }
+                    if is_pdf {
+                        backend.ocr_pdf_page(file, page)
+                    } else {
+                        backend.ocr_image(file)
+                    }
+                }
+                OcrBackendType::Groq => {
+                    use crate::ocr::GroqBackend;
+                    let backend = GroqBackend::new();
+                    if !backend.is_available() {
+                        errors.insert(backend_name.clone(), backend.availability_hint());
+                        had_error = true;
+                        break;
+                    }
+                    if is_pdf {
+                        backend.ocr_pdf_page(file, page)
+                    } else {
+                        backend.ocr_image(file)
+                    }
+                }
             };
 
             match result {
@@ -609,6 +637,7 @@ pub async fn cmd_analyze(
     method: Option<&str>,
     workers: usize,
     limit: usize,
+    mime_type: Option<&str>,
     daemon: bool,
     interval: u64,
     reload: ReloadMode,
@@ -673,7 +702,7 @@ pub async fn cmd_analyze(
 
     loop {
         // Check if there's work to do
-        let (docs_count, pages_count) = service.count_needing_processing(source_id).await?;
+        let (docs_count, pages_count) = service.count_needing_processing(source_id, mime_type).await?;
         if docs_count == 0 && pages_count == 0 {
             if daemon {
                 println!(
@@ -868,7 +897,7 @@ pub async fn cmd_analyze(
 
         // Run service
         let _result = service
-            .process(source_id, &methods, workers, limit, event_tx)
+            .process(source_id, &methods, workers, limit, mime_type, event_tx)
             .await?;
 
         // Wait for event handler to finish

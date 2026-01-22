@@ -8,9 +8,9 @@ use diesel_async::RunQueryDsl;
 
 use super::{DieselDocumentRepository, LastInsertRowId, OcrResult};
 use crate::models::{DocumentPage, PageOcrStatus};
-use crate::repository::diesel_models::DocumentPageRecord;
+use crate::repository::diesel_models::{DocumentPageRecord, NewPageOcrResult, PageOcrResultRecord};
 use crate::repository::pool::DieselError;
-use crate::schema::document_pages;
+use crate::schema::{document_pages, page_ocr_results};
 use crate::{with_conn, with_conn_split};
 
 impl DieselDocumentRepository {
@@ -161,31 +161,113 @@ impl DieselDocumentRepository {
             .collect())
     }
 
-    /// Store OCR result for a page.
-    /// Updates the ocr_text and status fields on the page.
+    /// Store OCR result for a page from a specific backend.
+    /// Stores in page_ocr_results table and updates page's ocr_text/status.
     pub async fn store_page_ocr_result(
         &self,
         page_id: i64,
-        _backend: &str,
+        backend: &str,
         text: Option<&str>,
-        _confidence: Option<f32>,
-        error: Option<&str>,
+        confidence: Option<f32>,
+        processing_time_ms: Option<i32>,
     ) -> Result<(), DieselError> {
-        let status = if error.is_some() {
-            "failed"
-        } else {
-            "ocr_complete"
+        let now = Utc::now().to_rfc3339();
+        let char_count = text.map(|t| t.chars().count() as i32);
+        let word_count = text.map(|t| t.split_whitespace().count() as i32);
+
+        let new_result = NewPageOcrResult {
+            page_id: page_id as i32,
+            backend,
+            text,
+            confidence,
+            quality_score: None, // Computed later if needed
+            char_count,
+            word_count,
+            processing_time_ms,
+            error_message: None,
+            created_at: &now,
         };
 
         with_conn!(self.pool, conn, {
-            diesel::update(document_pages::table.find(page_id as i32))
+            // Upsert: insert or update if backend already exists for this page
+            diesel::insert_into(page_ocr_results::table)
+                .values(&new_result)
+                .on_conflict((page_ocr_results::page_id, page_ocr_results::backend))
+                .do_update()
                 .set((
-                    document_pages::ocr_text.eq(text),
-                    document_pages::ocr_status.eq(status),
+                    page_ocr_results::text.eq(text),
+                    page_ocr_results::confidence.eq(confidence),
+                    page_ocr_results::char_count.eq(char_count),
+                    page_ocr_results::word_count.eq(word_count),
+                    page_ocr_results::processing_time_ms.eq(processing_time_ms),
+                    page_ocr_results::created_at.eq(&now),
                 ))
                 .execute(&mut conn)
                 .await?;
+
+            // Also update the page's ocr_text for backwards compatibility
+            diesel::update(document_pages::table.find(page_id as i32))
+                .set((
+                    document_pages::ocr_text.eq(text),
+                    document_pages::ocr_status.eq("ocr_complete"),
+                ))
+                .execute(&mut conn)
+                .await?;
+
             Ok(())
+        })
+    }
+
+    /// Store OCR error for a page from a specific backend.
+    pub async fn store_page_ocr_error(
+        &self,
+        page_id: i64,
+        backend: &str,
+        error_message: &str,
+    ) -> Result<(), DieselError> {
+        let now = Utc::now().to_rfc3339();
+
+        let new_result = NewPageOcrResult {
+            page_id: page_id as i32,
+            backend,
+            text: None,
+            confidence: None,
+            quality_score: None,
+            char_count: None,
+            word_count: None,
+            processing_time_ms: None,
+            error_message: Some(error_message),
+            created_at: &now,
+        };
+
+        with_conn!(self.pool, conn, {
+            diesel::insert_into(page_ocr_results::table)
+                .values(&new_result)
+                .on_conflict((page_ocr_results::page_id, page_ocr_results::backend))
+                .do_update()
+                .set((
+                    page_ocr_results::text.eq::<Option<&str>>(None),
+                    page_ocr_results::error_message.eq(Some(error_message)),
+                    page_ocr_results::created_at.eq(&now),
+                ))
+                .execute(&mut conn)
+                .await?;
+
+            Ok(())
+        })
+    }
+
+    /// Get all OCR results for a page from different backends.
+    pub async fn get_page_ocr_results(
+        &self,
+        page_id: i64,
+    ) -> Result<Vec<PageOcrResultRecord>, DieselError> {
+        with_conn!(self.pool, conn, {
+            page_ocr_results::table
+                .filter(page_ocr_results::page_id.eq(page_id as i32))
+                .order(page_ocr_results::created_at.desc())
+                .load(&mut conn)
+                .await
         })
     }
 
@@ -245,6 +327,41 @@ impl DieselDocumentRepository {
                 .await?;
             Ok(count as u64)
         })
+    }
+
+    /// Get pages needing OCR across all documents.
+    pub async fn get_all_pages_needing_ocr(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<DocumentPage>, DieselError> {
+        let records: Vec<DocumentPageRecord> = with_conn!(self.pool, conn, {
+            document_pages::table
+                .filter(
+                    document_pages::ocr_status
+                        .eq("pending")
+                        .or(document_pages::ocr_status.eq("text_extracted")),
+                )
+                .limit(limit as i64)
+                .load(&mut conn)
+                .await
+        })?;
+
+        Ok(records
+            .into_iter()
+            .map(|r| DocumentPage {
+                id: r.id as i64,
+                document_id: r.document_id,
+                version_id: r.version_id as i64,
+                page_number: r.page_number as u32,
+                pdf_text: r.pdf_text,
+                ocr_text: r.ocr_text,
+                final_text: None,
+                ocr_status: PageOcrStatus::from_str(&r.ocr_status)
+                    .unwrap_or(PageOcrStatus::Pending),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            })
+            .collect())
     }
 
     /// Get combined page text for a document.

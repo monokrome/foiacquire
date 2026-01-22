@@ -54,6 +54,10 @@ pub enum OcrBackendType {
     PaddleOcr,
     /// DeepSeek VLM-based OCR via subprocess.
     DeepSeek,
+    /// Google Gemini Vision API.
+    Gemini,
+    /// Groq Vision API (Llama 4 Scout/Maverick).
+    Groq,
 }
 
 impl OcrBackendType {
@@ -63,6 +67,8 @@ impl OcrBackendType {
             OcrBackendType::Ocrs => "ocrs",
             OcrBackendType::PaddleOcr => "paddleocr",
             OcrBackendType::DeepSeek => "deepseek",
+            OcrBackendType::Gemini => "gemini",
+            OcrBackendType::Groq => "groq",
         }
     }
 
@@ -72,6 +78,8 @@ impl OcrBackendType {
             "ocrs" => Some(OcrBackendType::Ocrs),
             "paddleocr" | "paddle" => Some(OcrBackendType::PaddleOcr),
             "deepseek" => Some(OcrBackendType::DeepSeek),
+            "gemini" => Some(OcrBackendType::Gemini),
+            "groq" => Some(OcrBackendType::Groq),
             _ => None,
         }
     }

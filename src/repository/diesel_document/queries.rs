@@ -67,15 +67,46 @@ impl DieselDocumentRepository {
     /// Count documents needing OCR.
     /// Documents need OCR if status is 'pending' or 'downloaded' and they have a PDF version.
     pub async fn count_needing_ocr(&self, source_id: Option<&str>) -> Result<u64, DieselError> {
+        self.count_needing_ocr_filtered(source_id, None).await
+    }
+
+    /// Count documents needing OCR with optional mime type filter.
+    pub async fn count_needing_ocr_filtered(
+        &self,
+        source_id: Option<&str>,
+        mime_type: Option<&str>,
+    ) -> Result<u64, DieselError> {
+        use crate::schema::document_versions;
+
         with_conn!(self.pool, conn, {
-            let mut query = documents::table
-                .filter(documents::status.eq_any(vec!["pending", "downloaded"]))
-                .into_boxed();
-            if let Some(sid) = source_id {
-                query = query.filter(documents::source_id.eq(sid));
+            if let Some(mime) = mime_type {
+                // Join with versions to filter by mime type
+                let mut query = documents::table
+                    .inner_join(document_versions::table.on(
+                        document_versions::document_id.eq(documents::id)
+                    ))
+                    .filter(documents::status.eq_any(vec!["pending", "downloaded"]))
+                    .filter(document_versions::mime_type.eq(mime))
+                    .select(documents::id)
+                    .distinct()
+                    .into_boxed();
+
+                if let Some(sid) = source_id {
+                    query = query.filter(documents::source_id.eq(sid));
+                }
+                let count: i64 = query.count().get_result(&mut conn).await?;
+                Ok(count as u64)
+            } else {
+                // No mime filter, use simple query
+                let mut query = documents::table
+                    .filter(documents::status.eq_any(vec!["pending", "downloaded"]))
+                    .into_boxed();
+                if let Some(sid) = source_id {
+                    query = query.filter(documents::source_id.eq(sid));
+                }
+                let count: i64 = query.count().get_result(&mut conn).await?;
+                Ok(count as u64)
             }
-            let count: i64 = query.count().get_result(&mut conn).await?;
-            Ok(count as u64)
         })
     }
 
@@ -1029,12 +1060,43 @@ impl DieselDocumentRepository {
 
     /// Get documents needing OCR.
     pub async fn get_needing_ocr(&self, limit: usize) -> Result<Vec<Document>, DieselError> {
+        self.get_needing_ocr_filtered(limit, None).await
+    }
+
+    /// Get documents needing OCR with optional mime type filter.
+    pub async fn get_needing_ocr_filtered(
+        &self,
+        limit: usize,
+        mime_type: Option<&str>,
+    ) -> Result<Vec<Document>, DieselError> {
+        use crate::schema::document_versions;
+
         let records: Vec<DocumentRecord> = with_conn!(self.pool, conn, {
-            documents::table
-                .filter(documents::status.eq_any(vec!["pending", "downloaded"]))
-                .limit(limit as i64)
-                .load(&mut conn)
-                .await
+            if let Some(mime) = mime_type {
+                // Join with versions to filter by mime type
+                let doc_ids: Vec<String> = documents::table
+                    .inner_join(document_versions::table.on(
+                        document_versions::document_id.eq(documents::id)
+                    ))
+                    .filter(documents::status.eq_any(vec!["pending", "downloaded"]))
+                    .filter(document_versions::mime_type.eq(mime))
+                    .select(documents::id)
+                    .distinct()
+                    .limit(limit as i64)
+                    .load(&mut conn)
+                    .await?;
+
+                documents::table
+                    .filter(documents::id.eq_any(doc_ids))
+                    .load(&mut conn)
+                    .await
+            } else {
+                documents::table
+                    .filter(documents::status.eq_any(vec!["pending", "downloaded"]))
+                    .limit(limit as i64)
+                    .load(&mut conn)
+                    .await
+            }
         })?;
 
         let mut docs = Vec::with_capacity(records.len());

@@ -6,6 +6,8 @@
 //! - OCRS for pure-Rust OCR (feature: ocr-ocrs)
 //! - PaddleOCR for CNN-based OCR via ONNX (feature: ocr-paddle)
 //! - DeepSeek OCR for LLM-based text extraction (GPU recommended)
+//! - Gemini Vision for cloud-based LLM OCR (GEMINI_API_KEY)
+//! - Groq Vision for fast cloud-based LLM OCR (GROQ_API_KEY)
 //!
 //! Also includes URL extraction from extracted text.
 //! And archive handling for processing files within zip archives.
@@ -14,12 +16,14 @@
 //! ## OCR Backends
 //!
 //! Tesseract is the default and recommended OCR backend.
-//! Additional backends are available via feature flags:
+//! Additional backends are available via feature flags or API keys:
 //!
 //! - **Tesseract**: Traditional OCR, widely available, CPU-based (default)
 //! - **OCRS**: Pure Rust OCR, no external binaries (feature: ocr-ocrs)
 //! - **PaddleOCR**: CNN-based, fast, GPU support via ONNX (feature: ocr-paddle)
 //! - **DeepSeek**: LLM-based OCR, highest accuracy, GPU recommended
+//! - **Gemini**: Google's vision LLM, free tier 1,500 req/day (GEMINI_API_KEY)
+//! - **Groq**: Fast inference, free tier 1,000 req/day (GROQ_API_KEY)
 //!
 //! Use `OcrManager` to compare results across backends.
 
@@ -31,6 +35,8 @@ mod backend;
 mod deepseek;
 mod email;
 mod extractor;
+mod gemini;
+mod groq;
 mod model_utils;
 mod pdf_utils;
 mod tesseract;
@@ -49,6 +55,8 @@ pub use url_finder::UrlFinder;
 // OCR backend abstraction for A/B testing and per-source backend selection
 pub use backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError, OcrManager, OcrResult};
 pub use deepseek::DeepSeekBackend;
+pub use gemini::GeminiBackend;
+pub use groq::GroqBackend;
 pub use tesseract::TesseractBackend;
 
 #[cfg(feature = "ocr-ocrs")]

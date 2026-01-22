@@ -94,6 +94,22 @@ diesel::table! {
 }
 
 diesel::table! {
+    page_ocr_results (id) {
+        id -> Integer,
+        page_id -> Integer,
+        backend -> Text,
+        text -> Nullable<Text>,
+        confidence -> Nullable<Float>,
+        quality_score -> Nullable<Float>,
+        char_count -> Nullable<Integer>,
+        word_count -> Nullable<Integer>,
+        processing_time_ms -> Nullable<Integer>,
+        error_message -> Nullable<Text>,
+        created_at -> Text,
+    }
+}
+
+diesel::table! {
     document_versions (id) {
         id -> Integer,
         document_id -> Text,
@@ -229,6 +245,7 @@ diesel::joinable!(document_versions -> documents (document_id));
 diesel::joinable!(document_versions -> archive_snapshots (archive_snapshot_id));
 diesel::joinable!(documents -> sources (source_id));
 diesel::joinable!(virtual_files -> documents (document_id));
+diesel::joinable!(page_ocr_results -> document_pages (page_id));
 
 diesel::joinable!(document_analysis_results -> documents (document_id));
 diesel::joinable!(document_analysis_results -> document_pages (page_id));
@@ -247,6 +264,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     document_pages,
     document_versions,
     documents,
+    page_ocr_results,
     rate_limit_state,
     service_status,
     sources,
