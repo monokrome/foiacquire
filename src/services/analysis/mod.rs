@@ -40,7 +40,10 @@ impl AnalysisService {
         source_id: Option<&str>,
         mime_type: Option<&str>,
     ) -> anyhow::Result<(u64, u64)> {
-        let docs = self.doc_repo.count_needing_ocr_filtered(source_id, mime_type).await?;
+        let docs = self
+            .doc_repo
+            .count_needing_ocr_filtered(source_id, mime_type)
+            .await?;
         let pages = self.doc_repo.count_pages_needing_ocr().await?;
         Ok((docs, pages))
     }
@@ -137,7 +140,10 @@ impl AnalysisService {
         result: &mut AnalysisResult,
     ) -> anyhow::Result<()> {
         // Get documents needing OCR (same as Phase 1) - we check MIME before processing
-        let total_count = self.doc_repo.count_needing_ocr_filtered(source_id, mime_type).await?;
+        let total_count = self
+            .doc_repo
+            .count_needing_ocr_filtered(source_id, mime_type)
+            .await?;
 
         if total_count == 0 {
             return Ok(());
@@ -145,11 +151,18 @@ impl AnalysisService {
 
         let _ = event_tx
             .send(AnalysisEvent::MimeCheckStarted {
-                total_documents: if limit > 0 { limit } else { total_count as usize },
+                total_documents: if limit > 0 {
+                    limit
+                } else {
+                    total_count as usize
+                },
             })
             .await;
 
-        let docs = self.doc_repo.get_needing_ocr_filtered(if limit > 0 { limit.min(10000) } else { 10000 }, mime_type).await?;
+        let docs = self
+            .doc_repo
+            .get_needing_ocr_filtered(if limit > 0 { limit.min(10000) } else { 10000 }, mime_type)
+            .await?;
         let mut checked = 0;
         let mut fixed = 0;
 
@@ -254,7 +267,10 @@ impl AnalysisService {
         event_tx: &mpsc::Sender<AnalysisEvent>,
         result: &mut AnalysisResult,
     ) -> anyhow::Result<()> {
-        let total_count = self.doc_repo.count_needing_ocr_filtered(source_id, mime_type).await?;
+        let total_count = self
+            .doc_repo
+            .count_needing_ocr_filtered(source_id, mime_type)
+            .await?;
 
         if total_count == 0 {
             return Ok(());
@@ -264,7 +280,11 @@ impl AnalysisService {
 
         let _ = event_tx
             .send(AnalysisEvent::Phase1Started {
-                total_documents: if limit > 0 { limit } else { total_count as usize },
+                total_documents: if limit > 0 {
+                    limit
+                } else {
+                    total_count as usize
+                },
             })
             .await;
 
@@ -284,7 +304,10 @@ impl AnalysisService {
             let remaining = max_to_process - current_processed;
             let batch_limit = remaining.min(batch_size);
 
-            let docs = self.doc_repo.get_needing_ocr_filtered(batch_limit, mime_type).await?;
+            let docs = self
+                .doc_repo
+                .get_needing_ocr_filtered(batch_limit, mime_type)
+                .await?;
 
             if docs.is_empty() {
                 break; // No more documents to process
@@ -399,10 +422,7 @@ impl AnalysisService {
 
         loop {
             let batch_limit = batch_size;
-            let pages = self
-                .doc_repo
-                .get_all_pages_needing_ocr(batch_limit)
-                .await?;
+            let pages = self.doc_repo.get_all_pages_needing_ocr(batch_limit).await?;
 
             if pages.is_empty() {
                 break; // No more pages to process
@@ -411,7 +431,6 @@ impl AnalysisService {
             let mut handles = Vec::with_capacity(pages.len().min(workers));
 
             for page in pages {
-
                 let doc_repo = self.doc_repo.clone();
                 let processed = processed.clone();
                 let ocr_improved = ocr_improved.clone();

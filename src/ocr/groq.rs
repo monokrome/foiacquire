@@ -11,6 +11,7 @@
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -19,12 +20,15 @@ use tokio::runtime::Handle;
 
 use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError, OcrResult};
 use super::pdf_utils;
+use crate::privacy::PrivacyConfig;
+use crate::scrapers::HttpClient;
 
 /// Groq Vision OCR backend using OpenAI-compatible API.
 pub struct GroqBackend {
     config: OcrConfig,
     api_key: Option<String>,
     model: String,
+    privacy: PrivacyConfig,
 }
 
 #[derive(Debug, Serialize)]
@@ -83,6 +87,7 @@ impl GroqBackend {
             config: OcrConfig::default(),
             api_key: std::env::var("GROQ_API_KEY").ok(),
             model: "llama-4-scout-17b-16e-instruct".to_string(),
+            privacy: PrivacyConfig::default(),
         }
     }
 
@@ -92,6 +97,17 @@ impl GroqBackend {
             config,
             api_key: std::env::var("GROQ_API_KEY").ok(),
             model: "llama-4-scout-17b-16e-instruct".to_string(),
+            privacy: PrivacyConfig::default(),
+        }
+    }
+
+    /// Create a new Groq backend with privacy configuration.
+    pub fn with_privacy(privacy: PrivacyConfig) -> Self {
+        Self {
+            config: OcrConfig::default(),
+            api_key: std::env::var("GROQ_API_KEY").ok(),
+            model: "llama-4-scout-17b-16e-instruct".to_string(),
+            privacy,
         }
     }
 
@@ -107,6 +123,18 @@ impl GroqBackend {
         self
     }
 
+    /// Create an HTTP client for Groq requests.
+    fn create_client(&self) -> Result<HttpClient, OcrError> {
+        HttpClient::with_privacy(
+            "groq-ocr",
+            Duration::from_secs(120),
+            Duration::from_millis(0),
+            None,
+            &self.privacy,
+        )
+        .map_err(|e| OcrError::OcrFailed(format!("Failed to create HTTP client: {}", e)))
+    }
+
     /// Run Groq OCR on an image (async implementation).
     async fn run_groq_async(&self, image_path: &Path) -> Result<String, OcrError> {
         let api_key = self.api_key.as_ref().ok_or_else(|| {
@@ -118,11 +146,7 @@ impl GroqBackend {
         let image_bytes = fs::read(image_path)?;
         let image_base64 = base64::engine::general_purpose::STANDARD.encode(&image_bytes);
 
-        let mime_type = if image_path
-            .extension()
-            .map(|e| e == "png")
-            .unwrap_or(false)
-        {
+        let mime_type = if image_path.extension().map(|e| e == "png").unwrap_or(false) {
             "image/png"
         } else {
             "image/jpeg"
@@ -147,22 +171,24 @@ impl GroqBackend {
             temperature: 0.1,
         };
 
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(120))
-            .build()
-            .map_err(|e| OcrError::OcrFailed(format!("Failed to create HTTP client: {}", e)))?;
+        let client = self.create_client()?;
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Authorization".to_string(),
+            format!("Bearer {}", api_key),
+        );
 
         let response = client
-            .post("https://api.groq.com/openai/v1/chat/completions")
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .send()
+            .post_json_with_headers(
+                "https://api.groq.com/openai/v1/chat/completions",
+                &request,
+                headers,
+            )
             .await
             .map_err(|e| OcrError::OcrFailed(format!("HTTP request failed: {}", e)))?;
 
-        if !response.status().is_success() {
-            let status = response.status();
+        if !response.status.is_success() {
+            let status = response.status;
             let body = response.text().await.unwrap_or_default();
             return Err(OcrError::OcrFailed(format!(
                 "Groq API error ({}): {}",

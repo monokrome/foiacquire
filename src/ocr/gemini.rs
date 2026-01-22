@@ -19,12 +19,15 @@ use tokio::runtime::Handle;
 
 use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError, OcrResult};
 use super::pdf_utils;
+use crate::privacy::PrivacyConfig;
+use crate::scrapers::HttpClient;
 
 /// Gemini Vision OCR backend using Google's Generative AI API.
 pub struct GeminiBackend {
     config: OcrConfig,
     api_key: Option<String>,
     model: String,
+    privacy: PrivacyConfig,
 }
 
 #[derive(Debug, Serialize)]
@@ -92,6 +95,7 @@ impl GeminiBackend {
             config: OcrConfig::default(),
             api_key: std::env::var("GEMINI_API_KEY").ok(),
             model: "gemini-1.5-flash".to_string(),
+            privacy: PrivacyConfig::default(),
         }
     }
 
@@ -101,6 +105,17 @@ impl GeminiBackend {
             config,
             api_key: std::env::var("GEMINI_API_KEY").ok(),
             model: "gemini-1.5-flash".to_string(),
+            privacy: PrivacyConfig::default(),
+        }
+    }
+
+    /// Create a new Gemini backend with privacy configuration.
+    pub fn with_privacy(privacy: PrivacyConfig) -> Self {
+        Self {
+            config: OcrConfig::default(),
+            api_key: std::env::var("GEMINI_API_KEY").ok(),
+            model: "gemini-1.5-flash".to_string(),
+            privacy,
         }
     }
 
@@ -116,6 +131,18 @@ impl GeminiBackend {
         self
     }
 
+    /// Create an HTTP client for Gemini requests.
+    fn create_client(&self) -> Result<HttpClient, OcrError> {
+        HttpClient::with_privacy(
+            "gemini-ocr",
+            Duration::from_secs(120),
+            Duration::from_millis(0),
+            None,
+            &self.privacy,
+        )
+        .map_err(|e| OcrError::OcrFailed(format!("Failed to create HTTP client: {}", e)))
+    }
+
     /// Run Gemini OCR on an image (async implementation).
     async fn run_gemini_async(&self, image_path: &Path) -> Result<String, OcrError> {
         let api_key = self.api_key.as_ref().ok_or_else(|| {
@@ -127,11 +154,7 @@ impl GeminiBackend {
         let image_bytes = fs::read(image_path)?;
         let image_base64 = base64::engine::general_purpose::STANDARD.encode(&image_bytes);
 
-        let mime_type = if image_path
-            .extension()
-            .map(|e| e == "png")
-            .unwrap_or(false)
-        {
+        let mime_type = if image_path.extension().map(|e| e == "png").unwrap_or(false) {
             "image/png"
         } else {
             "image/jpeg"
@@ -162,20 +185,14 @@ impl GeminiBackend {
             self.model, api_key
         );
 
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(120))
-            .build()
-            .map_err(|e| OcrError::OcrFailed(format!("Failed to create HTTP client: {}", e)))?;
-
+        let client = self.create_client()?;
         let response = client
-            .post(&url)
-            .json(&request)
-            .send()
+            .post_json(&url, &request)
             .await
             .map_err(|e| OcrError::OcrFailed(format!("HTTP request failed: {}", e)))?;
 
-        if !response.status().is_success() {
-            let status = response.status();
+        if !response.status.is_success() {
+            let status = response.status;
             let body = response.text().await.unwrap_or_default();
             return Err(OcrError::OcrFailed(format!(
                 "Gemini API error ({}): {}",

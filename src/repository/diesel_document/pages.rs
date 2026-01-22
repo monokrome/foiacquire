@@ -122,6 +122,7 @@ impl DieselDocumentRepository {
     }
 
     /// Get pages needing OCR.
+    #[allow(dead_code)]
     pub async fn get_pages_needing_ocr(
         &self,
         document_id: &str,
@@ -219,6 +220,7 @@ impl DieselDocumentRepository {
     }
 
     /// Store OCR error for a page from a specific backend.
+    #[allow(dead_code)]
     pub async fn store_page_ocr_error(
         &self,
         page_id: i64,
@@ -258,6 +260,7 @@ impl DieselDocumentRepository {
     }
 
     /// Get all OCR results for a page from different backends.
+    #[allow(dead_code)]
     pub async fn get_page_ocr_results(
         &self,
         page_id: i64,

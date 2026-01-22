@@ -82,9 +82,10 @@ impl DieselDocumentRepository {
             if let Some(mime) = mime_type {
                 // Join with versions to filter by mime type
                 let mut query = documents::table
-                    .inner_join(document_versions::table.on(
-                        document_versions::document_id.eq(documents::id)
-                    ))
+                    .inner_join(
+                        document_versions::table
+                            .on(document_versions::document_id.eq(documents::id)),
+                    )
                     .filter(documents::status.eq_any(vec!["pending", "downloaded"]))
                     .filter(document_versions::mime_type.eq(mime))
                     .select(documents::id)
@@ -1059,6 +1060,7 @@ impl DieselDocumentRepository {
     }
 
     /// Get documents needing OCR.
+    #[allow(dead_code)]
     pub async fn get_needing_ocr(&self, limit: usize) -> Result<Vec<Document>, DieselError> {
         self.get_needing_ocr_filtered(limit, None).await
     }
@@ -1075,9 +1077,10 @@ impl DieselDocumentRepository {
             if let Some(mime) = mime_type {
                 // Join with versions to filter by mime type
                 let doc_ids: Vec<String> = documents::table
-                    .inner_join(document_versions::table.on(
-                        document_versions::document_id.eq(documents::id)
-                    ))
+                    .inner_join(
+                        document_versions::table
+                            .on(document_versions::document_id.eq(documents::id)),
+                    )
                     .filter(documents::status.eq_any(vec!["pending", "downloaded"]))
                     .filter(document_versions::mime_type.eq(mime))
                     .select(documents::id)

@@ -195,7 +195,9 @@ impl LlmConfig {
                 match provider_lower.as_str() {
                     "groq" => self.model = "llama-3.1-70b-versatile".to_string(),
                     "openai" => self.model = "gpt-4o-mini".to_string(),
-                    "together" => self.model = "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo".to_string(),
+                    "together" => {
+                        self.model = "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo".to_string()
+                    }
                     _ => {} // ollama keeps default
                 }
             }

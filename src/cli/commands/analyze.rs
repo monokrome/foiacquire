@@ -702,7 +702,9 @@ pub async fn cmd_analyze(
 
     loop {
         // Check if there's work to do
-        let (docs_count, pages_count) = service.count_needing_processing(source_id, mime_type).await?;
+        let (docs_count, pages_count) = service
+            .count_needing_processing(source_id, mime_type)
+            .await?;
         if docs_count == 0 && pages_count == 0 {
             if daemon {
                 println!(
