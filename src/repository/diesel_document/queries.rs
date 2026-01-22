@@ -1032,7 +1032,6 @@ impl DieselDocumentRepository {
         let records: Vec<DocumentRecord> = with_conn!(self.pool, conn, {
             documents::table
                 .filter(documents::status.eq_any(vec!["pending", "downloaded"]))
-                .order(documents::updated_at.asc())
                 .limit(limit as i64)
                 .load(&mut conn)
                 .await

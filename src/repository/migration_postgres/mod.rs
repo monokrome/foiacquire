@@ -360,6 +360,7 @@ impl PostgresMigrator {
                 updated_at TEXT NOT NULL
             )"#,
             "CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_id)",
+            "CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)",
             "CREATE INDEX IF NOT EXISTS idx_documents_url ON documents(source_url)",
             "CREATE INDEX IF NOT EXISTS idx_document_versions_doc ON document_versions(document_id)",
             "CREATE INDEX IF NOT EXISTS idx_crawl_urls_source_status ON crawl_urls(source_id, status)",

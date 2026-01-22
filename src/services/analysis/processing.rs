@@ -42,9 +42,16 @@ pub fn extract_document_text_per_page(
 
     // Get page count (use cached value if available)
     let page_count = version.page_count.unwrap_or_else(|| {
-        extractor
+        tracing::debug!(
+            "Getting page count for document {}: {}",
+            doc.id,
+            version.file_path.display()
+        );
+        let count = extractor
             .get_pdf_page_count(&version.file_path)
-            .unwrap_or(1)
+            .unwrap_or(1);
+        tracing::debug!("Document {} has {} pages", doc.id, count);
+        count
     });
 
     // Cache page count if not already cached
@@ -58,6 +65,12 @@ pub fn extract_document_text_per_page(
     let mut pages_created = 0;
 
     for page_num in 1..=page_count {
+        tracing::debug!(
+            "Processing page {}/{} of document {}",
+            page_num,
+            page_count,
+            doc.id
+        );
         // Extract text using pdftotext
         let pdf_text = extractor
             .extract_pdf_page_text(&version.file_path, page_num)
@@ -67,6 +80,12 @@ pub fn extract_document_text_per_page(
         page.pdf_text = Some(pdf_text.clone());
         page.ocr_status = PageOcrStatus::TextExtracted;
 
+        tracing::debug!(
+            "Saving page {}/{} to database for document {}",
+            page_num,
+            page_count,
+            doc.id
+        );
         let page_id = handle.block_on(doc_repo.save_page(&page))?;
 
         // Store pdftotext result in page_ocr_results for comparison

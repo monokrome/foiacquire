@@ -140,19 +140,13 @@ impl AnalysisService {
             return Ok(());
         }
 
-        let effective_limit = if limit > 0 {
-            limit.min(total_count as usize)
-        } else {
-            total_count as usize
-        };
-
         let _ = event_tx
             .send(AnalysisEvent::MimeCheckStarted {
-                total_documents: effective_limit,
+                total_documents: if limit > 0 { limit } else { total_count as usize },
             })
             .await;
 
-        let docs = self.doc_repo.get_needing_ocr(effective_limit).await?;
+        let docs = self.doc_repo.get_needing_ocr(if limit > 0 { limit.min(10000) } else { 10000 }).await?;
         let mut checked = 0;
         let mut fixed = 0;
 
@@ -262,15 +256,11 @@ impl AnalysisService {
             return Ok(());
         }
 
-        let effective_limit = if limit > 0 {
-            limit
-        } else {
-            total_count as usize
-        };
+        let max_to_process = if limit > 0 { limit } else { usize::MAX };
 
         let _ = event_tx
             .send(AnalysisEvent::Phase1Started {
-                total_documents: effective_limit.min(total_count as usize),
+                total_documents: if limit > 0 { limit } else { total_count as usize },
             })
             .await;
 
@@ -280,21 +270,27 @@ impl AnalysisService {
         let processed = Arc::new(AtomicUsize::new(0));
 
         let batch_size = workers * 4;
-        let mut offset = 0;
 
-        while offset < effective_limit {
-            let batch_limit = (effective_limit - offset).min(batch_size);
+        loop {
+            let current_processed = processed.load(Ordering::Relaxed);
+            if current_processed >= max_to_process {
+                break;
+            }
+
+            let remaining = max_to_process - current_processed;
+            let batch_limit = remaining.min(batch_size);
+
             let docs = self.doc_repo.get_needing_ocr(batch_limit).await?;
 
             if docs.is_empty() {
-                break;
+                break; // No more documents to process
             }
 
             let mut handles = Vec::with_capacity(docs.len().min(workers));
 
             for doc in docs {
                 let current = processed.load(Ordering::Relaxed);
-                if current >= effective_limit {
+                if current >= max_to_process {
                     break;
                 }
 
@@ -361,8 +357,6 @@ impl AnalysisService {
             for h in handles {
                 let _ = h.await;
             }
-
-            offset += batch_limit;
         }
 
         result.phase1_succeeded = succeeded.load(Ordering::Relaxed);
@@ -386,17 +380,9 @@ impl AnalysisService {
         event_tx: &mpsc::Sender<AnalysisEvent>,
         result: &mut AnalysisResult,
     ) -> anyhow::Result<()> {
-        let pages_needing_ocr = self.doc_repo.count_pages_needing_ocr().await?;
-
-        if pages_needing_ocr == 0 {
-            return Ok(());
-        }
-
-        let effective_limit = pages_needing_ocr as usize;
-
         let _ = event_tx
             .send(AnalysisEvent::Phase2Started {
-                total_pages: effective_limit,
+                total_pages: 0, // Unknown total, process until none remain
             })
             .await;
 
@@ -406,26 +392,21 @@ impl AnalysisService {
         let ocr_failed = Arc::new(AtomicUsize::new(0));
 
         let batch_size = workers * 2;
-        let mut offset = 0;
 
-        while offset < effective_limit {
-            let batch_limit = (effective_limit - offset).min(batch_size);
+        loop {
+            let batch_limit = batch_size;
             let pages = self
                 .doc_repo
                 .get_pages_needing_ocr("", 0, batch_limit)
                 .await?;
 
             if pages.is_empty() {
-                break;
+                break; // No more pages to process
             }
 
             let mut handles = Vec::with_capacity(pages.len().min(workers));
 
             for page in pages {
-                let current = processed.load(Ordering::Relaxed);
-                if current >= effective_limit {
-                    break;
-                }
 
                 let doc_repo = self.doc_repo.clone();
                 let processed = processed.clone();
@@ -499,8 +480,6 @@ impl AnalysisService {
             for h in handles {
                 let _ = h.await;
             }
-
-            offset += batch_limit;
         }
 
         result.phase2_improved = ocr_improved.load(Ordering::Relaxed);
