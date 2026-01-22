@@ -1,8 +1,120 @@
 //! Helper types and utility functions for handlers.
 
+use axum::{http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 
 use super::super::AppState;
+use crate::models::{Document, DocumentVersion};
+
+/// Create an internal server error response.
+pub fn internal_error(e: impl std::fmt::Display) -> impl IntoResponse {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({ "error": e.to_string() })),
+    )
+}
+
+/// Create a not found error response.
+pub fn not_found(message: &str) -> impl IntoResponse {
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({ "error": message })),
+    )
+}
+
+/// Create a bad request error response.
+#[allow(dead_code)]
+pub fn bad_request(message: &str) -> impl IntoResponse {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({ "error": message })),
+    )
+}
+
+/// Version summary for API responses.
+#[derive(Debug, Clone, Serialize)]
+pub struct VersionSummary {
+    pub id: i64,
+    pub content_hash: String,
+    pub file_size: u64,
+    pub mime_type: String,
+    pub acquired_at: String,
+    pub original_filename: Option<String>,
+    pub page_count: Option<u32>,
+}
+
+impl From<&DocumentVersion> for VersionSummary {
+    fn from(v: &DocumentVersion) -> Self {
+        Self {
+            id: v.id,
+            content_hash: v.content_hash.clone(),
+            file_size: v.file_size,
+            mime_type: v.mime_type.clone(),
+            acquired_at: v.acquired_at.to_rfc3339(),
+            original_filename: v.original_filename.clone(),
+            page_count: v.page_count,
+        }
+    }
+}
+
+/// Document summary for API responses.
+#[derive(Debug, Clone, Serialize)]
+pub struct DocumentSummary {
+    pub id: String,
+    pub source_id: String,
+    pub title: String,
+    pub source_url: String,
+    pub status: String,
+    pub synopsis: Option<String>,
+    pub tags: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub discovery_method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_version: Option<VersionSummary>,
+}
+
+impl From<Document> for DocumentSummary {
+    fn from(doc: Document) -> Self {
+        let current_version = doc.current_version().map(VersionSummary::from);
+        Self {
+            id: doc.id,
+            source_id: doc.source_id,
+            title: doc.title,
+            source_url: doc.source_url,
+            status: doc.status.as_str().to_string(),
+            synopsis: doc.synopsis,
+            tags: doc.tags,
+            created_at: doc.created_at.to_rfc3339(),
+            updated_at: doc.updated_at.to_rfc3339(),
+            discovery_method: doc.discovery_method,
+            current_version,
+        }
+    }
+}
+
+/// Paginated response wrapper.
+#[derive(Debug, Serialize)]
+pub struct PaginatedResponse<T> {
+    pub items: Vec<T>,
+    pub page: usize,
+    pub per_page: usize,
+    pub total: u64,
+    pub total_pages: u64,
+}
+
+impl<T> PaginatedResponse<T> {
+    pub fn new(items: Vec<T>, page: usize, per_page: usize, total: u64) -> Self {
+        let total_pages = total.div_ceil(per_page as u64);
+        Self {
+            items,
+            page,
+            per_page,
+            total,
+            total_pages,
+        }
+    }
+}
 
 /// Parse a comma-separated query parameter into a Vec of trimmed, non-empty strings.
 ///

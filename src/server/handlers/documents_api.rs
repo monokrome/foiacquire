@@ -2,14 +2,15 @@
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
     response::IntoResponse,
     Json,
 };
 use serde::{Deserialize, Serialize};
 
 use super::super::AppState;
-use super::helpers::{paginate, parse_csv_param};
+use super::helpers::{
+    internal_error, not_found, paginate, parse_csv_param, DocumentSummary, PaginatedResponse,
+};
 use crate::repository::diesel_document::BrowseParams;
 
 /// Query parameters for document search/listing.
@@ -33,44 +34,6 @@ pub struct DocumentsQuery {
     pub sort: Option<String>,
     /// Sort order (asc, desc)
     pub order: Option<String>,
-}
-
-/// Document response format for API.
-#[derive(Debug, Serialize)]
-pub struct DocumentResponse {
-    pub id: String,
-    pub source_id: String,
-    pub title: String,
-    pub source_url: String,
-    pub status: String,
-    pub synopsis: Option<String>,
-    pub tags: Vec<String>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub discovery_method: String,
-    pub current_version: Option<VersionSummary>,
-}
-
-/// Version summary for document responses.
-#[derive(Debug, Serialize)]
-pub struct VersionSummary {
-    pub id: i64,
-    pub content_hash: String,
-    pub file_size: u64,
-    pub mime_type: String,
-    pub acquired_at: String,
-    pub original_filename: Option<String>,
-    pub page_count: Option<u32>,
-}
-
-/// Paginated response wrapper.
-#[derive(Debug, Serialize)]
-pub struct PaginatedResponse<T> {
-    pub items: Vec<T>,
-    pub page: usize,
-    pub per_page: usize,
-    pub total: u64,
-    pub total_pages: u64,
 }
 
 /// List/search documents with filters and pagination.
@@ -99,13 +62,7 @@ pub async fn list_documents(
         .await
     {
         Ok(docs) => docs,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
-                .into_response();
-        }
+        Err(e) => return internal_error(e).into_response(),
     };
 
     // Get total count
@@ -121,45 +78,9 @@ pub async fn list_documents(
         .await
         .unwrap_or(documents.len() as u64);
 
-    let items: Vec<DocumentResponse> = documents
-        .into_iter()
-        .map(|doc| {
-            let current_version = doc.current_version().map(|v| VersionSummary {
-                id: v.id,
-                content_hash: v.content_hash.clone(),
-                file_size: v.file_size,
-                mime_type: v.mime_type.clone(),
-                acquired_at: v.acquired_at.to_rfc3339(),
-                original_filename: v.original_filename.clone(),
-                page_count: v.page_count,
-            });
+    let items: Vec<DocumentSummary> = documents.into_iter().map(DocumentSummary::from).collect();
 
-            DocumentResponse {
-                id: doc.id,
-                source_id: doc.source_id,
-                title: doc.title,
-                source_url: doc.source_url,
-                status: doc.status.as_str().to_string(),
-                synopsis: doc.synopsis,
-                tags: doc.tags,
-                created_at: doc.created_at.to_rfc3339(),
-                updated_at: doc.updated_at.to_rfc3339(),
-                discovery_method: doc.discovery_method,
-                current_version,
-            }
-        })
-        .collect();
-
-    let total_pages = total.div_ceil(per_page as u64);
-
-    Json(PaginatedResponse {
-        items,
-        page,
-        per_page,
-        total,
-        total_pages,
-    })
-    .into_response()
+    Json(PaginatedResponse::new(items, page, per_page, total)).into_response()
 }
 
 /// Get a single document by ID.
@@ -168,42 +89,9 @@ pub async fn get_document(
     Path(doc_id): Path<String>,
 ) -> impl IntoResponse {
     match state.doc_repo.get(&doc_id).await {
-        Ok(Some(doc)) => {
-            let current_version = doc.current_version().map(|v| VersionSummary {
-                id: v.id,
-                content_hash: v.content_hash.clone(),
-                file_size: v.file_size,
-                mime_type: v.mime_type.clone(),
-                acquired_at: v.acquired_at.to_rfc3339(),
-                original_filename: v.original_filename.clone(),
-                page_count: v.page_count,
-            });
-
-            Json(DocumentResponse {
-                id: doc.id,
-                source_id: doc.source_id,
-                title: doc.title,
-                source_url: doc.source_url,
-                status: doc.status.as_str().to_string(),
-                synopsis: doc.synopsis,
-                tags: doc.tags,
-                created_at: doc.created_at.to_rfc3339(),
-                updated_at: doc.updated_at.to_rfc3339(),
-                discovery_method: doc.discovery_method,
-                current_version,
-            })
-            .into_response()
-        }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "Document not found" })),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Ok(Some(doc)) => Json(DocumentSummary::from(doc)).into_response(),
+        Ok(None) => not_found("Document not found").into_response(),
+        Err(e) => internal_error(e).into_response(),
     }
 }
 
@@ -236,20 +124,8 @@ pub async fn get_document_content(
 ) -> impl IntoResponse {
     let doc = match state.doc_repo.get(&doc_id).await {
         Ok(Some(d)) => d,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "Document not found" })),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
-                .into_response();
-        }
+        Ok(None) => return not_found("Document not found").into_response(),
+        Err(e) => return internal_error(e).into_response(),
     };
 
     let version_id = params

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 
 use super::super::AppState;
-use super::helpers::parse_csv_param;
+use super::helpers::{internal_error, parse_csv_param};
 use crate::repository::diesel_document::BrowseParams;
 
 /// Export format options.
@@ -85,13 +85,7 @@ pub async fn export_documents(
         .await
     {
         Ok(docs) => docs,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
-                .into_response();
-        }
+        Err(e) => return internal_error(e).into_response(),
     };
 
     // Convert to export format
@@ -268,13 +262,7 @@ pub async fn export_annotations(
         .await
     {
         Ok(docs) => docs,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
-                .into_response();
-        }
+        Err(e) => return internal_error(e).into_response(),
     };
 
     // Only include documents with annotations

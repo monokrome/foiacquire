@@ -2,13 +2,13 @@
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
     response::IntoResponse,
     Json,
 };
 use serde::Serialize;
 
 use super::super::AppState;
+use super::helpers::{internal_error, not_found};
 
 /// Full version details for API response.
 #[derive(Debug, Serialize)]
@@ -28,6 +28,26 @@ pub struct VersionResponse {
     pub earliest_archived_at: Option<String>,
 }
 
+impl From<crate::models::DocumentVersion> for VersionResponse {
+    fn from(v: crate::models::DocumentVersion) -> Self {
+        Self {
+            id: v.id,
+            content_hash: v.content_hash,
+            content_hash_blake3: v.content_hash_blake3,
+            file_path: v.file_path.to_string_lossy().to_string(),
+            file_size: v.file_size,
+            mime_type: v.mime_type,
+            acquired_at: v.acquired_at.to_rfc3339(),
+            source_url: v.source_url,
+            original_filename: v.original_filename,
+            server_date: v.server_date.map(|d| d.to_rfc3339()),
+            page_count: v.page_count,
+            archive_snapshot_id: v.archive_snapshot_id,
+            earliest_archived_at: v.earliest_archived_at.map(|d| d.to_rfc3339()),
+        }
+    }
+}
+
 /// Get all versions of a document.
 pub async fn list_versions(
     State(state): State<AppState>,
@@ -38,21 +58,7 @@ pub async fn list_versions(
             let versions: Vec<VersionResponse> = doc
                 .versions
                 .into_iter()
-                .map(|v| VersionResponse {
-                    id: v.id,
-                    content_hash: v.content_hash,
-                    content_hash_blake3: v.content_hash_blake3,
-                    file_path: v.file_path.to_string_lossy().to_string(),
-                    file_size: v.file_size,
-                    mime_type: v.mime_type,
-                    acquired_at: v.acquired_at.to_rfc3339(),
-                    source_url: v.source_url,
-                    original_filename: v.original_filename,
-                    server_date: v.server_date.map(|d| d.to_rfc3339()),
-                    page_count: v.page_count,
-                    archive_snapshot_id: v.archive_snapshot_id,
-                    earliest_archived_at: v.earliest_archived_at.map(|d| d.to_rfc3339()),
-                })
+                .map(VersionResponse::from)
                 .collect();
 
             Json(serde_json::json!({
@@ -62,16 +68,8 @@ pub async fn list_versions(
             }))
             .into_response()
         }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "Document not found" })),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Ok(None) => not_found("Document not found").into_response(),
+        Err(e) => internal_error(e).into_response(),
     }
 }
 
@@ -83,40 +81,13 @@ pub async fn get_version(
     match state.doc_repo.get(&doc_id).await {
         Ok(Some(doc)) => {
             if let Some(version) = doc.versions.into_iter().find(|v| v.id == version_id) {
-                Json(VersionResponse {
-                    id: version.id,
-                    content_hash: version.content_hash,
-                    content_hash_blake3: version.content_hash_blake3,
-                    file_path: version.file_path.to_string_lossy().to_string(),
-                    file_size: version.file_size,
-                    mime_type: version.mime_type,
-                    acquired_at: version.acquired_at.to_rfc3339(),
-                    source_url: version.source_url,
-                    original_filename: version.original_filename,
-                    server_date: version.server_date.map(|d| d.to_rfc3339()),
-                    page_count: version.page_count,
-                    archive_snapshot_id: version.archive_snapshot_id,
-                    earliest_archived_at: version.earliest_archived_at.map(|d| d.to_rfc3339()),
-                })
-                .into_response()
+                Json(VersionResponse::from(version)).into_response()
             } else {
-                (
-                    StatusCode::NOT_FOUND,
-                    Json(serde_json::json!({ "error": "Version not found" })),
-                )
-                    .into_response()
+                not_found("Version not found").into_response()
             }
         }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "Document not found" })),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Ok(None) => not_found("Document not found").into_response(),
+        Err(e) => internal_error(e).into_response(),
     }
 }
 
@@ -131,10 +102,6 @@ pub async fn find_by_hash(
             "sources": sources
         }))
         .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => internal_error(e).into_response(),
     }
 }
