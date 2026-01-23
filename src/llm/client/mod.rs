@@ -133,14 +133,14 @@ impl LlmClient {
     /// For OpenAI-compatible APIs (Groq, OpenAI, Together), this checks that an API key is set.
     /// For Ollama, this makes an HTTP call to verify the service is running.
     pub async fn is_available(&self) -> bool {
-        if !self.config.enabled {
+        if !self.config.enabled() {
             return false;
         }
 
         // For OpenAI-compatible APIs, just check that we have an API key
         // Making an HTTP call to /v1/models can be slow and may have rate limits
-        if matches!(self.config.provider, LlmProvider::OpenAI) {
-            return self.config.api_key.is_some();
+        if matches!(self.config.provider(), LlmProvider::OpenAI) {
+            return self.config.api_key().is_some();
         }
 
         // For Ollama, check if the service is actually running
@@ -149,7 +149,7 @@ impl LlmClient {
             Err(_) => return false,
         };
 
-        let url = format!("{}/api/tags", self.config.endpoint);
+        let url = format!("{}/api/tags", self.config.endpoint());
         let response = client.get(&url, None, None).await;
 
         match response {
@@ -160,7 +160,7 @@ impl LlmClient {
 
     /// List available models.
     pub async fn list_models(&self) -> Result<Vec<String>, LlmError> {
-        match self.config.provider {
+        match self.config.provider() {
             LlmProvider::Ollama => self.list_models_ollama().await,
             LlmProvider::OpenAI => self.list_models_openai().await,
         }
@@ -171,7 +171,7 @@ impl LlmClient {
             .create_client()
             .map_err(|e| LlmError::Connection(e.to_string()))?;
 
-        let url = format!("{}/api/tags", self.config.endpoint);
+        let url = format!("{}/api/tags", self.config.endpoint());
         let resp = client
             .get(&url, None, None)
             .await
@@ -204,9 +204,9 @@ impl LlmClient {
             .create_client()
             .map_err(|e| LlmError::Connection(e.to_string()))?;
 
-        let url = format!("{}/v1/models", self.config.endpoint);
+        let url = format!("{}/v1/models", self.config.endpoint());
 
-        let resp = if let Some(ref api_key) = self.config.api_key {
+        let resp = if let Some(api_key) = self.config.api_key() {
             let mut headers = HashMap::new();
             headers.insert("Authorization".to_string(), format!("Bearer {}", api_key));
             client.get_with_headers(&url, headers).await
@@ -340,11 +340,12 @@ Focus on terms specifically relevant to {domain}. Return ONLY a comma-separated 
 
     /// Truncate content to configured maximum (UTF-8 safe).
     fn truncate_content<'a>(&self, text: &'a str) -> &'a str {
-        if text.len() <= self.config.max_content_chars {
+        let max_chars = self.config.max_content_chars();
+        if text.len() <= max_chars {
             return text;
         }
         // Find a valid UTF-8 boundary at or before max_content_chars
-        let mut end = self.config.max_content_chars;
+        let mut end = max_chars;
         while end > 0 && !text.is_char_boundary(end) {
             end -= 1;
         }
@@ -353,7 +354,7 @@ Focus on terms specifically relevant to {domain}. Return ONLY a comma-separated 
 
     /// Call LLM API with a prompt (provider-aware).
     async fn call_llm(&self, prompt: &str) -> Result<String, LlmError> {
-        match self.config.provider {
+        match self.config.provider() {
             LlmProvider::Ollama => self.call_ollama(prompt).await,
             LlmProvider::OpenAI => self.call_openai(prompt).await,
         }
@@ -366,16 +367,16 @@ Focus on terms specifically relevant to {domain}. Return ONLY a comma-separated 
             .map_err(|e| LlmError::Connection(e.to_string()))?;
 
         let request = OllamaRequest {
-            model: self.config.model.clone(),
+            model: self.config.model().to_string(),
             prompt: prompt.to_string(),
             stream: false,
             options: OllamaOptions {
-                temperature: self.config.temperature,
-                num_predict: self.config.max_tokens,
+                temperature: self.config.temperature(),
+                num_predict: self.config.max_tokens(),
             },
         };
 
-        let url = format!("{}/api/generate", self.config.endpoint);
+        let url = format!("{}/api/generate", self.config.endpoint());
         let resp = client
             .post_json(&url, &request)
             .await
@@ -402,18 +403,18 @@ Focus on terms specifically relevant to {domain}. Return ONLY a comma-separated 
             .map_err(|e| LlmError::Connection(e.to_string()))?;
 
         let request = OpenAIRequest {
-            model: self.config.model.clone(),
+            model: self.config.model().to_string(),
             messages: vec![OpenAIMessage {
                 role: "user".to_string(),
                 content: prompt.to_string(),
             }],
-            max_tokens: self.config.max_tokens,
-            temperature: self.config.temperature,
+            max_tokens: self.config.max_tokens(),
+            temperature: self.config.temperature(),
         };
 
-        let url = format!("{}/v1/chat/completions", self.config.endpoint);
+        let url = format!("{}/v1/chat/completions", self.config.endpoint());
 
-        let resp = if let Some(ref api_key) = self.config.api_key {
+        let resp = if let Some(api_key) = self.config.api_key() {
             let mut headers = HashMap::new();
             headers.insert("Authorization".to_string(), format!("Bearer {}", api_key));
             client.post_json_with_headers(&url, &request, headers).await
@@ -538,9 +539,9 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = LlmConfig::default();
-        assert!(config.enabled);
-        assert!(config.model.contains("dolphin"));
-        assert!(config.synopsis_prompt.is_none());
+        assert!(config.enabled());
+        assert!(config.model().contains("dolphin"));
+        assert!(config.app.synopsis_prompt.is_none());
         assert!(config.get_synopsis_prompt().contains("{title}"));
     }
 }

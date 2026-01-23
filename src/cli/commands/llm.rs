@@ -15,22 +15,22 @@ pub async fn cmd_llm_models(_settings: &Settings) -> anyhow::Result<()> {
     println!(
         "{:<20} {}",
         "Enabled:",
-        if config.llm.enabled { "Yes" } else { "No" }
+        if config.llm.enabled() { "Yes" } else { "No" }
     );
     println!("{:<20} {}", "Provider:", config.llm.provider_name());
-    println!("{:<20} {}", "Endpoint:", config.llm.endpoint);
+    println!("{:<20} {}", "Endpoint:", config.llm.endpoint());
     println!(
         "{:<20} {}",
         "API Key:",
-        if config.llm.api_key.is_some() {
+        if config.llm.api_key().is_some() {
             "Set"
         } else {
             "Not set"
         }
     );
-    println!("{:<20} {}", "Current Model:", config.llm.model);
-    println!("{:<20} {}", "Max Tokens:", config.llm.max_tokens);
-    println!("{:<20} {:.2}", "Temperature:", config.llm.temperature);
+    println!("{:<20} {}", "Current Model:", config.llm.model());
+    println!("{:<20} {}", "Max Tokens:", config.llm.max_tokens());
+    println!("{:<20} {:.2}", "Temperature:", config.llm.temperature());
 
     if !llm_client.is_available().await {
         println!(
@@ -50,7 +50,7 @@ pub async fn cmd_llm_models(_settings: &Settings) -> anyhow::Result<()> {
                 println!("  No models available");
             } else {
                 for model in models {
-                    let marker = if model == config.llm.model {
+                    let marker = if model == config.llm.model() {
                         style("*").green().to_string()
                     } else {
                         " ".to_string()

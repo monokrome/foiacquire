@@ -43,13 +43,13 @@ pub async fn cmd_annotate(
     let mut current_config_hash = config.hash();
     let mut llm_config = config.llm.clone();
     if let Some(ref ep) = endpoint {
-        llm_config.endpoint = ep.clone();
+        llm_config.set_endpoint(ep.clone());
     }
     if let Some(ref m) = model {
-        llm_config.model = m.clone();
+        llm_config.set_model(m.clone());
     }
 
-    if !llm_config.enabled {
+    if !llm_config.enabled() {
         println!(
             "{} LLM annotation is disabled in configuration",
             style("!").yellow()
@@ -66,8 +66,8 @@ pub async fn cmd_annotate(
         "{} Using {} at {} (model: {})",
         style("✓").green(),
         llm_config.provider_name(),
-        llm_config.endpoint,
-        llm_config.model
+        llm_config.endpoint(),
+        llm_config.model()
     );
 
     // Check if LLM service is available
@@ -102,20 +102,20 @@ pub async fn cmd_annotate(
             let fresh_config = Config::load().await;
             let mut new_llm_config = fresh_config.llm.clone();
             if let Some(ref ep) = endpoint {
-                new_llm_config.endpoint = ep.clone();
+                new_llm_config.set_endpoint(ep.clone());
             }
             if let Some(ref m) = model {
-                new_llm_config.model = m.clone();
+                new_llm_config.set_model(m.clone());
             }
 
-            if new_llm_config.endpoint != llm_config.endpoint
-                || new_llm_config.model != llm_config.model
-                || new_llm_config.enabled != llm_config.enabled
+            if new_llm_config.endpoint() != llm_config.endpoint()
+                || new_llm_config.model() != llm_config.model()
+                || new_llm_config.enabled() != llm_config.enabled()
             {
                 println!(
                     "{} Config reloaded (model: {})",
                     style("↻").cyan(),
-                    new_llm_config.model
+                    new_llm_config.model()
                 );
                 llm_config = new_llm_config;
                 current_config_hash = fresh_config.hash();

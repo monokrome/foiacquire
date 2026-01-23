@@ -1,4 +1,8 @@
 //! LLM client configuration.
+//!
+//! Split into two tiers:
+//! - `LlmAppConfig`: Stored in DB, synced across devices (prompts, generation params)
+//! - `LlmDeviceConfig`: From env vars, device-specific (provider, endpoint, model, api_key)
 
 #![allow(dead_code)]
 
@@ -27,24 +31,13 @@ impl LlmProvider {
     }
 }
 
-/// Configuration for LLM client.
+/// Application-level LLM config (stored in DB, synced across devices).
+/// Controls what the LLM does, not how to connect to it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LlmConfig {
+pub struct LlmAppConfig {
     /// Whether LLM summarization is enabled
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    /// LLM provider (ollama or openai)
-    #[serde(default)]
-    pub provider: LlmProvider,
-    /// API endpoint (provider-specific defaults apply)
-    #[serde(default = "default_endpoint")]
-    pub endpoint: String,
-    /// API key for OpenAI-compatible providers
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api_key: Option<String>,
-    /// Model to use for summarization
-    #[serde(default = "default_model")]
-    pub model: String,
     /// Maximum tokens in response
     #[serde(default = "default_max_tokens")]
     pub max_tokens: u32,
@@ -52,12 +45,67 @@ pub struct LlmConfig {
     #[serde(default = "default_temperature")]
     pub temperature: f32,
     /// Custom prompt for synopsis generation (uses {title} and {content} placeholders)
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub synopsis_prompt: Option<String>,
     /// Custom prompt for tag generation (uses {title} and {content} placeholders)
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags_prompt: Option<String>,
     /// Maximum characters of document content to send to LLM
+    #[serde(default = "default_max_content_chars")]
+    pub max_content_chars: usize,
+}
+
+/// Device-level LLM config (from env vars, varies per device).
+/// Controls how to connect to the LLM backend.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LlmDeviceConfig {
+    /// LLM provider (ollama or openai)
+    pub provider: LlmProvider,
+    /// API endpoint (provider-specific defaults apply)
+    pub endpoint: String,
+    /// Model to use for summarization
+    pub model: String,
+    /// API key for OpenAI-compatible providers
+    pub api_key: Option<String>,
+}
+
+/// Combined LLM configuration (runtime).
+/// Merges app config (from DB) with device config (from env).
+///
+/// Serde: Only the app config is serialized/deserialized (DB-stored settings).
+/// Device config is populated from environment variables during Default.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LlmConfig {
+    /// Application-level settings (from DB)
+    #[serde(flatten)]
+    pub app: LlmAppConfig,
+    /// Device-level settings (from env) - not serialized
+    #[serde(skip)]
+    pub device: LlmDeviceConfig,
+}
+
+/// Legacy LlmConfig for serde compatibility during migration.
+/// This allows reading old config files that have the flat structure.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LlmConfigLegacy {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub provider: LlmProvider,
+    #[serde(default = "default_endpoint")]
+    pub endpoint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default = "default_model")]
+    pub model: String,
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
+    #[serde(default = "default_temperature")]
+    pub temperature: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synopsis_prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags_prompt: Option<String>,
     #[serde(default = "default_max_content_chars")]
     pub max_content_chars: usize,
 }
@@ -86,21 +134,12 @@ fn default_max_content_chars() -> usize {
     12000
 }
 
-impl Default for LlmConfig {
-    fn default() -> Self {
-        Self::base_default().with_env_overrides()
-    }
-}
+// === LlmAppConfig implementations ===
 
-impl LlmConfig {
-    /// Base default without env overrides (used internally to avoid recursion).
-    fn base_default() -> Self {
+impl Default for LlmAppConfig {
+    fn default() -> Self {
         Self {
             enabled: default_enabled(),
-            provider: LlmProvider::default(),
-            endpoint: default_endpoint(),
-            api_key: None,
-            model: default_model(),
             max_tokens: default_max_tokens(),
             temperature: default_temperature(),
             synopsis_prompt: None,
@@ -108,161 +147,12 @@ impl LlmConfig {
             max_content_chars: default_max_content_chars(),
         }
     }
+}
 
+impl LlmAppConfig {
     /// Check if the config equals the default (for skip_serializing_if).
     pub fn is_default(&self) -> bool {
-        *self == Self::base_default()
-    }
-
-    /// Apply environment variable overrides.
-    ///
-    /// Supported env vars:
-    /// - `LLM_ENABLED`: "true" or "false"
-    /// - `LLM_PROVIDER`: "ollama" (default), "openai", "groq", or "together"
-    /// - `LLM_ENDPOINT`: API endpoint (defaults based on provider)
-    /// - `OLLAMA_HOST`: Ollama endpoint (standard Ollama env var, fallback for LLM_ENDPOINT)
-    /// - `LLM_API_KEY`: API key for OpenAI-compatible providers
-    /// - `LLM_MODEL`: Model name
-    /// - `LLM_MAX_TOKENS`: Maximum tokens in response
-    /// - `LLM_TEMPERATURE`: Generation temperature (0.0-1.0)
-    /// - `LLM_MAX_CONTENT_CHARS`: Max document chars to send
-    /// - `LLM_SYNOPSIS_PROMPT`: Custom synopsis prompt
-    /// - `LLM_TAGS_PROMPT`: Custom tags prompt
-    ///
-    /// Priority: LLM_PROVIDER wins over auto-detection from API keys.
-    /// If LLM_PROVIDER=openai, uses OPENAI_API_KEY even if GROQ_API_KEY is set.
-    ///
-    /// For Groq, you can use:
-    /// ```sh
-    /// LLM_PROVIDER=groq LLM_MODEL=llama-3.1-70b-versatile
-    /// # Or just set the key (auto-detects provider):
-    /// GROQ_API_KEY=gsk_...
-    /// ```
-    pub fn with_env_overrides(mut self) -> Self {
-        if let Ok(val) = std::env::var("LLM_ENABLED") {
-            self.enabled = val.eq_ignore_ascii_case("true") || val == "1";
-        }
-
-        // Check if provider is explicitly set - this is authoritative
-        let explicit_provider = std::env::var("LLM_PROVIDER").ok();
-        if let Some(ref val) = explicit_provider {
-            if let Some(provider) = LlmProvider::from_str(val) {
-                self.provider = provider;
-            }
-        }
-
-        // Explicit endpoint always wins, then OLLAMA_HOST for Ollama provider
-        let explicit_endpoint = std::env::var("LLM_ENDPOINT").ok();
-        if let Some(ref endpoint) = explicit_endpoint {
-            self.endpoint = endpoint.clone();
-        } else if let Ok(ollama_host) = std::env::var("OLLAMA_HOST") {
-            // OLLAMA_HOST is standard Ollama env var - use as fallback for Ollama provider
-            self.endpoint = ollama_host;
-        }
-
-        // Explicit API key always wins
-        if let Ok(val) = std::env::var("LLM_API_KEY") {
-            self.api_key = Some(val);
-        }
-
-        // If provider was explicitly set, use provider-specific defaults
-        let explicit_model = std::env::var("LLM_MODEL").ok();
-        if let Some(ref provider_str) = explicit_provider {
-            let provider_lower = provider_str.to_lowercase();
-
-            // Set endpoint if not explicitly provided
-            if explicit_endpoint.is_none() {
-                match provider_lower.as_str() {
-                    "groq" => self.endpoint = "https://api.groq.com/openai".to_string(),
-                    "openai" => self.endpoint = "https://api.openai.com".to_string(),
-                    "together" => self.endpoint = "https://api.together.xyz".to_string(),
-                    _ => {} // ollama keeps default
-                }
-            }
-
-            // Set API key from provider-specific env var if not explicitly provided
-            if self.api_key.is_none() {
-                match provider_lower.as_str() {
-                    "groq" => self.api_key = std::env::var("GROQ_API_KEY").ok(),
-                    "openai" => self.api_key = std::env::var("OPENAI_API_KEY").ok(),
-                    // together uses LLM_API_KEY which we already checked
-                    _ => {}
-                }
-            }
-
-            // Set default model for provider if not explicitly provided
-            if explicit_model.is_none() {
-                match provider_lower.as_str() {
-                    "groq" => self.model = "llama-3.1-70b-versatile".to_string(),
-                    "openai" => self.model = "gpt-4o-mini".to_string(),
-                    "together" => {
-                        self.model = "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo".to_string()
-                    }
-                    _ => {} // ollama keeps default
-                }
-            }
-        } else {
-            // No explicit provider - auto-detect from available keys
-            if self.api_key.is_none() {
-                if let Ok(key) = std::env::var("GROQ_API_KEY") {
-                    self.api_key = Some(key);
-                    self.provider = LlmProvider::OpenAI;
-                    if explicit_endpoint.is_none() {
-                        self.endpoint = "https://api.groq.com/openai".to_string();
-                    }
-                    // Set default Groq model if not explicitly configured
-                    if self.model == default_model() {
-                        self.model = "llama-3.1-70b-versatile".to_string();
-                    }
-                } else if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-                    self.api_key = Some(key);
-                    self.provider = LlmProvider::OpenAI;
-                    if explicit_endpoint.is_none() {
-                        self.endpoint = "https://api.openai.com".to_string();
-                    }
-                    // Set default OpenAI model if not explicitly configured
-                    if self.model == default_model() {
-                        self.model = "gpt-4o-mini".to_string();
-                    }
-                }
-            }
-        }
-
-        if let Ok(val) = std::env::var("LLM_MODEL") {
-            self.model = val;
-        }
-        if let Ok(val) = std::env::var("LLM_MAX_TOKENS") {
-            if let Ok(n) = val.parse() {
-                self.max_tokens = n;
-            }
-        }
-        if let Ok(val) = std::env::var("LLM_TEMPERATURE") {
-            if let Ok(t) = val.parse() {
-                self.temperature = t;
-            }
-        }
-        if let Ok(val) = std::env::var("LLM_MAX_CONTENT_CHARS") {
-            if let Ok(n) = val.parse() {
-                self.max_content_chars = n;
-            }
-        }
-        if let Ok(val) = std::env::var("LLM_SYNOPSIS_PROMPT") {
-            self.synopsis_prompt = Some(val);
-        }
-        if let Ok(val) = std::env::var("LLM_TAGS_PROMPT") {
-            self.tags_prompt = Some(val);
-        }
-        self
-    }
-
-    pub fn with_endpoint(mut self, endpoint: &str) -> Self {
-        self.endpoint = endpoint.to_string();
-        self
-    }
-
-    pub fn with_model(mut self, model: &str) -> Self {
-        self.model = model.to_string();
-        self
+        *self == Self::default()
     }
 
     /// Get the synopsis prompt, using custom or default.
@@ -275,6 +165,131 @@ impl LlmConfig {
     /// Get the tags prompt, using custom or default.
     pub fn get_tags_prompt(&self) -> &str {
         self.tags_prompt.as_deref().unwrap_or(DEFAULT_TAGS_PROMPT)
+    }
+}
+
+// === LlmDeviceConfig implementations ===
+
+impl Default for LlmDeviceConfig {
+    fn default() -> Self {
+        Self::from_env()
+    }
+}
+
+impl LlmDeviceConfig {
+    /// Create device config from environment variables.
+    pub fn from_env() -> Self {
+        let mut config = Self {
+            provider: LlmProvider::default(),
+            endpoint: default_endpoint(),
+            model: default_model(),
+            api_key: None,
+        };
+
+        // Check if provider is explicitly set
+        let explicit_provider = std::env::var("LLM_PROVIDER").ok();
+        if let Some(ref val) = explicit_provider {
+            if let Some(provider) = LlmProvider::from_str(val) {
+                config.provider = provider;
+            }
+        }
+
+        // Explicit endpoint always wins, then OLLAMA_HOST for Ollama provider
+        let explicit_endpoint = std::env::var("LLM_ENDPOINT").ok();
+        if let Some(ref endpoint) = explicit_endpoint {
+            config.endpoint = endpoint.clone();
+        } else if let Ok(ollama_host) = std::env::var("OLLAMA_HOST") {
+            config.endpoint = ollama_host;
+        }
+
+        // Explicit API key always wins
+        if let Ok(val) = std::env::var("LLM_API_KEY") {
+            config.api_key = Some(val);
+        }
+
+        // Explicit model
+        let explicit_model = std::env::var("LLM_MODEL").ok();
+
+        // If provider was explicitly set, use provider-specific defaults
+        if let Some(ref provider_str) = explicit_provider {
+            let provider_lower = provider_str.to_lowercase();
+
+            // Set endpoint if not explicitly provided
+            if explicit_endpoint.is_none() {
+                match provider_lower.as_str() {
+                    "groq" => config.endpoint = "https://api.groq.com/openai".to_string(),
+                    "openai" => config.endpoint = "https://api.openai.com".to_string(),
+                    "together" => config.endpoint = "https://api.together.xyz".to_string(),
+                    _ => {}
+                }
+            }
+
+            // Set API key from provider-specific env var if not explicitly provided
+            if config.api_key.is_none() {
+                match provider_lower.as_str() {
+                    "groq" => config.api_key = std::env::var("GROQ_API_KEY").ok(),
+                    "openai" => config.api_key = std::env::var("OPENAI_API_KEY").ok(),
+                    _ => {}
+                }
+            }
+
+            // Set default model for provider if not explicitly provided
+            if explicit_model.is_none() {
+                match provider_lower.as_str() {
+                    "groq" => config.model = "llama-3.1-70b-versatile".to_string(),
+                    "openai" => config.model = "gpt-4o-mini".to_string(),
+                    "together" => {
+                        config.model = "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo".to_string()
+                    }
+                    _ => {}
+                }
+            }
+        } else {
+            // No explicit provider - auto-detect from available keys
+            if config.api_key.is_none() {
+                if let Ok(key) = std::env::var("GROQ_API_KEY") {
+                    config.api_key = Some(key);
+                    config.provider = LlmProvider::OpenAI;
+                    if explicit_endpoint.is_none() {
+                        config.endpoint = "https://api.groq.com/openai".to_string();
+                    }
+                    if config.model == default_model() {
+                        config.model = "llama-3.1-70b-versatile".to_string();
+                    }
+                } else if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+                    config.api_key = Some(key);
+                    config.provider = LlmProvider::OpenAI;
+                    if explicit_endpoint.is_none() {
+                        config.endpoint = "https://api.openai.com".to_string();
+                    }
+                    if config.model == default_model() {
+                        config.model = "gpt-4o-mini".to_string();
+                    }
+                }
+            }
+        }
+
+        if let Some(model) = explicit_model {
+            config.model = model;
+        }
+
+        config
+    }
+
+    /// Get the provider name for display.
+    pub fn provider_name(&self) -> &'static str {
+        match self.provider {
+            LlmProvider::Ollama => "Ollama",
+            LlmProvider::OpenAI => {
+                if self.endpoint.contains("groq.com") {
+                    "Groq"
+                } else if self.endpoint.contains("together.xyz") {
+                    "Together.ai"
+                } else {
+                    "OpenAI"
+                }
+            }
+        }
     }
 
     /// Get a provider-aware availability hint for error messages.
@@ -295,20 +310,146 @@ impl LlmConfig {
             }
         }
     }
+}
 
-    /// Get the provider name for display.
+// === LlmConfig (combined) implementations ===
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            app: LlmAppConfig::default(),
+            device: LlmDeviceConfig::default(),
+        }
+    }
+}
+
+impl LlmConfig {
+    /// Create from app config (DB) and device config (env).
+    pub fn new(app: LlmAppConfig, device: LlmDeviceConfig) -> Self {
+        Self { app, device }
+    }
+
+    /// Create with default app config and device config from env.
+    pub fn from_env() -> Self {
+        Self::default()
+    }
+
+    /// Check if the config equals the default (for skip_serializing_if).
+    pub fn is_default(&self) -> bool {
+        self.app.is_default()
+    }
+
+    // Convenience accessors that delegate to sub-configs
+
+    pub fn enabled(&self) -> bool {
+        self.app.enabled
+    }
+
+    pub fn provider(&self) -> &LlmProvider {
+        &self.device.provider
+    }
+
+    pub fn endpoint(&self) -> &str {
+        &self.device.endpoint
+    }
+
+    pub fn model(&self) -> &str {
+        &self.device.model
+    }
+
+    pub fn api_key(&self) -> Option<&str> {
+        self.device.api_key.as_deref()
+    }
+
+    pub fn max_tokens(&self) -> u32 {
+        self.app.max_tokens
+    }
+
+    pub fn temperature(&self) -> f32 {
+        self.app.temperature
+    }
+
+    pub fn max_content_chars(&self) -> usize {
+        self.app.max_content_chars
+    }
+
+    pub fn get_synopsis_prompt(&self) -> &str {
+        self.app.get_synopsis_prompt()
+    }
+
+    pub fn get_tags_prompt(&self) -> &str {
+        self.app.get_tags_prompt()
+    }
+
     pub fn provider_name(&self) -> &'static str {
-        match self.provider {
-            LlmProvider::Ollama => "Ollama",
-            LlmProvider::OpenAI => {
-                if self.endpoint.contains("groq.com") {
-                    "Groq"
-                } else if self.endpoint.contains("together.xyz") {
-                    "Together.ai"
-                } else {
-                    "OpenAI"
-                }
-            }
+        self.device.provider_name()
+    }
+
+    pub fn availability_hint(&self) -> String {
+        self.device.availability_hint()
+    }
+
+    // Setters for CLI override use cases
+
+    pub fn set_endpoint(&mut self, endpoint: String) {
+        self.device.endpoint = endpoint;
+    }
+
+    pub fn set_model(&mut self, model: String) {
+        self.device.model = model;
+    }
+}
+
+// === LlmConfigLegacy implementations ===
+
+impl Default for LlmConfigLegacy {
+    fn default() -> Self {
+        Self {
+            enabled: default_enabled(),
+            provider: LlmProvider::default(),
+            endpoint: default_endpoint(),
+            api_key: None,
+            model: default_model(),
+            max_tokens: default_max_tokens(),
+            temperature: default_temperature(),
+            synopsis_prompt: None,
+            tags_prompt: None,
+            max_content_chars: default_max_content_chars(),
+        }
+    }
+}
+
+impl LlmConfigLegacy {
+    /// Check if the config equals the default (for skip_serializing_if).
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Convert legacy config to split config.
+    /// App settings come from the legacy config, device settings from env.
+    pub fn to_split_config(self) -> LlmConfig {
+        let app = LlmAppConfig {
+            enabled: self.enabled,
+            max_tokens: self.max_tokens,
+            temperature: self.temperature,
+            synopsis_prompt: self.synopsis_prompt,
+            tags_prompt: self.tags_prompt,
+            max_content_chars: self.max_content_chars,
+        };
+        // Device config always comes from env, ignoring legacy provider/endpoint/model/key
+        let device = LlmDeviceConfig::from_env();
+        LlmConfig::new(app, device)
+    }
+
+    /// Extract just the app config portion (for DB storage).
+    pub fn to_app_config(&self) -> LlmAppConfig {
+        LlmAppConfig {
+            enabled: self.enabled,
+            max_tokens: self.max_tokens,
+            temperature: self.temperature,
+            synopsis_prompt: self.synopsis_prompt.clone(),
+            tags_prompt: self.tags_prompt.clone(),
+            max_content_chars: self.max_content_chars,
         }
     }
 }

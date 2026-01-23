@@ -389,8 +389,7 @@ impl Config {
                 let llm: LlmConfig = pref_config
                     .get::<LlmConfig>("llm")
                     .await
-                    .unwrap_or_default()
-                    .with_env_overrides();
+                    .unwrap_or_default();
                 let analysis: AnalysisConfig =
                     pref_config.get("analysis").await.unwrap_or_default();
                 let privacy: PrivacyConfig = pref_config
@@ -455,7 +454,7 @@ impl Config {
         };
 
         config.source_path = Some(path.to_path_buf());
-        config.llm = config.llm.with_env_overrides();
+        // Note: LlmConfig device settings are auto-populated from env via Default
         config.privacy = config.privacy.with_env_overrides();
         Ok(config)
     }
@@ -581,7 +580,7 @@ impl Config {
         };
 
         // Apply environment variable overrides
-        config.llm = config.llm.with_env_overrides();
+        // Note: LlmConfig device settings are auto-populated from env via Default
         config.privacy = config.privacy.with_env_overrides();
         Some(config)
     }
