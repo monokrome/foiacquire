@@ -98,9 +98,8 @@ pub async fn cmd_scrape(
         #[cfg(feature = "redis-backend")]
         RateLimitBackendType::Redis => {
             tracing::debug!("Using Redis rate limit backend");
-            // TODO: Get Redis URL from config
             let redis_url =
-                std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1/".to_string());
+                std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
             let backend = Arc::new(
                 crate::scrapers::RedisRateLimitBackend::new(&redis_url, base_delay_ms).await?,
             );

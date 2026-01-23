@@ -6,6 +6,9 @@ USER="${USER_ID:-1000}"
 GROUP="${GROUP_ID:-$USER}"
 MIGRATE="${MIGRATE:-false}"
 
+# Default Redis URL for container deployments (expects linked 'redis' service)
+export REDIS_URL="${REDIS_URL:-redis://redis:6379}"
+
 # Allow BROWSER_LINK_NAME & BROWSER_PORT since chromium fails with HOST header
 if [[ -z $BROWSER_URL ]] && [[ ! -z $BROWSER_LINK_NAME ]]; then
     BROWSER_PORT="${BROWSER_PORT:-9222}"

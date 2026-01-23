@@ -840,6 +840,15 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
         settings.database_url = Some(database_url);
     }
 
+    // RATE_LIMIT_BACKEND environment variable takes precedence over config
+    if let Some(backend) = std::env::var("RATE_LIMIT_BACKEND")
+        .ok()
+        .filter(|s| !s.is_empty())
+    {
+        tracing::debug!("Using RATE_LIMIT_BACKEND from environment: {}", backend);
+        settings.rate_limit_backend = Some(backend);
+    }
+
     // Save config to database history (errors logged gracefully)
     config.save_to_db_if_changed(&settings).await;
 
