@@ -299,8 +299,8 @@ impl std::fmt::Debug for RateLimiter {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::InMemoryRateLimitBackend;
+    use super::*;
 
     fn create_test_limiter() -> RateLimiter {
         let backend = Arc::new(InMemoryRateLimitBackend::new(100));

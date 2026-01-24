@@ -8,9 +8,7 @@ use async_trait::async_trait;
 use redis::aio::ConnectionManager;
 use redis::{AsyncCommands, Script};
 
-use super::backend::{
-    DomainRateState, RateLimitBackend, RateLimitError, RateLimitResult,
-};
+use super::backend::{DomainRateState, RateLimitBackend, RateLimitError, RateLimitResult};
 
 /// Key prefix for rate limit data in Redis.
 const KEY_PREFIX: &str = "foiacquire:ratelimit:";

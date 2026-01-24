@@ -20,13 +20,13 @@ pub use configurable::ConfigurableScraper;
 pub use http_client::{HttpClient, HttpResponse};
 
 // Rate limiting re-exports from crate::rate_limit
+#[cfg(feature = "redis-backend")]
+pub use crate::rate_limit::RedisRateLimitBackend;
 #[allow(unused_imports)]
 pub use crate::rate_limit::{
     DieselRateLimitBackend, DomainRateState, InMemoryRateLimitBackend, RateLimitBackend,
     RateLimitError, RateLimiter,
 };
-#[cfg(feature = "redis-backend")]
-pub use crate::rate_limit::RedisRateLimitBackend;
 
 use crate::models::{CrawlUrl, DiscoveryMethod};
 use chrono::{DateTime, Utc};

@@ -30,9 +30,9 @@ use reqwest::{Client, Proxy, StatusCode};
 use tracing::debug;
 
 use super::config::ViaMode;
-use crate::rate_limit::{InMemoryRateLimitBackend, RateLimiter};
 use crate::models::{CrawlRequest, CrawlUrl, UrlStatus};
 use crate::privacy::{PrivacyConfig, PrivacyMode};
+use crate::rate_limit::{InMemoryRateLimitBackend, RateLimiter};
 use crate::repository::DieselCrawlRepository;
 
 #[cfg(feature = "browser")]

@@ -24,10 +24,10 @@ use tempfile::TempDir;
 use tokio::runtime::Handle;
 use tracing::{debug, warn};
 
-use crate::rate_limit::{backoff_delay, get_delay_from_env, parse_retry_after};
 use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError, OcrResult};
 use super::pdf_utils;
 use crate::privacy::PrivacyConfig;
+use crate::rate_limit::{backoff_delay, get_delay_from_env, parse_retry_after};
 use crate::scrapers::HttpClient;
 
 /// Maximum retry attempts on rate limit errors.
@@ -217,8 +217,8 @@ impl GroqBackend {
                 // Get Retry-After header
                 let retry_after = response.headers.get("retry-after").map(|s| s.as_str());
 
-                let wait = parse_retry_after(retry_after)
-                    .unwrap_or_else(|| backoff_delay(attempt, 1000));
+                let wait =
+                    parse_retry_after(retry_after).unwrap_or_else(|| backoff_delay(attempt, 1000));
 
                 warn!(
                     "Groq rate limited (attempt {}), waiting {:?}",

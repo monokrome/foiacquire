@@ -13,11 +13,11 @@ use std::time::Duration;
 #[cfg(feature = "browser")]
 use super::browser::BrowserEngineConfig;
 use super::config::{ScraperConfig, ViaMode};
-use crate::rate_limit::RateLimiter;
 use super::HttpClient;
 use crate::models::Source;
 #[allow(unused_imports)]
 use crate::privacy::PrivacyConfig;
+use crate::rate_limit::RateLimiter;
 use crate::repository::DieselCrawlRepository;
 
 mod api;
