@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::llm::LlmConfig;
+use crate::prefer_db::FoiaConfigLoader;
 use crate::privacy::PrivacyConfig;
 use crate::repository::diesel_context::DieselDbContext;
 use crate::repository::util::{is_postgres_url, validate_database_url};
@@ -17,14 +18,16 @@ use crate::scrapers::{ScraperConfig, ViaMode};
 pub const DEFAULT_REFRESH_TTL_DAYS: u64 = 14;
 
 /// Analysis configuration for text extraction methods.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, prefer::FromValue)]
 pub struct AnalysisConfig {
     /// Named analysis methods (custom commands).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[prefer(default)]
     pub methods: HashMap<String, AnalysisMethodConfig>,
     /// Default methods to run if --method flag not specified.
     /// Defaults to ["ocr"] if empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[prefer(default)]
     pub default_methods: Vec<String>,
 }
 
@@ -36,22 +39,26 @@ impl AnalysisConfig {
 }
 
 /// Configuration for a single analysis method.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, prefer::FromValue)]
 pub struct AnalysisMethodConfig {
     /// Command to execute (required for custom commands, optional for built-ins).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
     /// Arguments (can include {file} and {page} placeholders).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[prefer(default)]
     pub args: Vec<String>,
     /// Mimetypes this method applies to (supports wildcards like "audio/*").
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[prefer(default)]
     pub mimetypes: Vec<String>,
     /// Analysis granularity: "page" or "document" (default: "document").
     #[serde(default = "default_granularity")]
+    #[prefer(default = "document")]
     pub granularity: String,
     /// Whether command outputs to stdout (true) or a file (false).
     #[serde(default = "default_true")]
+    #[prefer(default = "true")]
     pub stdout: bool,
     /// Output file template (if stdout is false). Can use {file} placeholder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -292,7 +299,7 @@ impl Settings {
 }
 
 /// Configuration file structure.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, prefer::FromValue)]
 pub struct Config {
     /// Data directory path.
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "target")]
@@ -310,51 +317,41 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_delay_ms: Option<u64>,
     /// Rate limit backend URL.
-    /// - None or "memory": In-memory (single process only)
-    /// - "sqlite": Use local SQLite database (multi-process safe)
-    /// - "redis://host:port": Use Redis (distributed)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_limit_backend: Option<String>,
     /// Worker queue broker URL.
-    /// - None or "database": Use local SQLite database
-    /// - "amqp://host:port": Use RabbitMQ
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broker_url: Option<String>,
-    /// Default refresh TTL in days for re-checking fetched URLs.
-    /// Individual scrapers can override this with their own refresh_ttl_days.
-    /// Defaults to 14 days if not set.
+    /// Default refresh TTL in days.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_refresh_ttl_days: Option<u64>,
     /// Scraper configurations.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[prefer(default)]
     pub scrapers: HashMap<String, ScraperConfig>,
     /// LLM configuration for document summarization.
     #[serde(default, skip_serializing_if = "LlmConfig::is_default")]
+    #[prefer(default)]
     pub llm: LlmConfig,
     /// Analysis configuration for text extraction methods.
     #[serde(default, skip_serializing_if = "AnalysisConfig::is_default")]
+    #[prefer(default)]
     pub analysis: AnalysisConfig,
-
     /// Privacy configuration for Tor and proxy routing.
     #[serde(default, skip_serializing_if = "PrivacyConfig::is_default")]
+    #[prefer(default)]
     pub privacy: PrivacyConfig,
-
     /// URL rewriting for caching proxies (CDN bypass).
-    /// Maps original base URLs to proxy URLs.
-    /// Example: "https://www.cia.gov" = "https://cia.monokro.me"
-    /// Requests to cia.gov will be fetched via the CloudFront proxy instead.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[prefer(default)]
     pub via: HashMap<String, String>,
-
-    /// Via proxy mode - controls when via mappings are used for requests.
-    /// - "strict" (default): Never use via for requests, only for URL detection
-    /// - "fallback": Use via as fallback when rate limited (429/503)
-    /// - "priority": Use via first, fall back to original URL on failure
+    /// Via proxy mode.
     #[serde(default, skip_serializing_if = "is_via_mode_default")]
+    #[prefer(default)]
     pub via_mode: ViaMode,
-
     /// Path to the config file this was loaded from (not serialized).
     #[serde(skip)]
+    #[prefer(skip)]
     pub source_path: Option<PathBuf>,
 }
 
@@ -365,7 +362,7 @@ fn is_via_mode_default(mode: &ViaMode) -> bool {
 /// App-level configuration snapshot for database storage.
 /// Contains only settings that should be synced across devices.
 /// Excludes device-specific (data_dir, privacy) and bootstrap (rate_limit_backend, broker_url) settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, prefer::FromValue)]
 pub struct AppConfigSnapshot {
     /// User agent string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -381,78 +378,41 @@ pub struct AppConfigSnapshot {
     pub default_refresh_ttl_days: Option<u64>,
     /// Scraper configurations.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[prefer(default)]
     pub scrapers: HashMap<String, ScraperConfig>,
     /// LLM configuration (app portion only - device settings excluded via serde skip).
     #[serde(default, skip_serializing_if = "LlmConfig::is_default")]
+    #[prefer(default)]
     pub llm: LlmConfig,
     /// Analysis configuration for text extraction methods.
     #[serde(default, skip_serializing_if = "AnalysisConfig::is_default")]
+    #[prefer(default)]
     pub analysis: AnalysisConfig,
     /// URL rewriting for caching proxies (CDN bypass).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[prefer(default)]
     pub via: HashMap<String, String>,
     /// Via proxy mode - controls when via mappings are used for requests.
     #[serde(default, skip_serializing_if = "is_via_mode_default")]
+    #[prefer(default)]
     pub via_mode: ViaMode,
 }
 
 impl Config {
-    /// Load configuration using prefer crate.
+    /// Load configuration using prefer crate for discovery.
     /// Automatically discovers foiacquire config files in standard locations.
     pub async fn load() -> Self {
+        // Use prefer for file discovery, then parse with serde
         match prefer::load("foiacquire").await {
             Ok(pref_config) => {
-                // Extract values from prefer config using dot notation
-                // Try data_dir first, fall back to target for backwards compat
-                let data_dir: Option<String> = pref_config
-                    .get("data_dir")
-                    .await
-                    .ok()
-                    .or(pref_config.get("target").await.ok());
-                let database: Option<String> = pref_config.get("database").await.ok();
-                let user_agent: Option<String> = pref_config.get("user_agent").await.ok();
-                let request_timeout: Option<u64> = pref_config.get("request_timeout").await.ok();
-                let request_delay_ms: Option<u64> = pref_config.get("request_delay_ms").await.ok();
-                let rate_limit_backend: Option<String> =
-                    pref_config.get("rate_limit_backend").await.ok();
-                let broker_url: Option<String> = pref_config.get("broker_url").await.ok();
-                let default_refresh_ttl_days: Option<u64> =
-                    pref_config.get("default_refresh_ttl_days").await.ok();
-                let scrapers: HashMap<String, ScraperConfig> =
-                    pref_config.get("scrapers").await.unwrap_or_default();
-                let llm: LlmConfig = pref_config
-                    .get::<LlmConfig>("llm")
-                    .await
-                    .unwrap_or_default();
-                let analysis: AnalysisConfig =
-                    pref_config.get("analysis").await.unwrap_or_default();
-                let privacy: PrivacyConfig = pref_config
-                    .get::<PrivacyConfig>("privacy")
-                    .await
-                    .unwrap_or_default()
-                    .with_env_overrides();
-                let via: HashMap<String, String> = pref_config.get("via").await.unwrap_or_default();
-                let via_mode: ViaMode = pref_config.get("via_mode").await.unwrap_or_default();
-
-                // Get the source path from prefer
-                let source_path = pref_config.source_path().cloned();
-
-                Config {
-                    data_dir,
-                    database,
-                    user_agent,
-                    request_timeout,
-                    request_delay_ms,
-                    rate_limit_backend,
-                    broker_url,
-                    default_refresh_ttl_days,
-                    scrapers,
-                    llm,
-                    analysis,
-                    privacy,
-                    via,
-                    via_mode,
-                    source_path,
+                // Get the discovered file path and load with serde
+                if let Some(path) = pref_config.source_path() {
+                    match Self::load_from_path(path).await {
+                        Ok(config) => config,
+                        Err(_) => Self::default_with_env(),
+                    }
+                } else {
+                    Self::default_with_env()
                 }
             }
             Err(_) => {
@@ -616,7 +576,7 @@ impl Config {
             llm: self.llm.clone(),
             analysis: self.analysis.clone(),
             via: self.via.clone(),
-            via_mode: self.via_mode.clone(),
+            via_mode: self.via_mode,
         }
     }
 
@@ -645,33 +605,11 @@ impl Config {
     /// Load configuration from database history.
     /// Loads app-level settings only and merges with default config.
     /// Device-specific and bootstrap settings are not stored in DB.
+    ///
+    /// Uses prefer_db's FoiaConfigLoader for serde-based deserialization.
     pub async fn load_from_db(db_path: &Path) -> Option<Self> {
-        let ctx = DieselDbContext::from_sqlite_path(db_path).ok()?;
-        let entry = ctx.config_history().get_latest().await.ok()??;
-
-        // Try to load as AppConfigSnapshot first (new format)
-        // Fall back to full Config for backwards compatibility with old DB entries
-        let snapshot: AppConfigSnapshot = match entry.format.to_lowercase().as_str() {
-            "json" => {
-                // Try snapshot format first, fall back to full config
-                serde_json::from_str(&entry.data)
-                    .or_else(|_| {
-                        // Old format: full Config, extract app portion
-                        serde_json::from_str::<Config>(&entry.data)
-                            .map(|c| c.to_app_snapshot())
-                    })
-                    .ok()?
-            }
-            "toml" => {
-                toml::from_str(&entry.data)
-                    .or_else(|_| {
-                        toml::from_str::<Config>(&entry.data)
-                            .map(|c| c.to_app_snapshot())
-                    })
-                    .ok()?
-            }
-            _ => serde_json::from_str(&entry.data).ok()?,
-        };
+        let loader = FoiaConfigLoader::new(db_path);
+        let snapshot = loader.load_snapshot().await?;
 
         // Start with default config (gets device settings from env)
         let mut config = Config::default();
@@ -864,7 +802,10 @@ async fn load_config_from_sources(
     // DB provides baseline, file overrides take priority
     if let Some(resolved) = resolved_data {
         if let Some(db_config) = Config::load_from_db(&resolved.database_path).await {
-            tracing::debug!("Merging DB app settings from: {}", resolved.database_path.display());
+            tracing::debug!(
+                "Merging DB app settings from: {}",
+                resolved.database_path.display()
+            );
             // Apply DB app settings as baseline, then re-apply file overrides
             let file_snapshot = config.to_app_snapshot();
             config.apply_app_snapshot(db_config.to_app_snapshot());
@@ -877,10 +818,7 @@ async fn load_config_from_sources(
 }
 
 /// Load config from file sources only (no DB merge).
-async fn load_file_config(
-    options: &LoadOptions,
-    data_dir_override: Option<&PathBuf>,
-) -> Config {
+async fn load_file_config(options: &LoadOptions, data_dir_override: Option<&PathBuf>) -> Config {
     // Priority 1: Explicit --config flag
     if let Some(ref config_path) = options.config_path {
         return Config::load_from_path(config_path)
@@ -939,7 +877,7 @@ fn merge_app_snapshots(config: &mut Config, overlay: &AppConfigSnapshot) {
         }
     }
     if overlay.via_mode != defaults.via_mode {
-        config.via_mode = overlay.via_mode.clone();
+        config.via_mode = overlay.via_mode;
     }
 }
 
@@ -948,17 +886,11 @@ fn merge_app_snapshots(config: &mut Config, overlay: &AppConfigSnapshot) {
 pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Config) {
     let db_env = DatabaseUrlEnv::from_env();
 
-    let data_dir_override = options
-        .data
-        .as_ref()
-        .map(|d| resolve_data_path_to_dir(d));
+    let data_dir_override = options.data.as_ref().map(|d| resolve_data_path_to_dir(d));
 
     // Only resolve SQLite database paths when NOT using postgres
     let resolved_data = if !db_env.is_postgres {
-        options
-            .data
-            .as_ref()
-            .map(|d| ResolvedData::from_path(d))
+        options.data.as_ref().map(|d| ResolvedData::from_path(d))
     } else {
         None
     };
@@ -1007,10 +939,7 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
     }
 
     // BROKER_URL environment variable takes precedence over config
-    if let Some(broker) = std::env::var("BROKER_URL")
-        .ok()
-        .filter(|s| !s.is_empty())
-    {
+    if let Some(broker) = std::env::var("BROKER_URL").ok().filter(|s| !s.is_empty()) {
         tracing::debug!("Using BROKER_URL from environment: {}", broker);
         settings.broker_url = Some(broker);
     }

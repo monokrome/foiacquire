@@ -24,6 +24,29 @@ pub enum Transport {
     Direct,
 }
 
+impl prefer::FromValue for Transport {
+    fn from_value(value: &prefer::ConfigValue) -> prefer::Result<Self> {
+        match value.as_str() {
+            Some(s) => match s.to_lowercase().as_str() {
+                "obfs4" => Ok(Transport::Obfs4),
+                "snowflake" => Ok(Transport::Snowflake),
+                "meek" => Ok(Transport::Meek),
+                "direct" => Ok(Transport::Direct),
+                other => Err(prefer::Error::ConversionError {
+                    key: String::new(),
+                    type_name: "Transport".to_string(),
+                    source: format!("unknown transport: {}", other).into(),
+                }),
+            },
+            None => Err(prefer::Error::ConversionError {
+                key: String::new(),
+                type_name: "Transport".to_string(),
+                source: "expected string".into(),
+            }),
+        }
+    }
+}
+
 impl std::fmt::Display for Transport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -68,24 +91,28 @@ impl std::fmt::Display for PrivacyMode {
 }
 
 /// Per-source privacy configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, prefer::FromValue)]
 pub struct SourcePrivacyConfig {
     /// Skip Tor entirely for this source.
     #[serde(default)]
+    #[prefer(default)]
     pub direct: bool,
 
     /// Use Tor without pluggable transports (detectable as Tor traffic).
     /// Ignored if `direct` is true.
     #[serde(default = "default_true")]
+    #[prefer(default)]
     pub obfuscation: bool,
 
     /// Force a specific transport (obfs4, snowflake, meek).
     /// Ignored if `obfuscation` is false or `direct` is true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[prefer(default)]
     pub transport: Option<Transport>,
 
     /// Use a dedicated Tor circuit for this source (different exit IP).
     #[serde(default)]
+    #[prefer(default)]
     pub isolate: bool,
 }
 
@@ -124,6 +151,28 @@ pub enum HiddenServiceProvider {
     None,
 }
 
+impl prefer::FromValue for HiddenServiceProvider {
+    fn from_value(value: &prefer::ConfigValue) -> prefer::Result<Self> {
+        match value.as_str() {
+            Some(s) => match s.to_lowercase().as_str() {
+                "c-tor" | "ctor" | "tor" => Ok(HiddenServiceProvider::CTor),
+                "arti" => Ok(HiddenServiceProvider::Arti),
+                "none" | "disabled" => Ok(HiddenServiceProvider::None),
+                other => Err(prefer::Error::ConversionError {
+                    key: String::new(),
+                    type_name: "HiddenServiceProvider".to_string(),
+                    source: format!("unknown provider: {}", other).into(),
+                }),
+            },
+            None => Err(prefer::Error::ConversionError {
+                key: String::new(),
+                type_name: "HiddenServiceProvider".to_string(),
+                source: "expected string".into(),
+            }),
+        }
+    }
+}
+
 impl std::fmt::Display for HiddenServiceProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -135,11 +184,12 @@ impl std::fmt::Display for HiddenServiceProvider {
 }
 
 /// Configuration for hidden service (onion service) hosting.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, prefer::FromValue)]
 pub struct HiddenServiceConfig {
     /// Hidden service provider (c-tor, arti, or none).
     /// Default: c-tor (most secure, recommended by Tor Project)
     #[serde(default)]
+    #[prefer(default)]
     pub provider: HiddenServiceProvider,
 
     /// Allow potentially insecure experimental circuits.
@@ -147,29 +197,35 @@ pub struct HiddenServiceConfig {
     /// service implementation is "not yet as secure as C-Tor").
     /// Default: false (safe default)
     #[serde(default)]
+    #[prefer(default)]
     pub allow_potentially_insecure_circuits: bool,
 
     /// Path to tor binary (default: search PATH for "tor")
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[prefer(default)]
     pub tor_binary: Option<PathBuf>,
 
     /// Directory for Tor data (default: data_dir/tor)
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[prefer(default)]
     pub tor_data_dir: Option<PathBuf>,
 
     /// Hidden service port (what the onion service advertises)
     /// Default: 80
     #[serde(default = "default_hidden_service_port")]
+    #[prefer(default)]
     pub hidden_service_port: u16,
 
     /// Also listen on clearnet (in addition to hidden service)
     /// Default: false (hidden service only for maximum privacy)
     #[serde(default)]
+    #[prefer(default)]
     pub also_listen_clearnet: bool,
 
     /// Clearnet bind address (only used if also_listen_clearnet is true)
     /// Default: 127.0.0.1:3030
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[prefer(default)]
     pub clearnet_bind: Option<String>,
 }
 
@@ -396,29 +452,34 @@ impl SourcePrivacyConfig {
 const DEFAULT_WARNING_DELAY: u64 = 15;
 
 /// Global privacy configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, prefer::FromValue)]
 pub struct PrivacyConfig {
     /// Disable Tor entirely (direct connections).
     /// Set via `--direct` flag or `FOIACQUIRE_DIRECT=1`.
     #[serde(default)]
+    #[prefer(default)]
     pub direct: bool,
 
     /// Enable pluggable transport obfuscation (default: true).
     /// Set to false via `--no-obfuscation` or `FOIACQUIRE_NO_OBFUSCATION=1`.
     #[serde(default = "default_true")]
+    #[prefer(default)]
     pub obfuscation: bool,
 
     /// External SOCKS5 proxy URL (bypasses embedded Arti).
     /// Set via `SOCKS_PROXY` environment variable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[prefer(default)]
     pub socks_proxy: Option<String>,
 
     /// Default transport when obfuscation is enabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[prefer(default)]
     pub transport: Option<Transport>,
 
     /// Bridge configuration for obfs4.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[prefer(default)]
     pub bridges: Vec<String>,
 
     /// Delay in seconds before proceeding when insecure (default: 15).
@@ -428,15 +489,18 @@ pub struct PrivacyConfig {
         default = "default_warning_delay",
         skip_serializing_if = "is_default_warning_delay"
     )]
+    #[prefer(default)]
     pub warning_delay: u64,
 
     /// Show Tor legality warning (default: true).
     /// Can be disabled via `--no-tor-warning`.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    #[prefer(default)]
     pub tor_legal_warning: bool,
 
     /// Hidden service configuration for server mode.
     #[serde(default, skip_serializing_if = "HiddenServiceConfig::is_default")]
+    #[prefer(default)]
     pub hidden_service: HiddenServiceConfig,
 }
 

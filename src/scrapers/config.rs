@@ -31,6 +31,26 @@ pub enum ViaMode {
     Priority,
 }
 
+impl prefer::FromValue for ViaMode {
+    fn from_value(value: &prefer::ConfigValue) -> prefer::Result<Self> {
+        match value.as_str() {
+            Some("strict") => Ok(ViaMode::Strict),
+            Some("fallback") => Ok(ViaMode::Fallback),
+            Some("priority") => Ok(ViaMode::Priority),
+            Some(other) => Err(prefer::Error::ConversionError {
+                key: String::new(),
+                type_name: "ViaMode".to_string(),
+                source: format!("unknown via mode: {}", other).into(),
+            }),
+            None => Err(prefer::Error::ConversionError {
+                key: String::new(),
+                type_name: "ViaMode".to_string(),
+                source: "expected string".into(),
+            }),
+        }
+    }
+}
+
 impl ViaMode {
     /// Check if this mode allows using via for requests (not just detection).
     pub fn allows_via_requests(&self) -> bool {
@@ -44,7 +64,7 @@ impl ViaMode {
 }
 
 /// Scraper configuration from JSON.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, prefer::FromValue)]
 pub struct ScraperConfig {
     /// Name of the scraper (optional, can use source ID).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -53,27 +73,23 @@ pub struct ScraperConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
     /// User agent configuration.
-    /// - None: Use default FOIAcquire user agent
-    /// - "impersonate": Randomly select from real browser user agents
-    /// - Any other string: Use as custom user agent
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
-    /// Refresh TTL in days. URLs older than this will be re-checked.
-    /// Overrides the global default_refresh_ttl_days if set.
+    /// Refresh TTL in days.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_ttl_days: Option<u64>,
     #[serde(default, skip_serializing_if = "DiscoveryConfig::is_default")]
+    #[prefer(default)]
     pub discovery: DiscoveryConfig,
     #[serde(default, skip_serializing_if = "FetchConfig::is_default")]
+    #[prefer(default)]
     pub fetch: FetchConfig,
     /// Browser configuration for anti-bot protected sites.
-    /// When set, the scraper will use a headless browser instead of HTTP requests.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<BrowserConfig>,
     /// Per-source privacy configuration.
-    /// Allows overriding global privacy settings for this specific source.
-    /// Example: `"privacy": { "direct": true }` to skip Tor for trusted internal sources.
     #[serde(default, skip_serializing_if = "SourcePrivacyConfig::is_default")]
+    #[prefer(default)]
     pub privacy: SourcePrivacyConfig,
 }
 
@@ -93,7 +109,7 @@ impl ScraperConfig {
 }
 
 /// Browser configuration for scraper.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, prefer::FromValue)]
 pub struct BrowserConfig {
     /// Whether to use browser for fetching (enables browser mode).
     #[serde(default)]
@@ -187,43 +203,56 @@ impl BrowserConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, prefer::FromValue)]
 pub struct DiscoveryConfig {
     #[serde(rename = "type", default = "default_discovery_type")]
+    #[prefer(default, rename = "type")]
     pub discovery_type: String,
     #[serde(default)]
+    #[prefer(default)]
     pub base_url: Option<String>,
     #[serde(default)]
+    #[prefer(default)]
     pub start_paths: Vec<String>,
     #[serde(default)]
+    #[prefer(default)]
     pub levels: Vec<LevelConfig>,
     #[serde(default)]
+    #[prefer(default)]
     pub api: Option<ApiConfig>,
     /// Maximum recursion depth for BFS crawling (default: 10)
     #[serde(default)]
+    #[prefer(default)]
     pub max_depth: Option<u32>,
     /// Direct document link selectors (simpler alternative to levels)
     #[serde(default)]
+    #[prefer(default)]
     pub document_links: Vec<String>,
     /// Direct document URL patterns (simpler alternative to levels)
     #[serde(default)]
+    #[prefer(default)]
     pub document_patterns: Vec<String>,
     /// Whether to use browser for fetching pages
     #[serde(default)]
+    #[prefer(default)]
     pub use_browser: bool,
     /// Search queries to expand discovery (generates search URLs)
     #[serde(default)]
+    #[prefer(default)]
     pub search_queries: Vec<String>,
     /// URL template for search queries, with {query} placeholder
     /// e.g., "/search?q={query}" or "/readingroom/search/site/?search_api_fulltext={query}"
     #[serde(default)]
+    #[prefer(default)]
     pub search_url_template: Option<String>,
     /// Whether to expand search queries using LLM (generates related terms)
     #[serde(default)]
+    #[prefer(default)]
     pub expand_search_terms: bool,
 
     /// External discovery configuration (search engines, sitemaps, Wayback, etc.)
     #[serde(default, skip_serializing_if = "ExternalDiscoveryConfig::is_default")]
+    #[prefer(skip)]
     pub external: ExternalDiscoveryConfig,
 }
 
@@ -245,65 +274,88 @@ fn default_discovery_type() -> String {
     "html_crawl".to_string()
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, prefer::FromValue)]
 pub struct LevelConfig {
     #[serde(default)]
+    #[prefer(default)]
     pub link_selectors: Vec<String>,
     #[serde(default)]
+    #[prefer(default)]
     pub link_pattern: Option<String>,
     #[serde(default)]
+    #[prefer(default)]
     pub document_patterns: Vec<String>,
     #[serde(default)]
+    #[prefer(default)]
     pub pagination: Option<PaginationConfig>,
     #[serde(default)]
+    #[prefer(default)]
     pub use_browser: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, prefer::FromValue)]
 pub struct PaginationConfig {
     #[serde(default)]
+    #[prefer(default)]
     pub next_selectors: Vec<String>,
     #[serde(default)]
+    #[prefer(default)]
     pub page_param: Option<String>,
     #[serde(default)]
+    #[prefer(default)]
     pub page_size: Option<u32>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, prefer::FromValue)]
 pub struct ApiConfig {
     #[serde(default)]
+    #[prefer(default)]
     pub base_url: Option<String>,
     #[serde(default)]
+    #[prefer(default)]
     pub endpoint: String,
     #[serde(default)]
+    #[prefer(skip)]
     pub params: serde_json::Value,
     #[serde(default)]
+    #[prefer(default)]
     pub pagination: ApiPaginationConfig,
     #[serde(default)]
+    #[prefer(default)]
     pub url_extraction: UrlExtractionConfig,
     #[serde(default)]
+    #[prefer(default)]
     pub queries: Vec<String>,
     #[serde(default)]
+    #[prefer(default)]
     pub query_param: Option<String>,
     #[serde(default)]
+    #[prefer(default)]
     pub parent: Option<ApiParentConfig>,
     #[serde(default)]
+    #[prefer(default)]
     pub child: Option<ApiChildConfig>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, prefer::FromValue)]
 pub struct ApiPaginationConfig {
     #[serde(default = "default_page_param")]
+    #[prefer(default)]
     pub page_param: String,
     #[serde(default)]
+    #[prefer(default)]
     pub page_size_param: Option<String>,
     #[serde(default = "default_page_size")]
+    #[prefer(default)]
     pub page_size: u32,
     #[serde(default = "default_results_path")]
+    #[prefer(default)]
     pub results_path: String,
     #[serde(default)]
+    #[prefer(default)]
     pub cursor_param: Option<String>,
     #[serde(default)]
+    #[prefer(default)]
     pub cursor_response_path: Option<String>,
 }
 
@@ -317,18 +369,23 @@ fn default_results_path() -> String {
     "results".to_string()
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, prefer::FromValue)]
 pub struct UrlExtractionConfig {
     #[serde(default = "default_url_field")]
+    #[prefer(default)]
     pub url_field: String,
     #[serde(default)]
+    #[prefer(default)]
     pub url_template: Option<String>,
     #[serde(default)]
+    #[prefer(default)]
     pub fallback_field: Option<String>,
     #[serde(default)]
+    #[prefer(default)]
     pub items_path: Option<String>,
     /// Nested array paths to traverse (e.g., ["communications", "files"] for communications[*].files[*])
     #[serde(default)]
+    #[prefer(default)]
     pub nested_arrays: Vec<String>,
 }
 
@@ -336,17 +393,22 @@ fn default_url_field() -> String {
     "url".to_string()
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, prefer::FromValue)]
 pub struct ApiParentConfig {
     #[serde(default)]
+    #[prefer(default)]
     pub endpoint: String,
     #[serde(default)]
+    #[prefer(skip)]
     pub params: serde_json::Value,
     #[serde(default)]
+    #[prefer(default)]
     pub pagination: ApiPaginationConfig,
     #[serde(default = "default_results_path")]
+    #[prefer(default)]
     pub results_path: String,
     #[serde(default = "default_id_path")]
+    #[prefer(default)]
     pub id_path: String,
 }
 
@@ -354,27 +416,34 @@ fn default_id_path() -> String {
     "id".to_string()
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, prefer::FromValue)]
 pub struct ApiChildConfig {
     #[serde(default)]
+    #[prefer(default)]
     pub endpoint_template: String,
     #[serde(default = "default_results_path")]
+    #[prefer(default)]
     pub results_path: String,
     #[serde(default)]
+    #[prefer(default)]
     pub url_extraction: UrlExtractionConfig,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, prefer::FromValue)]
 pub struct FetchConfig {
     #[serde(default)]
+    #[prefer(default)]
     pub use_browser: bool,
     /// Use binary fetch for PDFs (JavaScript fetch from within browser context).
     /// Required for sites with Akamai/Cloudflare protection on PDF endpoints.
     #[serde(default)]
+    #[prefer(default)]
     pub binary_fetch: bool,
     #[serde(default)]
+    #[prefer(default)]
     pub pdf_selectors: Vec<String>,
     #[serde(default)]
+    #[prefer(default)]
     pub title_selectors: Vec<String>,
 }
 

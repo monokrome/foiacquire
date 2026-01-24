@@ -21,6 +21,27 @@ pub enum LlmProvider {
     OpenAI,
 }
 
+impl prefer::FromValue for LlmProvider {
+    fn from_value(value: &prefer::ConfigValue) -> prefer::Result<Self> {
+        match value.as_str() {
+            Some(s) => match s.to_lowercase().as_str() {
+                "ollama" => Ok(LlmProvider::Ollama),
+                "openai" | "groq" | "together" => Ok(LlmProvider::OpenAI),
+                other => Err(prefer::Error::ConversionError {
+                    key: String::new(),
+                    type_name: "LlmProvider".to_string(),
+                    source: format!("unknown provider: {}", other).into(),
+                }),
+            },
+            None => Err(prefer::Error::ConversionError {
+                key: String::new(),
+                type_name: "LlmProvider".to_string(),
+                source: "expected string".into(),
+            }),
+        }
+    }
+}
+
 impl LlmProvider {
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
@@ -33,25 +54,31 @@ impl LlmProvider {
 
 /// Application-level LLM config (stored in DB, synced across devices).
 /// Controls what the LLM does, not how to connect to it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, prefer::FromValue)]
 pub struct LlmAppConfig {
     /// Whether LLM summarization is enabled
     #[serde(default = "default_enabled")]
+    #[prefer(default)]
     pub enabled: bool,
     /// Maximum tokens in response
     #[serde(default = "default_max_tokens")]
+    #[prefer(default)]
     pub max_tokens: u32,
     /// Temperature for generation (0.0 - 1.0)
     #[serde(default = "default_temperature")]
+    #[prefer(default)]
     pub temperature: f32,
     /// Custom prompt for synopsis generation (uses {title} and {content} placeholders)
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[prefer(default)]
     pub synopsis_prompt: Option<String>,
     /// Custom prompt for tag generation (uses {title} and {content} placeholders)
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[prefer(default)]
     pub tags_prompt: Option<String>,
     /// Maximum characters of document content to send to LLM
     #[serde(default = "default_max_content_chars")]
+    #[prefer(default)]
     pub max_content_chars: usize,
 }
 
@@ -74,13 +101,15 @@ pub struct LlmDeviceConfig {
 ///
 /// Serde: Only the app config is serialized/deserialized (DB-stored settings).
 /// Device config is populated from environment variables during Default.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, prefer::FromValue)]
 pub struct LlmConfig {
     /// Application-level settings (from DB)
     #[serde(flatten)]
+    #[prefer(flatten)]
     pub app: LlmAppConfig,
     /// Device-level settings (from env) - not serialized
     #[serde(skip)]
+    #[prefer(skip)]
     pub device: LlmDeviceConfig,
 }
 
@@ -314,14 +343,6 @@ impl LlmDeviceConfig {
 
 // === LlmConfig (combined) implementations ===
 
-impl Default for LlmConfig {
-    fn default() -> Self {
-        Self {
-            app: LlmAppConfig::default(),
-            device: LlmDeviceConfig::default(),
-        }
-    }
-}
 
 impl LlmConfig {
     /// Create from app config (DB) and device config (env).
@@ -427,7 +448,7 @@ impl LlmConfigLegacy {
 
     /// Convert legacy config to split config.
     /// App settings come from the legacy config, device settings from env.
-    pub fn to_split_config(self) -> LlmConfig {
+    pub fn into_split_config(self) -> LlmConfig {
         let app = LlmAppConfig {
             enabled: self.enabled,
             max_tokens: self.max_tokens,
