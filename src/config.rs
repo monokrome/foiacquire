@@ -851,10 +851,35 @@ fn resolve_data_path_to_dir(path: &Path) -> PathBuf {
 }
 
 /// Load config from the appropriate source based on options.
+/// Merges file config with DB app settings for cross-device sync.
 async fn load_config_from_sources(
     options: &LoadOptions,
     data_dir_override: Option<&PathBuf>,
     resolved_data: Option<&ResolvedData>,
+) -> Config {
+    // Step 1: Load file-based config
+    let mut config = load_file_config(options, data_dir_override).await;
+
+    // Step 2: Merge with DB app settings (synced across devices)
+    // DB provides baseline, file overrides take priority
+    if let Some(resolved) = resolved_data {
+        if let Some(db_config) = Config::load_from_db(&resolved.database_path).await {
+            tracing::debug!("Merging DB app settings from: {}", resolved.database_path.display());
+            // Apply DB app settings as baseline, then re-apply file overrides
+            let file_snapshot = config.to_app_snapshot();
+            config.apply_app_snapshot(db_config.to_app_snapshot());
+            // Re-apply file settings on top (file takes priority)
+            merge_app_snapshots(&mut config, &file_snapshot);
+        }
+    }
+
+    config
+}
+
+/// Load config from file sources only (no DB merge).
+async fn load_file_config(
+    options: &LoadOptions,
+    data_dir_override: Option<&PathBuf>,
 ) -> Config {
     // Priority 1: Explicit --config flag
     if let Some(ref config_path) = options.config_path {
@@ -863,7 +888,7 @@ async fn load_config_from_sources(
             .unwrap_or_else(|_| Config::default_with_env());
     }
 
-    // Priority 2-3: Config next to data dir, or from database history
+    // Priority 2: Config next to data dir
     if let Some(data_dir) = data_dir_override {
         if let Some(config_path) = find_config_next_to_db(data_dir) {
             tracing::debug!("Found config next to data dir: {}", config_path.display());
@@ -871,21 +896,51 @@ async fn load_config_from_sources(
                 .await
                 .unwrap_or_else(|_| Config::default_with_env());
         }
-
-        if let Some(resolved) = resolved_data {
-            tracing::debug!(
-                "No config file found, trying database history: {}",
-                resolved.database_path.display()
-            );
-            if let Some(config) = Config::load_from_db(&resolved.database_path).await {
-                return config;
-            }
-            tracing::debug!("No config in database history, using defaults");
-        }
     }
 
-    // Priority 4: Auto-discover via prefer
+    // Priority 3: Auto-discover via prefer
     Config::load().await
+}
+
+/// Merge non-default values from snapshot into config.
+/// Only applies values that differ from defaults (preserves explicit settings).
+fn merge_app_snapshots(config: &mut Config, overlay: &AppConfigSnapshot) {
+    let defaults = AppConfigSnapshot::default();
+
+    // Merge each field if it differs from default
+    if overlay.user_agent != defaults.user_agent {
+        config.user_agent = overlay.user_agent.clone();
+    }
+    if overlay.request_timeout != defaults.request_timeout {
+        config.request_timeout = overlay.request_timeout;
+    }
+    if overlay.request_delay_ms != defaults.request_delay_ms {
+        config.request_delay_ms = overlay.request_delay_ms;
+    }
+    if overlay.default_refresh_ttl_days != defaults.default_refresh_ttl_days {
+        config.default_refresh_ttl_days = overlay.default_refresh_ttl_days;
+    }
+    if overlay.scrapers != defaults.scrapers {
+        // Merge scrapers - overlay entries replace base entries
+        for (key, value) in &overlay.scrapers {
+            config.scrapers.insert(key.clone(), value.clone());
+        }
+    }
+    if !overlay.llm.is_default() {
+        // Apply LLM app settings (device settings come from env)
+        config.llm.app = overlay.llm.app.clone();
+    }
+    if !overlay.analysis.is_default() {
+        config.analysis = overlay.analysis.clone();
+    }
+    if overlay.via != defaults.via {
+        for (key, value) in &overlay.via {
+            config.via.insert(key.clone(), value.clone());
+        }
+    }
+    if overlay.via_mode != defaults.via_mode {
+        config.via_mode = overlay.via_mode.clone();
+    }
 }
 
 /// Load settings with explicit options.
