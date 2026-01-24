@@ -17,33 +17,124 @@ use crate::scrapers::{ScraperConfig, ViaMode};
 /// Default refresh TTL in days (14 days).
 pub const DEFAULT_REFRESH_TTL_DAYS: u64 = 14;
 
-/// OCR backend configuration with fallback chain support.
-#[derive(Debug, Clone, Serialize, Deserialize, prefer::FromValue)]
-pub struct OcrConfig {
-    /// Ordered list of OCR backends to try (fallback chain).
-    /// First available backend that succeeds will be used.
-    /// On rate limit, tries next backend in chain.
-    /// Example: ["groq", "gemini", "tesseract"]
-    #[serde(default = "default_ocr_backends")]
-    #[prefer(default)]
-    pub backends: Vec<String>,
-
-    /// Always run tesseract as baseline, regardless of other backends.
-    /// Useful for comparison and deduplication via image hash.
-    #[serde(default)]
-    #[prefer(default)]
-    pub always_tesseract: bool,
+/// A backend entry - either a single backend or a fallback chain.
+///
+/// Examples:
+/// - `"tesseract"` - single backend, always runs
+/// - `["groq", "gemini"]` - fallback chain, tries groq first, gemini if rate limited
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BackendEntry {
+    /// Single backend that always runs.
+    Single(String),
+    /// Fallback chain - tries backends in order until one succeeds.
+    Chain(Vec<String>),
 }
 
-fn default_ocr_backends() -> Vec<String> {
-    vec!["tesseract".to_string()]
+impl BackendEntry {
+    /// Get the primary backend name (first in chain or the single backend).
+    #[allow(dead_code)]
+    pub fn primary(&self) -> &str {
+        match self {
+            BackendEntry::Single(s) => s,
+            BackendEntry::Chain(v) => v.first().map(|s| s.as_str()).unwrap_or(""),
+        }
+    }
+
+    /// Get all backend names in this entry.
+    pub fn backends(&self) -> Vec<&str> {
+        match self {
+            BackendEntry::Single(s) => vec![s.as_str()],
+            BackendEntry::Chain(v) => v.iter().map(|s| s.as_str()).collect(),
+        }
+    }
+
+    /// Check if this is a fallback chain (multiple backends).
+    #[allow(dead_code)]
+    pub fn is_chain(&self) -> bool {
+        matches!(self, BackendEntry::Chain(v) if v.len() > 1)
+    }
+}
+
+impl prefer::FromValue for BackendEntry {
+    fn from_value(value: &prefer::ConfigValue) -> prefer::Result<Self> {
+        // Try as string first
+        if let Some(s) = value.as_str() {
+            return Ok(BackendEntry::Single(s.to_string()));
+        }
+        // Try as array of strings
+        if let Some(arr) = value.as_array() {
+            let mut backends = Vec::new();
+            for item in arr {
+                if let Some(s) = item.as_str() {
+                    backends.push(s.to_string());
+                } else {
+                    return Err(prefer::Error::ConversionError {
+                        key: String::new(),
+                        type_name: "BackendEntry".to_string(),
+                        source: "array items must be strings".into(),
+                    });
+                }
+            }
+            return Ok(BackendEntry::Chain(backends));
+        }
+        Err(prefer::Error::ConversionError {
+            key: String::new(),
+            type_name: "BackendEntry".to_string(),
+            source: "expected string or array of strings".into(),
+        })
+    }
+}
+
+/// OCR backend configuration with parallel execution and fallback chains.
+///
+/// Each entry in `backends` is either:
+/// - A string: single backend that always runs
+/// - An array: fallback chain that tries backends in order
+///
+/// Example: `["tesseract", ["groq", "gemini"], "deepseek"]`
+/// - Runs tesseract, stores result
+/// - Runs groq (falls back to gemini if rate limited), stores result
+/// - Runs deepseek, stores result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OcrConfig {
+    /// Backend entries to run. Each entry produces a separate result.
+    #[serde(default = "default_ocr_backends")]
+    pub backends: Vec<BackendEntry>,
+}
+
+impl prefer::FromValue for OcrConfig {
+    fn from_value(value: &prefer::ConfigValue) -> prefer::Result<Self> {
+        // Try to get backends array
+        let backends = if let Some(obj) = value.as_object() {
+            if let Some(backends_val) = obj.get("backends") {
+                if let Some(arr) = backends_val.as_array() {
+                    let mut entries = Vec::new();
+                    for item in arr {
+                        entries.push(BackendEntry::from_value(item)?);
+                    }
+                    entries
+                } else {
+                    default_ocr_backends()
+                }
+            } else {
+                default_ocr_backends()
+            }
+        } else {
+            default_ocr_backends()
+        };
+        Ok(OcrConfig { backends })
+    }
+}
+
+fn default_ocr_backends() -> Vec<BackendEntry> {
+    vec![BackendEntry::Single("tesseract".to_string())]
 }
 
 impl Default for OcrConfig {
     fn default() -> Self {
         Self {
             backends: default_ocr_backends(),
-            always_tesseract: false,
         }
     }
 }
@@ -51,7 +142,8 @@ impl Default for OcrConfig {
 impl OcrConfig {
     /// Check if this is the default config.
     pub fn is_default(&self) -> bool {
-        self.backends == default_ocr_backends() && !self.always_tesseract
+        self.backends.len() == 1
+            && matches!(&self.backends[0], BackendEntry::Single(s) if s == "tesseract")
     }
 }
 

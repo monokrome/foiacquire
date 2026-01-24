@@ -27,34 +27,21 @@ use super::paddle_backend::PaddleBackend;
 pub struct FallbackOcrBackend {
     /// Ordered list of backends to try.
     backends: Vec<Arc<dyn OcrBackend>>,
-    /// Whether to always run tesseract as baseline (for comparison/dedup).
-    always_tesseract: bool,
-    /// Tesseract backend instance (if always_tesseract is true).
-    tesseract: Option<Arc<TesseractBackend>>,
 }
 
 impl FallbackOcrBackend {
-    /// Create a new fallback backend from configuration.
+    /// Create a new fallback backend from a list of backend names.
     ///
     /// # Arguments
-    /// * `backend_names` - Ordered list of backend names to try (e.g., ["groq", "gemini", "tesseract"])
-    /// * `always_tesseract` - Always run tesseract as baseline, even if another backend succeeds
+    /// * `backend_names` - Ordered list of backend names to try (e.g., ["groq", "gemini"])
     /// * `config` - OCR configuration (language, GPU settings, etc.)
-    pub fn from_config(
-        backend_names: &[String],
-        always_tesseract: bool,
-        config: OcrConfig,
-    ) -> Self {
+    pub fn from_names(backend_names: &[&str], config: OcrConfig) -> Self {
         let mut backends: Vec<Arc<dyn OcrBackend>> = Vec::new();
-        let mut has_tesseract = false;
 
         for name in backend_names {
             if let Some(backend) = Self::create_backend(name, &config) {
                 if backend.is_available() {
                     debug!("OCR fallback chain: added {} backend", name);
-                    if backend.backend_type() == OcrBackendType::Tesseract {
-                        has_tesseract = true;
-                    }
                     backends.push(backend);
                 } else {
                     debug!(
@@ -68,38 +55,26 @@ impl FallbackOcrBackend {
             }
         }
 
-        // If no backends configured or available, default to tesseract
+        // If no backends available, try tesseract as last resort
         if backends.is_empty() {
-            let tesseract = Arc::new(TesseractBackend::with_config(config.clone()));
+            let tesseract = Arc::new(TesseractBackend::with_config(config));
             if tesseract.is_available() {
                 backends.push(tesseract);
-                has_tesseract = true;
             }
         }
-
-        // Create separate tesseract instance for always_tesseract mode
-        let tesseract = if always_tesseract && !has_tesseract {
-            let t = Arc::new(TesseractBackend::with_config(config));
-            if t.is_available() {
-                Some(t)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
 
         info!(
-            "OCR fallback chain initialized with {} backends, always_tesseract={}",
-            backends.len(),
-            always_tesseract
+            "OCR fallback chain initialized with {} backends",
+            backends.len()
         );
 
-        Self {
-            backends,
-            always_tesseract,
-            tesseract,
-        }
+        Self { backends }
+    }
+
+    /// Create a fallback backend for a single backend (no fallback).
+    #[allow(dead_code)]
+    pub fn single(backend_name: &str, config: OcrConfig) -> Self {
+        Self::from_names(&[backend_name], config)
     }
 
     /// Create a backend by name.
@@ -201,28 +176,10 @@ impl OcrBackend for FallbackOcrBackend {
     }
 
     fn ocr_image(&self, image_path: &Path) -> Result<OcrResult, OcrError> {
-        // Optionally run tesseract baseline first
-        if self.always_tesseract {
-            if let Some(ref tesseract) = self.tesseract {
-                if let Ok(result) = tesseract.ocr_image(image_path) {
-                    debug!("Tesseract baseline: {} chars", result.text.len());
-                }
-            }
-        }
-
         self.run_with_fallback(|backend| backend.ocr_image(image_path))
     }
 
     fn ocr_pdf_page(&self, pdf_path: &Path, page: u32) -> Result<OcrResult, OcrError> {
-        // Optionally run tesseract baseline first
-        if self.always_tesseract {
-            if let Some(ref tesseract) = self.tesseract {
-                if let Ok(result) = tesseract.ocr_pdf_page(pdf_path, page) {
-                    debug!("Tesseract baseline: {} chars", result.text.len());
-                }
-            }
-        }
-
         self.run_with_fallback(|backend| backend.ocr_pdf_page(pdf_path, page))
     }
 }
@@ -233,21 +190,24 @@ mod tests {
 
     #[test]
     fn test_empty_config_defaults_to_tesseract() {
-        let backend = FallbackOcrBackend::from_config(&[], false, OcrConfig::default());
+        let backend = FallbackOcrBackend::from_names(&[], OcrConfig::default());
         // Should have at least tesseract if available
         assert!(backend.backends.len() <= 1);
     }
 
     #[test]
     fn test_unknown_backend_ignored() {
-        let backend = FallbackOcrBackend::from_config(
-            &["unknown_backend".to_string(), "tesseract".to_string()],
-            false,
-            OcrConfig::default(),
-        );
+        let backend =
+            FallbackOcrBackend::from_names(&["unknown_backend", "tesseract"], OcrConfig::default());
         // Unknown backend should be skipped
         for b in &backend.backends {
             assert_ne!(b.backend_type().as_str(), "unknown_backend");
         }
+    }
+
+    #[test]
+    fn test_single_backend() {
+        let backend = FallbackOcrBackend::single("tesseract", OcrConfig::default());
+        assert!(backend.backends.len() <= 1);
     }
 }
