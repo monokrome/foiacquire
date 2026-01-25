@@ -162,7 +162,7 @@ impl OcrBackend for OcrsBackend {
     fn ocr_image(&self, image_path: &Path) -> Result<OcrResult, OcrError> {
         let start = Instant::now();
         let text = self.run_ocrs(image_path)?;
-        Ok(build_ocr_result(text, OcrBackendType::Ocrs, start))
+        Ok(build_ocr_result(text, OcrBackendType::Ocrs, None, start))
     }
 
     fn ocr_pdf_page(&self, pdf_path: &Path, page: u32) -> Result<OcrResult, OcrError> {
@@ -170,6 +170,6 @@ impl OcrBackend for OcrsBackend {
         let temp_dir = TempDir::new()?;
         let image_path = pdf_utils::pdf_page_to_image(pdf_path, page, temp_dir.path())?;
         let text = self.run_ocrs(&image_path)?;
-        Ok(build_ocr_result(text, OcrBackendType::Ocrs, start))
+        Ok(build_ocr_result(text, OcrBackendType::Ocrs, None, start))
     }
 }
