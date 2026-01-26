@@ -18,9 +18,12 @@ const MAX_HISTORY_ENTRIES: i64 = 16;
 /// Represents a stored configuration entry.
 #[derive(Debug, Clone)]
 pub struct DieselConfigHistoryEntry {
+    #[allow(dead_code)]
     pub uuid: String,
+    #[allow(dead_code)]
     pub created_at: DateTime<Utc>,
     pub data: String,
+    #[allow(dead_code)]
     pub format: String,
     #[allow(dead_code)]
     pub hash: String,
@@ -113,6 +116,7 @@ impl DieselConfigHistoryRepository {
     }
 
     /// Get all configuration history entries (most recent first).
+    #[allow(dead_code)]
     pub async fn get_all(&self) -> Result<Vec<DieselConfigHistoryEntry>, DieselError> {
         with_conn!(self.pool, conn, {
             configuration_history::table

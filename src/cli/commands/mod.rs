@@ -448,25 +448,23 @@ enum SourceCommands {
 
 #[derive(Subcommand)]
 enum ConfigCommands {
-    /// Recover a skeleton config from an existing database (generates from sources)
-    Recover {
-        /// Path to the database file
-        database: PathBuf,
-        /// Output file (default: stdout)
+    /// Migrate a config file into the database
+    Transfer {
+        /// Path to config file (default: auto-discover)
         #[arg(short, long)]
-        output: Option<PathBuf>,
+        file: Option<PathBuf>,
     },
-    /// Restore the most recent config from database history
-    Restore {
-        /// Output file (default: foiacquire.json next to the database)
-        #[arg(short, long)]
-        output: Option<PathBuf>,
+    /// Get a config value
+    Get {
+        /// Setting path (e.g., "user_agent", "scrapers.my-source.name")
+        setting: String,
     },
-    /// List configuration history entries
-    History {
-        /// Show full config data (default: show summary only)
-        #[arg(long)]
-        full: bool,
+    /// Set a config value
+    Set {
+        /// Setting path (e.g., "user_agent", "request_timeout")
+        setting: String,
+        /// Value to set (JSON for complex types)
+        value: String,
     },
 }
 
@@ -806,14 +804,14 @@ pub async fn run() -> anyhow::Result<()> {
             }
         },
         Commands::Config { command } => match command {
-            ConfigCommands::Recover { database, output } => {
-                config_cmd::cmd_config_recover(&database, output.as_deref()).await
+            ConfigCommands::Transfer { file } => {
+                config_cmd::cmd_config_transfer(&settings, file.as_deref()).await
             }
-            ConfigCommands::Restore { output } => {
-                config_cmd::cmd_config_restore(&settings, output.as_deref()).await
+            ConfigCommands::Get { setting } => {
+                config_cmd::cmd_config_get(&settings, &setting).await
             }
-            ConfigCommands::History { full } => {
-                config_cmd::cmd_config_history(&settings, full).await
+            ConfigCommands::Set { setting, value } => {
+                config_cmd::cmd_config_set(&settings, &setting, &value).await
             }
         },
         Commands::Db { command } => match command {

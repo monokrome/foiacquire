@@ -727,15 +727,6 @@ impl Config {
         self.via_mode = snapshot.via_mode;
     }
 
-    /// Compute SHA-256 hash of the app-level settings only.
-    pub fn app_hash(&self) -> String {
-        let snapshot = self.to_app_snapshot();
-        let json = serde_json::to_string(&snapshot).unwrap_or_default();
-        let mut hasher = Sha256::new();
-        hasher.update(json.as_bytes());
-        hex::encode(hasher.finalize())
-    }
-
     /// Load configuration from database history.
     /// Loads app-level settings only and merges with default config.
     /// Device-specific and bootstrap settings are not stored in DB.
@@ -750,44 +741,6 @@ impl Config {
         // Apply app settings from DB
         config.apply_app_snapshot(snapshot);
         Some(config)
-    }
-
-    /// Save configuration to database history if it has changed.
-    /// Only saves app-level settings (excludes device-specific and bootstrap settings).
-    pub async fn save_to_db_if_changed(&self, settings: &Settings) {
-        // Use app_hash to only track changes to app-level settings
-        let hash = self.app_hash();
-        // Serialize only app-level settings
-        let snapshot = self.to_app_snapshot();
-        let data = serde_json::to_string_pretty(&snapshot).unwrap_or_default();
-        let format = "json";
-
-        let ctx = match settings.create_db_context() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                tracing::warn!("Could not save config to history (db context error): {}", e);
-                return;
-            }
-        };
-        let repo = ctx.config_history();
-
-        match repo.insert_if_new(&data, format, &hash).await {
-            Ok(true) => {
-                tracing::debug!("Saved new config to history");
-            }
-            Ok(false) => {
-                tracing::debug!("Config unchanged, not saving to history");
-            }
-            Err(e) => {
-                // Check for lock errors and warn
-                let msg = e.to_string();
-                if msg.contains("locked") || msg.contains("SQLITE_BUSY") {
-                    tracing::warn!("Could not save config to history (database locked): {}", e);
-                } else {
-                    tracing::warn!("Could not save config to history: {}", e);
-                }
-            }
-        }
     }
 }
 
@@ -1077,9 +1030,6 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
         tracing::debug!("Using BROKER_URL from environment: {}", broker);
         settings.broker_url = Some(broker);
     }
-
-    // Save config to database history (errors logged gracefully)
-    config.save_to_db_if_changed(&settings).await;
 
     (settings, config)
 }

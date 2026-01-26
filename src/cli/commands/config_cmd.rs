@@ -1,174 +1,331 @@
 //! Configuration management commands.
 
-use std::collections::HashMap;
-use std::io::Write;
 use std::path::Path;
 
 use console::style;
+use sha2::{Digest, Sha256};
 
-use crate::cli::icons::{dim_arrow, success, warn};
-use crate::config::{Config, Settings};
-use crate::repository::diesel_context::DieselDbContext;
-use crate::scrapers::ScraperConfig;
+use crate::cli::icons::{error, success};
+use crate::config::{AppConfigSnapshot, Config, Settings};
 
-/// Recover a skeleton config from an existing database.
-pub async fn cmd_config_recover(database: &Path, output: Option<&Path>) -> anyhow::Result<()> {
-    // Validate database exists
-    if !database.exists() {
-        anyhow::bail!("Database not found: {}", database.display());
-    }
-
-    // Derive target directory from database path
-    let target = database
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine parent directory of database"))?;
-
-    let database_filename = database
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| anyhow::anyhow!("Could not determine database filename"))?;
-
-    // Open database and query sources
-    let ctx = DieselDbContext::from_sqlite_path(database)?;
-    let source_repo = ctx.sources();
-    let sources = source_repo.get_all().await?;
-
-    if sources.is_empty() {
-        eprintln!(
-            "{} No sources found in database. Generating minimal config.",
-            warn()
-        );
+/// Migrate a config file into the database.
+pub async fn cmd_config_transfer(settings: &Settings, file: Option<&Path>) -> anyhow::Result<()> {
+    // Load config from file (explicit path or auto-discover)
+    let config = if let Some(path) = file {
+        if !path.exists() {
+            anyhow::bail!("Config file not found: {}", path.display());
+        }
+        Config::load_from_path(path)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?
     } else {
-        eprintln!(
-            "{} Found {} source(s) in database",
-            success(),
-            sources.len()
-        );
-    }
-
-    // Build scraper configs from sources
-    let mut scrapers: HashMap<String, ScraperConfig> = HashMap::new();
-    for source in &sources {
-        let scraper_config = ScraperConfig {
-            name: Some(source.name.clone()),
-            base_url: Some(source.base_url.clone()),
-            ..Default::default()
-        };
-        scrapers.insert(source.id.clone(), scraper_config);
-
-        eprintln!("  {} {} ({})", dim_arrow(), source.id, source.base_url);
-    }
-
-    // Build the config
-    let config = Config {
-        data_dir: Some(target.display().to_string()),
-        database: Some(database_filename.to_string()),
-        scrapers,
-        ..Default::default()
+        let loaded = Config::load().await;
+        if loaded.source_path.is_none() {
+            anyhow::bail!("No config file found. Use --file to specify a path.");
+        }
+        loaded
     };
 
+    let source_path = config
+        .source_path
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "auto-discovered".to_string());
+
+    // Extract AppConfigSnapshot
+    let snapshot = config.to_app_snapshot();
+
     // Serialize to JSON
-    let json = serde_json::to_string_pretty(&config)?;
+    let json = serde_json::to_string_pretty(&snapshot)?;
 
-    // Output - JSON to stdout (or file), status messages to stderr
-    match output {
-        Some(path) => {
-            let mut file = std::fs::File::create(path)?;
-            file.write_all(json.as_bytes())?;
-            file.write_all(b"\n")?;
-            eprintln!("\n{} Config written to {}", success(), path.display());
-        }
-        None => {
-            println!("{}", json);
-        }
-    }
+    // Compute hash
+    let mut hasher = Sha256::new();
+    hasher.update(json.as_bytes());
+    let hash = hex::encode(hasher.finalize());
 
-    if !sources.is_empty() {
-        eprintln!();
+    // Save to DB
+    let ctx = settings.create_db_context()?;
+    let config_repo = ctx.config_history();
+
+    let inserted = config_repo.insert_if_new(&json, "json", &hash).await?;
+
+    if inserted {
+        eprintln!("{} Config transferred to database", success());
+        eprintln!("  {} Source: {}", style("→").dim(), source_path);
+        eprintln!("  {} Hash: {}", style("→").dim(), &hash[..16]);
+    } else {
         eprintln!(
-            "{} This is a skeleton config. Discovery/fetch rules must be added manually.",
-            style("Note:").yellow().bold()
+            "{} Config already exists in database (same hash)",
+            style("!").yellow()
         );
-        eprintln!("  See {} for examples.", style("etc/example.json").cyan());
+        eprintln!("  {} Hash: {}", style("→").dim(), &hash[..16]);
     }
 
     Ok(())
 }
 
-/// Restore the most recent config from database history.
-pub async fn cmd_config_restore(settings: &Settings, output: Option<&Path>) -> anyhow::Result<()> {
-    if !settings.database_exists() {
-        anyhow::bail!("Database not found: {}", settings.database_path().display());
-    }
-
+/// Get a config value from the database.
+pub async fn cmd_config_get(settings: &Settings, setting: &str) -> anyhow::Result<()> {
     let ctx = settings.create_db_context()?;
-    let repo = ctx.config_history();
-    let entry = repo
-        .get_latest()
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("No configuration history found in database"))?;
+    let config_repo = ctx.config_history();
 
-    // Determine output path
-    let output_path = output
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| settings.data_dir.join("foiacquire.json"));
+    // Load latest config
+    let entry = config_repo.get_latest().await?.ok_or_else(|| {
+        anyhow::anyhow!("No configuration found in database. Run 'config transfer' first.")
+    })?;
 
-    // Write the config
-    let mut file = std::fs::File::create(&output_path)?;
-    file.write_all(entry.data.as_bytes())?;
-    file.write_all(b"\n")?;
+    // Parse as JSON Value for flexible navigation
+    let value: serde_json::Value = serde_json::from_str(&entry.data)?;
 
-    eprintln!("{} Config restored to {}", success(), output_path.display());
-    eprintln!(
-        "  Format: {}, Created: {}",
-        entry.format,
-        entry.created_at.format("%Y-%m-%d %H:%M:%S UTC")
-    );
+    // Navigate to the setting
+    let result = navigate_json(&value, setting)?;
+
+    // Print the value
+    match result {
+        serde_json::Value::String(s) => println!("{}", s),
+        serde_json::Value::Null => println!("null"),
+        other => println!("{}", serde_json::to_string_pretty(&other)?),
+    }
 
     Ok(())
 }
 
-/// List configuration history entries.
-pub async fn cmd_config_history(settings: &Settings, full: bool) -> anyhow::Result<()> {
-    if !settings.database_exists() {
-        anyhow::bail!("Database not found: {}", settings.database_path().display());
+/// Set a config value in the database.
+pub async fn cmd_config_set(settings: &Settings, setting: &str, value: &str) -> anyhow::Result<()> {
+    let ctx = settings.create_db_context()?;
+    let config_repo = ctx.config_history();
+
+    // Load latest config or start with empty
+    let mut json_value: serde_json::Value = match config_repo.get_latest().await? {
+        Some(entry) => serde_json::from_str(&entry.data)?,
+        None => serde_json::to_value(AppConfigSnapshot::default())?,
+    };
+
+    // Parse the value (try JSON first, fall back to string)
+    let new_value: serde_json::Value = serde_json::from_str(value).unwrap_or_else(|_| {
+        // Try as number
+        if let Ok(n) = value.parse::<i64>() {
+            serde_json::Value::Number(n.into())
+        } else if let Ok(n) = value.parse::<f64>() {
+            serde_json::Number::from_f64(n)
+                .map(serde_json::Value::Number)
+                .unwrap_or_else(|| serde_json::Value::String(value.to_string()))
+        } else if value == "true" {
+            serde_json::Value::Bool(true)
+        } else if value == "false" {
+            serde_json::Value::Bool(false)
+        } else {
+            serde_json::Value::String(value.to_string())
+        }
+    });
+
+    // Set the value at the path
+    set_json_value(&mut json_value, setting, new_value)?;
+
+    // Validate by deserializing into AppConfigSnapshot
+    let _snapshot: AppConfigSnapshot = serde_json::from_value(json_value.clone())
+        .map_err(|e| anyhow::anyhow!("Invalid config after update: {}", e))?;
+
+    // Serialize back to JSON
+    let json_str = serde_json::to_string_pretty(&json_value)?;
+
+    // Compute hash
+    let mut hasher = Sha256::new();
+    hasher.update(json_str.as_bytes());
+    let hash = hex::encode(hasher.finalize());
+
+    // Save to DB
+    let inserted = config_repo.insert_if_new(&json_str, "json", &hash).await?;
+
+    if inserted {
+        eprintln!("{} Config updated", success());
+        eprintln!("  {} {}: {}", style("→").dim(), setting, value);
+    } else {
+        eprintln!("{} No change (value already set)", style("!").yellow());
     }
 
-    let ctx = settings.create_db_context()?;
-    let repo = ctx.config_history();
-    let entries = repo.get_all().await?;
+    Ok(())
+}
 
-    if entries.is_empty() {
-        println!("No configuration history found.");
+/// Navigate a JSON value by dot-separated path.
+fn navigate_json<'a>(
+    value: &'a serde_json::Value,
+    path: &str,
+) -> anyhow::Result<&'a serde_json::Value> {
+    if path.is_empty() {
+        return Ok(value);
+    }
+
+    let parts: Vec<&str> = path.split('.').collect();
+    let mut current = value;
+
+    for part in &parts {
+        current = match current {
+            serde_json::Value::Object(map) => map
+                .get(*part)
+                .ok_or_else(|| anyhow::anyhow!("{} Setting '{}' not found", error(), path))?,
+            serde_json::Value::Array(arr) => {
+                let idx: usize = part
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("{} Invalid array index: {}", error(), part))?;
+                arr.get(idx).ok_or_else(|| {
+                    anyhow::anyhow!("{} Array index out of bounds: {}", error(), idx)
+                })?
+            }
+            _ => anyhow::bail!(
+                "{} Cannot navigate into non-object/array at '{}'",
+                error(),
+                part
+            ),
+        };
+    }
+
+    Ok(current)
+}
+
+/// Set a value in a JSON object at a dot-separated path.
+fn set_json_value(
+    root: &mut serde_json::Value,
+    path: &str,
+    value: serde_json::Value,
+) -> anyhow::Result<()> {
+    if path.is_empty() {
+        *root = value;
         return Ok(());
     }
 
-    println!(
-        "{} configuration history entries:\n",
-        style(entries.len()).cyan()
-    );
+    let parts: Vec<&str> = path.split('.').collect();
+    let mut current = root;
 
-    for (i, entry) in entries.iter().enumerate() {
-        let marker = if i == 0 { "(latest)" } else { "" };
-        println!(
-            "{} {} {} {}",
-            style(&entry.uuid[..8]).dim(),
-            style(entry.created_at.format("%Y-%m-%d %H:%M:%S")).cyan(),
-            style(&entry.format).yellow(),
-            style(marker).green()
-        );
+    for (i, part) in parts.iter().enumerate() {
+        let is_last = i == parts.len() - 1;
 
-        if full {
-            println!("{}\n", entry.data);
+        if is_last {
+            match current {
+                serde_json::Value::Object(map) => {
+                    map.insert(part.to_string(), value);
+                    return Ok(());
+                }
+                _ => anyhow::bail!("Cannot set value at '{}': parent is not an object", path),
+            }
         }
-    }
 
-    if !full {
-        eprintln!(
-            "\n{} Use --full to see complete config data",
-            style("Tip:").dim()
-        );
+        // Navigate or create intermediate objects
+        current = match current {
+            serde_json::Value::Object(map) => {
+                if !map.contains_key(*part) {
+                    map.insert(part.to_string(), serde_json::json!({}));
+                }
+                map.get_mut(*part).unwrap()
+            }
+            _ => anyhow::bail!("Cannot navigate through non-object at '{}'", part),
+        };
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_navigate_json_top_level() {
+        let value = json!({"user_agent": "Test/1.0", "request_timeout": 60});
+        let result = navigate_json(&value, "user_agent").unwrap();
+        assert_eq!(result, &json!("Test/1.0"));
+    }
+
+    #[test]
+    fn test_navigate_json_nested() {
+        let value = json!({
+            "scrapers": {
+                "my-source": {
+                    "name": "My Source",
+                    "base_url": "https://example.com"
+                }
+            }
+        });
+        let result = navigate_json(&value, "scrapers.my-source.name").unwrap();
+        assert_eq!(result, &json!("My Source"));
+    }
+
+    #[test]
+    fn test_navigate_json_array_index() {
+        let value = json!({
+            "analysis": {
+                "ocr_backends": ["tesseract", "paddleocr"]
+            }
+        });
+        let result = navigate_json(&value, "analysis.ocr_backends.0").unwrap();
+        assert_eq!(result, &json!("tesseract"));
+    }
+
+    #[test]
+    fn test_navigate_json_not_found() {
+        let value = json!({"user_agent": "Test/1.0"});
+        let result = navigate_json(&value, "nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_navigate_json_empty_path() {
+        let value = json!({"user_agent": "Test/1.0"});
+        let result = navigate_json(&value, "").unwrap();
+        assert_eq!(result, &value);
+    }
+
+    #[test]
+    fn test_set_json_value_top_level() {
+        let mut value = json!({"user_agent": "Old/1.0"});
+        set_json_value(&mut value, "user_agent", json!("New/2.0")).unwrap();
+        assert_eq!(value["user_agent"], json!("New/2.0"));
+    }
+
+    #[test]
+    fn test_set_json_value_nested() {
+        let mut value = json!({
+            "scrapers": {
+                "my-source": {
+                    "name": "Old Name"
+                }
+            }
+        });
+        set_json_value(&mut value, "scrapers.my-source.name", json!("New Name")).unwrap();
+        assert_eq!(value["scrapers"]["my-source"]["name"], json!("New Name"));
+    }
+
+    #[test]
+    fn test_set_json_value_creates_intermediate() {
+        let mut value = json!({});
+        set_json_value(&mut value, "scrapers.new-source.name", json!("Test")).unwrap();
+        assert_eq!(value["scrapers"]["new-source"]["name"], json!("Test"));
+    }
+
+    #[test]
+    fn test_set_json_value_new_field() {
+        let mut value = json!({"existing": "value"});
+        set_json_value(&mut value, "new_field", json!(42)).unwrap();
+        assert_eq!(value["new_field"], json!(42));
+    }
+
+    #[test]
+    fn test_set_json_value_empty_path() {
+        let mut value = json!({"old": "data"});
+        set_json_value(&mut value, "", json!({"new": "data"})).unwrap();
+        assert_eq!(value, json!({"new": "data"}));
+    }
+
+    #[test]
+    fn test_set_json_value_complex_object() {
+        let mut value = json!({});
+        let scraper_config = json!({
+            "name": "New Source",
+            "base_url": "https://example.com",
+            "rate_limit": {"requests_per_minute": 10}
+        });
+        set_json_value(&mut value, "scrapers.new-source", scraper_config.clone()).unwrap();
+        assert_eq!(value["scrapers"]["new-source"], scraper_config);
+    }
 }
