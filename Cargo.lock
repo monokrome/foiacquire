@@ -1090,6 +1090,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cetane"
+version = "0.1.1"
+source = "git+https://github.com/monokrome/cetane?tag=v0.1.1#19a45d757dadaaf90a2371a0682a66188b84f6c8"
+dependencies = [
+ "sea-query",
+]
+
+[[package]]
 name = "cfb"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2711,6 +2719,7 @@ dependencies = [
  "base64",
  "blake3",
  "bytes",
+ "cetane",
  "chromiumoxide",
  "chrono",
  "clap",
@@ -2744,6 +2753,7 @@ dependencies = [
  "reqwest",
  "rten",
  "rten-imageproc",
+ "rusqlite",
  "scraper",
  "serde",
  "serde_json",
@@ -3616,6 +3626,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc150e5ce2330295b8616ce0e3f53250e53af31759a9dbedad1621ba29151847"
 dependencies = [
  "cfb",
+]
+
+[[package]]
+name = "inherent"
+version = "1.0.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c727f80bfa4a6c6e2508d2f05b6f4bfce242030bd88ed15ae5331c5b5d30fba7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
 ]
 
 [[package]]
@@ -6449,6 +6470,30 @@ dependencies = [
  "pbkdf2",
  "salsa20",
  "sha2",
+]
+
+[[package]]
+name = "sea-query"
+version = "0.32.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a5d1c518eaf5eda38e5773f902b26ab6d5e9e9e2bb2349ca6c64cf96f80448c"
+dependencies = [
+ "inherent",
+ "sea-query-derive",
+]
+
+[[package]]
+name = "sea-query-derive"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bae0cbad6ab996955664982739354128c58d16e126114fe88c2a493642502aab"
+dependencies = [
+ "darling 0.20.11",
+ "heck 0.4.1",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
+ "thiserror 2.0.17",
 ]
 
 [[package]]

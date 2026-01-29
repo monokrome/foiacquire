@@ -8,6 +8,10 @@ license = "MIT"
 repository = "https://github.com/monokrome/foiacquire"
 autobins = false
 
+[lib]
+name = "foiacquire"
+path = "src/lib.rs"
+
 [[bin]]
 name = "foia"
 path = "src/main.rs"
@@ -29,6 +33,9 @@ diesel_migrations = "2"
 deadpool = "0.12"
 # Bundle SQLite for static musl builds (0.35 for arti compatibility)
 libsqlite3-sys = { version = "0.35", features = ["bundled"] }
+
+# Migrations
+cetane = { git = "https://github.com/monokrome/cetane", tag = "v0.1.1" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -178,3 +185,6 @@ strip = true
 # Unix-only dependencies
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+rusqlite = { version = "0.37", features = ["bundled"] }

@@ -8,6 +8,7 @@ mod cli;
 mod config;
 mod discovery;
 mod llm;
+mod migrations;
 mod models;
 mod ocr;
 mod prefer_db;
