@@ -12,6 +12,8 @@ use super::AppState;
 /// Create the main router with all routes.
 pub fn create_router(state: AppState) -> Router {
     Router::new()
+        // Health check for container orchestration
+        .route("/health", get(handlers::health))
         // Root and /browse are the unified browse page
         .route("/", get(handlers::browse_documents))
         .route("/browse", get(handlers::browse_documents))

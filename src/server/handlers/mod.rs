@@ -21,6 +21,7 @@ mod versions_api;
 pub use annotations_api::{annotation_stats, get_annotation, list_annotations, update_annotation};
 pub use api::{
     api_recent_docs, api_search_tags, api_source_status, api_sources, api_status, api_type_stats,
+    health,
 };
 pub use browse::browse_documents;
 pub use documents::{document_detail, document_versions};
