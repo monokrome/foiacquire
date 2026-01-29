@@ -1092,7 +1092,8 @@ dependencies = [
 [[package]]
 name = "cetane"
 version = "0.1.1"
-source = "git+https://github.com/monokrome/cetane?tag=v0.1.1#19a45d757dadaaf90a2371a0682a66188b84f6c8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66a9cbd2c60a20acf1d0465f0b04cbddcac34062032e76f0b73dd0ef203541f6"
 dependencies = [
  "sea-query",
 ]

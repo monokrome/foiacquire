@@ -35,7 +35,7 @@ deadpool = "0.12"
 libsqlite3-sys = { version = "0.35", features = ["bundled"] }
 
 # Migrations
-cetane = { git = "https://github.com/monokrome/cetane", tag = "v0.1.1" }
+cetane = "0.1.1"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
