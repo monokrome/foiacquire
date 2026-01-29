@@ -330,10 +330,8 @@ mod tests {
     }
 
     #[test]
-    fn test_is_active_default_false() {
-        // TUI should not be active by default
-        // Note: This may fail if another test activated TUI
-        // In practice, tests run in isolation so this should pass
-        assert!(!is_active() || true); // Allow either state in tests
+    fn test_is_active_callable() {
+        // Just verify is_active() is callable - actual state depends on test ordering
+        let _ = is_active();
     }
 }

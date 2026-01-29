@@ -130,7 +130,8 @@ fn extract_indexes(conn: &Connection) -> SqliteResult<BTreeMap<String, IndexInfo
 
 /// Extract trigger names from a SQLite connection
 fn extract_triggers(conn: &Connection) -> SqliteResult<BTreeSet<String>> {
-    let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type='trigger' ORDER BY name")?;
+    let mut stmt =
+        conn.prepare("SELECT name FROM sqlite_master WHERE type='trigger' ORDER BY name")?;
 
     let triggers: BTreeSet<String> = stmt
         .query_map([], |row| row.get(0))?
@@ -393,10 +394,7 @@ fn test_schema_parity() {
     // Report summary
     let total_diffs = table_diffs.len() + index_diffs.len();
     if total_diffs > 0 {
-        panic!(
-            "Schema parity test failed with {} differences",
-            total_diffs
-        );
+        panic!("Schema parity test failed with {} differences", total_diffs);
     }
 
     println!("Schema parity test passed!");
@@ -428,14 +426,19 @@ fn test_individual_migrations_generate_valid_sql() {
                 if stmt.trim().is_empty() {
                     continue;
                 }
-                conn.execute_batch(stmt)
-                    .unwrap_or_else(|e| panic!("Migration {} failed: {}\nSQL: {}", migration.name, e, stmt));
+                conn.execute_batch(stmt).unwrap_or_else(|e| {
+                    panic!("Migration {} failed: {}\nSQL: {}", migration.name, e, stmt)
+                });
             }
         }
 
         let migration = registry.get(name).expect("Migration not found");
         let statements = migration.forward_sql(&backend);
-        println!("Migration {} generates valid SQL ({} statements)", migration.name, statements.len());
+        println!(
+            "Migration {} generates valid SQL ({} statements)",
+            migration.name,
+            statements.len()
+        );
     }
 }
 
