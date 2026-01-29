@@ -9,6 +9,11 @@ use serde::Deserialize;
 
 use super::super::AppState;
 
+/// Health check endpoint for container orchestration.
+pub async fn health() -> impl IntoResponse {
+    StatusCode::OK
+}
+
 /// Parameters for recent documents.
 #[derive(Debug, Deserialize)]
 pub struct RecentParams {
