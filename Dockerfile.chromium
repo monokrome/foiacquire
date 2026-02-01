@@ -14,9 +14,10 @@ FROM alpine:3.21
 ARG STEALTH=false
 ENV STEALTH=${STEALTH}
 
-RUN apk add --no-cache chromium font-noto socat xvfb x11vnc
+RUN apk add --no-cache chromium font-noto socat xvfb x11vnc tor
 
 RUN adduser -D chrome
+RUN mkdir -p /var/lib/tor /var/log/tor && chown -R chrome:chrome /var/lib/tor /var/log/tor
 USER chrome
 
 EXPOSE 9222 5900

@@ -2,6 +2,8 @@
 # Launch Chromium with anti-detection flags for stealth scraping
 # Chromium ignores --remote-debugging-address on Alpine/Debian, so we use socat
 # to forward external connections to its localhost-bound port.
+#
+# Tor is enabled by default. Set FOIACQUIRE_DIRECT=1 to disable.
 
 set -e
 
@@ -10,10 +12,11 @@ XVFB_PID=""
 VNC_PID=""
 CHROME_PID=""
 SOCAT_PID=""
+TOR_PID=""
 
 cleanup() {
     echo "Shutting down..."
-    kill $CHROME_PID $SOCAT_PID $VNC_PID $XVFB_PID 2>/dev/null || true
+    kill $CHROME_PID $SOCAT_PID $VNC_PID $XVFB_PID $TOR_PID 2>/dev/null || true
     rm -f /tmp/.X${DISPLAY_NUM}-lock /tmp/.X11-unix/X${DISPLAY_NUM} 2>/dev/null || true
 }
 
@@ -21,6 +24,32 @@ trap cleanup EXIT TERM INT
 
 # Clean up stale X server lock files from previous runs
 rm -f /tmp/.X${DISPLAY_NUM}-lock /tmp/.X11-unix/X${DISPLAY_NUM} 2>/dev/null || true
+
+# Tor routing (default: enabled)
+PROXY_FLAG=""
+if [ "$FOIACQUIRE_DIRECT" != "1" ]; then
+    echo "Starting Tor..."
+    tor --SocksPort 9050 --DataDirectory /var/lib/tor --Log "notice file /var/log/tor/notices.log" &
+    TOR_PID=$!
+
+    # Wait for Tor to bootstrap
+    for i in $(seq 1 30); do
+        if [ -S /var/lib/tor/control ] || grep -q "Bootstrapped 100%" /var/log/tor/notices.log 2>/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+
+    if grep -q "Bootstrapped 100%" /var/log/tor/notices.log 2>/dev/null; then
+        echo "Tor connected."
+        PROXY_FLAG="--proxy-server=socks5://127.0.0.1:9050"
+    else
+        echo "WARNING: Tor did not fully bootstrap after 30s, continuing anyway..."
+        PROXY_FLAG="--proxy-server=socks5://127.0.0.1:9050"
+    fi
+elif [ -n "$SOCKS_PROXY" ]; then
+    PROXY_FLAG="--proxy-server=$SOCKS_PROXY"
+fi
 
 # VNC_PASSWORD enables display on port 5900
 # VNC_VIEWONLY=true makes it read-only (default: interactive)
@@ -41,6 +70,7 @@ fi
 # Start Chromium with anti-detection flags
 chromium-browser \
     $HEADLESS_FLAG \
+    $PROXY_FLAG \
     --no-sandbox \
     --disable-gpu \
     --disable-dev-shm-usage \
