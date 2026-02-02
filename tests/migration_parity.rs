@@ -1,20 +1,29 @@
-//! Migration Parity Tests
+//! Migration Schema Tests
 //!
-//! Verifies that cetane migrations produce equivalent schemas to the original
-//! SQLite/PostgreSQL SQL migrations.
+//! Verifies that cetane migrations produce the expected database schema by
+//! comparing against a checked-in schema snapshot. If a migration changes the
+//! schema intentionally, regenerate the snapshot:
+//!
+//!   cargo test --test migration_parity regenerate_schema_snapshot -- --ignored
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::{Connection, Result as SqliteResult};
+use serde::{Deserialize, Serialize};
 
-/// Represents a SQLite table schema
-#[derive(Debug, Clone, PartialEq, Eq)]
+const SCHEMA_SNAPSHOT_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/expected_schema.json"
+);
+
+/// Represents a SQLite table schema.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct TableSchema {
     name: String,
     columns: BTreeMap<String, ColumnInfo>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct ColumnInfo {
     name: String,
     col_type: String,
@@ -23,8 +32,8 @@ struct ColumnInfo {
     primary_key: bool,
 }
 
-/// Represents a SQLite index
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Represents a SQLite index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct IndexInfo {
     name: String,
     table: String,
@@ -33,7 +42,15 @@ struct IndexInfo {
     partial: Option<String>,
 }
 
-/// Extract table schemas from a SQLite connection
+/// Full schema snapshot for comparison.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct SchemaSnapshot {
+    tables: BTreeMap<String, TableSchema>,
+    indexes: BTreeMap<String, IndexInfo>,
+    triggers: BTreeSet<String>,
+}
+
+/// Extract table schemas from a SQLite connection.
 fn extract_tables(conn: &Connection) -> SqliteResult<BTreeMap<String, TableSchema>> {
     let mut tables = BTreeMap::new();
 
@@ -76,7 +93,7 @@ fn extract_tables(conn: &Connection) -> SqliteResult<BTreeMap<String, TableSchem
     Ok(tables)
 }
 
-/// Extract indexes from a SQLite connection
+/// Extract indexes from a SQLite connection.
 fn extract_indexes(conn: &Connection) -> SqliteResult<BTreeMap<String, IndexInfo>> {
     let mut indexes = BTreeMap::new();
 
@@ -128,7 +145,7 @@ fn extract_indexes(conn: &Connection) -> SqliteResult<BTreeMap<String, IndexInfo
     Ok(indexes)
 }
 
-/// Extract trigger names from a SQLite connection
+/// Extract trigger names from a SQLite connection.
 fn extract_triggers(conn: &Connection) -> SqliteResult<BTreeSet<String>> {
     let mut stmt =
         conn.prepare("SELECT name FROM sqlite_master WHERE type='trigger' ORDER BY name")?;
@@ -140,64 +157,13 @@ fn extract_triggers(conn: &Connection) -> SqliteResult<BTreeSet<String>> {
     Ok(triggers)
 }
 
-/// Load and run original SQL migrations
-fn run_original_migrations(conn: &Connection) -> SqliteResult<()> {
-    // Initial schema
-    conn.execute_batch(include_str!(
-        "../migrations/sqlite/2024-12-26-000000_initial_schema/up.sql"
-    ))?;
-
-    // Service status
-    conn.execute_batch(include_str!(
-        "../migrations/sqlite/2024-12-30-000000_service_status/up.sql"
-    ))?;
-
-    // Analysis results
-    conn.execute_batch(include_str!(
-        "../migrations/sqlite/2024-12-30-100000_analysis_results/up.sql"
-    ))?;
-
-    // Unique constraints
-    conn.execute_batch(include_str!(
-        "../migrations/sqlite/2025-01-01-000000_add_missing_unique_constraints/up.sql"
-    ))?;
-
-    // Schema drift fix (SQLite-only)
-    conn.execute_batch(include_str!(
-        "../migrations/sqlite/2025-01-01-100000_fix_schema_drift/up.sql"
-    ))?;
-
-    // Archive history
-    conn.execute_batch(include_str!(
-        "../migrations/sqlite/2025-01-01-200000_archive_history/up.sql"
-    ))?;
-
-    // Page OCR results
-    conn.execute_batch(include_str!(
-        "../migrations/sqlite/2025-01-22-000000_page_ocr_results/up.sql"
-    ))?;
-
-    // Add model column
-    conn.execute_batch(include_str!(
-        "../migrations/sqlite/2025-01-22-100000_add_model_column/up.sql"
-    ))?;
-
-    // Page image hash
-    conn.execute_batch(include_str!(
-        "../migrations/sqlite/2025-01-24-000000_page_image_hash/up.sql"
-    ))?;
-
-    Ok(())
-}
-
-/// Run cetane migrations (generates SQL for SQLite backend)
+/// Run cetane migrations on a SQLite connection.
 fn run_cetane_migrations(conn: &Connection) -> SqliteResult<()> {
     use cetane::backend::Sqlite;
 
     let registry = foiacquire::migrations::registry();
     let backend = Sqlite;
 
-    // Get migration names in dependency order
     let ordered_names = registry
         .resolve_order()
         .expect("Failed to resolve migration order");
@@ -218,10 +184,18 @@ fn run_cetane_migrations(conn: &Connection) -> SqliteResult<()> {
     Ok(())
 }
 
-/// Normalize type names for comparison (SQLite is flexible with types)
+/// Extract a full schema snapshot from a SQLite connection.
+fn extract_snapshot(conn: &Connection) -> SchemaSnapshot {
+    SchemaSnapshot {
+        tables: extract_tables(conn).expect("Failed to extract tables"),
+        indexes: extract_indexes(conn).expect("Failed to extract indexes"),
+        triggers: extract_triggers(conn).expect("Failed to extract triggers"),
+    }
+}
+
+/// Normalize type names for comparison (SQLite is flexible with types).
 fn normalize_type(t: &str) -> String {
     let t = t.to_uppercase();
-    // SQLite type affinity rules
     if t.contains("INT") {
         return "INTEGER".to_string();
     }
@@ -237,63 +211,58 @@ fn normalize_type(t: &str) -> String {
     t
 }
 
-/// Compare two schemas and return differences
+/// Compare two schemas and return differences.
 fn compare_schemas(
-    original: &BTreeMap<String, TableSchema>,
-    cetane: &BTreeMap<String, TableSchema>,
+    expected: &BTreeMap<String, TableSchema>,
+    actual: &BTreeMap<String, TableSchema>,
 ) -> Vec<String> {
     let mut diffs = Vec::new();
 
-    // Check for missing tables
-    for name in original.keys() {
-        if !cetane.contains_key(name) {
-            diffs.push(format!("Missing table in cetane: {}", name));
+    for name in expected.keys() {
+        if !actual.contains_key(name) {
+            diffs.push(format!("Missing table: {}", name));
         }
     }
-    for name in cetane.keys() {
-        if !original.contains_key(name) {
-            diffs.push(format!("Extra table in cetane: {}", name));
+    for name in actual.keys() {
+        if !expected.contains_key(name) {
+            diffs.push(format!("Unexpected table: {}", name));
         }
     }
 
-    // Compare columns in shared tables
-    for (name, orig_table) in original {
-        if let Some(cetane_table) = cetane.get(name) {
-            for (col_name, orig_col) in &orig_table.columns {
-                if let Some(cetane_col) = cetane_table.columns.get(col_name) {
-                    // Compare types (with normalization)
-                    let orig_type = normalize_type(&orig_col.col_type);
-                    let cetane_type = normalize_type(&cetane_col.col_type);
-                    if orig_type != cetane_type {
+    for (name, expected_table) in expected {
+        if let Some(actual_table) = actual.get(name) {
+            for (col_name, expected_col) in &expected_table.columns {
+                if let Some(actual_col) = actual_table.columns.get(col_name) {
+                    let expected_type = normalize_type(&expected_col.col_type);
+                    let actual_type = normalize_type(&actual_col.col_type);
+                    if expected_type != actual_type {
                         diffs.push(format!(
-                            "Type mismatch in {}.{}: original={}, cetane={}",
-                            name, col_name, orig_col.col_type, cetane_col.col_type
+                            "Type mismatch in {}.{}: expected={}, actual={}",
+                            name, col_name, expected_col.col_type, actual_col.col_type
                         ));
                     }
 
-                    // Compare NOT NULL
-                    if orig_col.not_null != cetane_col.not_null {
+                    if expected_col.not_null != actual_col.not_null {
                         diffs.push(format!(
-                            "NOT NULL mismatch in {}.{}: original={}, cetane={}",
-                            name, col_name, orig_col.not_null, cetane_col.not_null
+                            "NOT NULL mismatch in {}.{}: expected={}, actual={}",
+                            name, col_name, expected_col.not_null, actual_col.not_null
                         ));
                     }
 
-                    // Compare primary key
-                    if orig_col.primary_key != cetane_col.primary_key {
+                    if expected_col.primary_key != actual_col.primary_key {
                         diffs.push(format!(
-                            "PRIMARY KEY mismatch in {}.{}: original={}, cetane={}",
-                            name, col_name, orig_col.primary_key, cetane_col.primary_key
+                            "PRIMARY KEY mismatch in {}.{}: expected={}, actual={}",
+                            name, col_name, expected_col.primary_key, actual_col.primary_key
                         ));
                     }
                 } else {
-                    diffs.push(format!("Missing column in cetane: {}.{}", name, col_name));
+                    diffs.push(format!("Missing column: {}.{}", name, col_name));
                 }
             }
 
-            for col_name in cetane_table.columns.keys() {
-                if !orig_table.columns.contains_key(col_name) {
-                    diffs.push(format!("Extra column in cetane: {}.{}", name, col_name));
+            for col_name in actual_table.columns.keys() {
+                if !expected_table.columns.contains_key(col_name) {
+                    diffs.push(format!("Unexpected column: {}.{}", name, col_name));
                 }
             }
         }
@@ -302,38 +271,36 @@ fn compare_schemas(
     diffs
 }
 
-/// Compare indexes between original and cetane schemas
+/// Compare indexes between expected and actual schemas.
 fn compare_indexes(
-    original: &BTreeMap<String, IndexInfo>,
-    cetane: &BTreeMap<String, IndexInfo>,
+    expected: &BTreeMap<String, IndexInfo>,
+    actual: &BTreeMap<String, IndexInfo>,
 ) -> Vec<String> {
     let mut diffs = Vec::new();
 
-    // Build a set of (table, columns, unique) tuples for semantic comparison
-    // Index names may differ but the actual index should be equivalent
-    let orig_semantic: BTreeSet<_> = original
+    let expected_semantic: BTreeSet<_> = expected
         .values()
         .map(|idx| (&idx.table, &idx.columns, idx.unique))
         .collect();
 
-    let cetane_semantic: BTreeSet<_> = cetane
+    let actual_semantic: BTreeSet<_> = actual
         .values()
         .map(|idx| (&idx.table, &idx.columns, idx.unique))
         .collect();
 
-    for (table, cols, unique) in &orig_semantic {
-        if !cetane_semantic.contains(&(*table, *cols, *unique)) {
+    for (table, cols, unique) in &expected_semantic {
+        if !actual_semantic.contains(&(*table, *cols, *unique)) {
             diffs.push(format!(
-                "Missing index in cetane: table={}, columns={:?}, unique={}",
+                "Missing index: table={}, columns={:?}, unique={}",
                 table, cols, unique
             ));
         }
     }
 
-    for (table, cols, unique) in &cetane_semantic {
-        if !orig_semantic.contains(&(*table, *cols, *unique)) {
+    for (table, cols, unique) in &actual_semantic {
+        if !expected_semantic.contains(&(*table, *cols, *unique)) {
             diffs.push(format!(
-                "Extra index in cetane: table={}, columns={:?}, unique={}",
+                "Unexpected index: table={}, columns={:?}, unique={}",
                 table, cols, unique
             ));
         }
@@ -344,19 +311,22 @@ fn compare_indexes(
 
 #[test]
 fn test_schema_parity() {
-    // Create two in-memory SQLite databases
-    let orig_conn = Connection::open_in_memory().expect("Failed to open original DB");
-    let cetane_conn = Connection::open_in_memory().expect("Failed to open cetane DB");
+    let snapshot_json = std::fs::read_to_string(SCHEMA_SNAPSHOT_PATH).unwrap_or_else(|_| {
+        panic!(
+            "Schema snapshot not found at {}.\n\
+             Generate it with: cargo test --test migration_parity regenerate_schema_snapshot -- --ignored",
+            SCHEMA_SNAPSHOT_PATH
+        )
+    });
 
-    // Run migrations
-    run_original_migrations(&orig_conn).expect("Failed to run original migrations");
-    run_cetane_migrations(&cetane_conn).expect("Failed to run cetane migrations");
+    let expected: SchemaSnapshot =
+        serde_json::from_str(&snapshot_json).expect("Failed to parse schema snapshot");
 
-    // Extract and compare tables
-    let orig_tables = extract_tables(&orig_conn).expect("Failed to extract original tables");
-    let cetane_tables = extract_tables(&cetane_conn).expect("Failed to extract cetane tables");
+    let conn = Connection::open_in_memory().expect("Failed to open DB");
+    run_cetane_migrations(&conn).expect("Failed to run cetane migrations");
+    let actual = extract_snapshot(&conn);
 
-    let table_diffs = compare_schemas(&orig_tables, &cetane_tables);
+    let table_diffs = compare_schemas(&expected.tables, &actual.tables);
     if !table_diffs.is_empty() {
         eprintln!("Table differences:");
         for diff in &table_diffs {
@@ -364,11 +334,7 @@ fn test_schema_parity() {
         }
     }
 
-    // Extract and compare indexes
-    let orig_indexes = extract_indexes(&orig_conn).expect("Failed to extract original indexes");
-    let cetane_indexes = extract_indexes(&cetane_conn).expect("Failed to extract cetane indexes");
-
-    let index_diffs = compare_indexes(&orig_indexes, &cetane_indexes);
+    let index_diffs = compare_indexes(&expected.indexes, &actual.indexes);
     if !index_diffs.is_empty() {
         eprintln!("Index differences:");
         for diff in &index_diffs {
@@ -376,31 +342,36 @@ fn test_schema_parity() {
         }
     }
 
-    // Extract and compare triggers
-    let orig_triggers = extract_triggers(&orig_conn).expect("Failed to extract original triggers");
-    let cetane_triggers =
-        extract_triggers(&cetane_conn).expect("Failed to extract cetane triggers");
-
-    if orig_triggers != cetane_triggers {
+    if expected.triggers != actual.triggers {
         eprintln!("Trigger differences:");
-        for t in orig_triggers.difference(&cetane_triggers) {
-            eprintln!("  - Missing in cetane: {}", t);
+        for t in expected.triggers.difference(&actual.triggers) {
+            eprintln!("  - Missing: {}", t);
         }
-        for t in cetane_triggers.difference(&orig_triggers) {
-            eprintln!("  - Extra in cetane: {}", t);
+        for t in actual.triggers.difference(&expected.triggers) {
+            eprintln!("  - Unexpected: {}", t);
         }
     }
 
-    // Report summary
-    let total_diffs = table_diffs.len() + index_diffs.len();
+    let total_diffs = table_diffs.len()
+        + index_diffs.len()
+        + expected
+            .triggers
+            .symmetric_difference(&actual.triggers)
+            .count();
+
     if total_diffs > 0 {
-        panic!("Schema parity test failed with {} differences", total_diffs);
+        panic!(
+            "Schema parity test failed with {} differences.\n\
+             If these changes are intentional, regenerate the snapshot:\n  \
+             cargo test --test migration_parity regenerate_schema_snapshot -- --ignored",
+            total_diffs
+        );
     }
 
     println!("Schema parity test passed!");
-    println!("  Tables: {}", orig_tables.len());
-    println!("  Indexes: {}", orig_indexes.len());
-    println!("  Triggers: {}", orig_triggers.len());
+    println!("  Tables: {}", actual.tables.len());
+    println!("  Indexes: {}", actual.indexes.len());
+    println!("  Triggers: {}", actual.triggers.len());
 }
 
 #[test]
@@ -414,11 +385,9 @@ fn test_individual_migrations_generate_valid_sql() {
         .resolve_order()
         .expect("Failed to resolve migration order");
 
-    // For each migration, run all preceding migrations in order
     for (i, name) in ordered_names.iter().enumerate() {
         let conn = Connection::open_in_memory().expect("Failed to open DB");
 
-        // Run all migrations up to and including the current one
         for prior_name in &ordered_names[..=i] {
             let migration = registry.get(prior_name).expect("Migration not found");
             let statements = migration.forward_sql(&backend);
@@ -457,16 +426,13 @@ fn test_postgres_sql_generation() {
         let migration = registry.get(name).expect("Migration not found");
         let statements = migration.forward_sql(&backend);
 
-        // Just verify SQL is generated (can't run without a real Postgres)
         assert!(
             !statements.is_empty() || migration.name.contains("drift"),
             "Migration {} produced no SQL for Postgres",
             migration.name
         );
 
-        // Check for common SQL generation issues
         for stmt in &statements {
-            // Should use SERIAL for auto-increment
             if stmt.contains("AUTOINCREMENT") {
                 panic!(
                     "Migration {} uses AUTOINCREMENT in Postgres SQL (should be SERIAL)",
@@ -481,4 +447,24 @@ fn test_postgres_sql_generation() {
             statements.len()
         );
     }
+}
+
+/// Regenerate the schema snapshot fixture.
+///
+/// Run with: cargo test --test migration_parity regenerate_schema_snapshot -- --ignored
+#[test]
+#[ignore]
+fn regenerate_schema_snapshot() {
+    let conn = Connection::open_in_memory().expect("Failed to open DB");
+    run_cetane_migrations(&conn).expect("Failed to run cetane migrations");
+
+    let snapshot = extract_snapshot(&conn);
+    let json = serde_json::to_string_pretty(&snapshot).expect("Failed to serialize snapshot");
+
+    std::fs::write(SCHEMA_SNAPSHOT_PATH, &json).expect("Failed to write snapshot");
+
+    println!("Schema snapshot written to {}", SCHEMA_SNAPSHOT_PATH);
+    println!("  Tables: {}", snapshot.tables.len());
+    println!("  Indexes: {}", snapshot.indexes.len());
+    println!("  Triggers: {}", snapshot.triggers.len());
 }

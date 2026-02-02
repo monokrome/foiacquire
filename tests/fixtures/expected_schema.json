@@ -1,0 +1,2075 @@
+{
+  "tables": {
+    "archive_checks": {
+      "name": "archive_checks",
+      "columns": {
+        "archive_source": {
+          "name": "archive_source",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "checked_at": {
+          "name": "checked_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "document_version_id": {
+          "name": "document_version_id",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "id": {
+          "name": "id",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "matching_snapshots": {
+          "name": "matching_snapshots",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        },
+        "result": {
+          "name": "result",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "snapshots_found": {
+          "name": "snapshots_found",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        },
+        "url_checked": {
+          "name": "url_checked",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        }
+      }
+    },
+    "archive_snapshots": {
+      "name": "archive_snapshots",
+      "columns": {
+        "archive_url": {
+          "name": "archive_url",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "captured_at": {
+          "name": "captured_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "content_length": {
+          "name": "content_length",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "digest": {
+          "name": "digest",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "discovered_at": {
+          "name": "discovered_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "http_status": {
+          "name": "http_status",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "id": {
+          "name": "id",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "metadata": {
+          "name": "metadata",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": "'{}'",
+          "primary_key": false
+        },
+        "mimetype": {
+          "name": "mimetype",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "original_url": {
+          "name": "original_url",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "service": {
+          "name": "service",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        }
+      }
+    },
+    "configuration_history": {
+      "name": "configuration_history",
+      "columns": {
+        "created_at": {
+          "name": "created_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "data": {
+          "name": "data",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "format": {
+          "name": "format",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "hash": {
+          "name": "hash",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "uuid": {
+          "name": "uuid",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        }
+      }
+    },
+    "crawl_config": {
+      "name": "crawl_config",
+      "columns": {
+        "config_hash": {
+          "name": "config_hash",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "source_id": {
+          "name": "source_id",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        }
+      }
+    },
+    "crawl_requests": {
+      "name": "crawl_requests",
+      "columns": {
+        "duration_ms": {
+          "name": "duration_ms",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "error": {
+          "name": "error",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "id": {
+          "name": "id",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "method": {
+          "name": "method",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": "'GET'",
+          "primary_key": false
+        },
+        "request_at": {
+          "name": "request_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "request_headers": {
+          "name": "request_headers",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": "'{}'",
+          "primary_key": false
+        },
+        "response_at": {
+          "name": "response_at",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "response_headers": {
+          "name": "response_headers",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": "'{}'",
+          "primary_key": false
+        },
+        "response_size": {
+          "name": "response_size",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "response_status": {
+          "name": "response_status",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "source_id": {
+          "name": "source_id",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "url": {
+          "name": "url",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "was_conditional": {
+          "name": "was_conditional",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        },
+        "was_not_modified": {
+          "name": "was_not_modified",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        }
+      }
+    },
+    "crawl_urls": {
+      "name": "crawl_urls",
+      "columns": {
+        "content_hash": {
+          "name": "content_hash",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "depth": {
+          "name": "depth",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        },
+        "discovered_at": {
+          "name": "discovered_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "discovery_context": {
+          "name": "discovery_context",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": "'{}'",
+          "primary_key": false
+        },
+        "discovery_method": {
+          "name": "discovery_method",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": "'seed'",
+          "primary_key": false
+        },
+        "document_id": {
+          "name": "document_id",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "etag": {
+          "name": "etag",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "fetched_at": {
+          "name": "fetched_at",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "id": {
+          "name": "id",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "last_error": {
+          "name": "last_error",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "last_modified": {
+          "name": "last_modified",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "next_retry_at": {
+          "name": "next_retry_at",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "parent_url": {
+          "name": "parent_url",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "retry_count": {
+          "name": "retry_count",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        },
+        "source_id": {
+          "name": "source_id",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "status": {
+          "name": "status",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": "'discovered'",
+          "primary_key": false
+        },
+        "url": {
+          "name": "url",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        }
+      }
+    },
+    "document_analysis_results": {
+      "name": "document_analysis_results",
+      "columns": {
+        "analysis_type": {
+          "name": "analysis_type",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "backend": {
+          "name": "backend",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "confidence": {
+          "name": "confidence",
+          "col_type": "REAL",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "document_id": {
+          "name": "document_id",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "error": {
+          "name": "error",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "id": {
+          "name": "id",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "metadata": {
+          "name": "metadata",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "model": {
+          "name": "model",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "page_id": {
+          "name": "page_id",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "processing_time_ms": {
+          "name": "processing_time_ms",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "result_text": {
+          "name": "result_text",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "status": {
+          "name": "status",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": "'complete'",
+          "primary_key": false
+        },
+        "version_id": {
+          "name": "version_id",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        }
+      }
+    },
+    "document_annotations": {
+      "name": "document_annotations",
+      "columns": {
+        "annotation_type": {
+          "name": "annotation_type",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": true
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "document_id": {
+          "name": "document_id",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": true
+        },
+        "error": {
+          "name": "error",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "result": {
+          "name": "result",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "version": {
+          "name": "version",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "1",
+          "primary_key": false
+        }
+      }
+    },
+    "document_counts": {
+      "name": "document_counts",
+      "columns": {
+        "count": {
+          "name": "count",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        },
+        "source_id": {
+          "name": "source_id",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        }
+      }
+    },
+    "document_pages": {
+      "name": "document_pages",
+      "columns": {
+        "created_at": {
+          "name": "created_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "document_id": {
+          "name": "document_id",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "final_text": {
+          "name": "final_text",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "id": {
+          "name": "id",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "ocr_status": {
+          "name": "ocr_status",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": "'pending'",
+          "primary_key": false
+        },
+        "ocr_text": {
+          "name": "ocr_text",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "page_number": {
+          "name": "page_number",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "pdf_text": {
+          "name": "pdf_text",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "version_id": {
+          "name": "version_id",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        }
+      }
+    },
+    "document_versions": {
+      "name": "document_versions",
+      "columns": {
+        "acquired_at": {
+          "name": "acquired_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "archive_snapshot_id": {
+          "name": "archive_snapshot_id",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "content_hash_blake3": {
+          "name": "content_hash_blake3",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "document_id": {
+          "name": "document_id",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "earliest_archived_at": {
+          "name": "earliest_archived_at",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "file_path": {
+          "name": "file_path",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "file_size": {
+          "name": "file_size",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "id": {
+          "name": "id",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "mime_type": {
+          "name": "mime_type",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "original_filename": {
+          "name": "original_filename",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "page_count": {
+          "name": "page_count",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "server_date": {
+          "name": "server_date",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "source_url": {
+          "name": "source_url",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        }
+      }
+    },
+    "documents": {
+      "name": "documents",
+      "columns": {
+        "category_id": {
+          "name": "category_id",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "date_confidence": {
+          "name": "date_confidence",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "date_source": {
+          "name": "date_source",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "discovery_method": {
+          "name": "discovery_method",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": "'import'",
+          "primary_key": false
+        },
+        "estimated_date": {
+          "name": "estimated_date",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "extracted_text": {
+          "name": "extracted_text",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "id": {
+          "name": "id",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "manual_date": {
+          "name": "manual_date",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "source_id": {
+          "name": "source_id",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "source_url": {
+          "name": "source_url",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "status": {
+          "name": "status",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "synopsis": {
+          "name": "synopsis",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "tags": {
+          "name": "tags",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "title": {
+          "name": "title",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        }
+      }
+    },
+    "file_categories": {
+      "name": "file_categories",
+      "columns": {
+        "description": {
+          "name": "description",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "doc_count": {
+          "name": "doc_count",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        },
+        "id": {
+          "name": "id",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        }
+      }
+    },
+    "page_ocr_results": {
+      "name": "page_ocr_results",
+      "columns": {
+        "backend": {
+          "name": "backend",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "char_count": {
+          "name": "char_count",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "confidence": {
+          "name": "confidence",
+          "col_type": "REAL",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "id": {
+          "name": "id",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "image_hash": {
+          "name": "image_hash",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "model": {
+          "name": "model",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "page_id": {
+          "name": "page_id",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "processing_time_ms": {
+          "name": "processing_time_ms",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "quality_score": {
+          "name": "quality_score",
+          "col_type": "REAL",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "text": {
+          "name": "text",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "word_count": {
+          "name": "word_count",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        }
+      }
+    },
+    "rate_limit_403s": {
+      "name": "rate_limit_403s",
+      "columns": {
+        "domain": {
+          "name": "domain",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "id": {
+          "name": "id",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "timestamp_ms": {
+          "name": "timestamp_ms",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "url": {
+          "name": "url",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        }
+      }
+    },
+    "rate_limit_domains": {
+      "name": "rate_limit_domains",
+      "columns": {
+        "consecutive_successes": {
+          "name": "consecutive_successes",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        },
+        "current_delay_ms": {
+          "name": "current_delay_ms",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "domain": {
+          "name": "domain",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "in_backoff": {
+          "name": "in_backoff",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        },
+        "last_request_at": {
+          "name": "last_request_at",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "rate_limit_hits": {
+          "name": "rate_limit_hits",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        },
+        "total_requests": {
+          "name": "total_requests",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        }
+      }
+    },
+    "rate_limit_state": {
+      "name": "rate_limit_state",
+      "columns": {
+        "current_delay_ms": {
+          "name": "current_delay_ms",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "domain": {
+          "name": "domain",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "in_backoff": {
+          "name": "in_backoff",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        },
+        "rate_limit_hits": {
+          "name": "rate_limit_hits",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        },
+        "total_requests": {
+          "name": "total_requests",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": "CURRENT_TIMESTAMP",
+          "primary_key": false
+        }
+      }
+    },
+    "service_status": {
+      "name": "service_status",
+      "columns": {
+        "current_task": {
+          "name": "current_task",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "error_count": {
+          "name": "error_count",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": "0",
+          "primary_key": false
+        },
+        "host": {
+          "name": "host",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "id": {
+          "name": "id",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": true
+        },
+        "last_activity": {
+          "name": "last_activity",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "last_error_at": {
+          "name": "last_error_at",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "last_heartbeat": {
+          "name": "last_heartbeat",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "service_type": {
+          "name": "service_type",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "source_id": {
+          "name": "source_id",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "stats": {
+          "name": "stats",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": "'{}'",
+          "primary_key": false
+        },
+        "status": {
+          "name": "status",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": "'starting'",
+          "primary_key": false
+        },
+        "version": {
+          "name": "version",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        }
+      }
+    },
+    "sources": {
+      "name": "sources",
+      "columns": {
+        "base_url": {
+          "name": "base_url",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "id": {
+          "name": "id",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "last_scraped": {
+          "name": "last_scraped",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "name": {
+          "name": "name",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "source_type": {
+          "name": "source_type",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        }
+      }
+    },
+    "storage_meta": {
+      "name": "storage_meta",
+      "columns": {
+        "key": {
+          "name": "key",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "value": {
+          "name": "value",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        }
+      }
+    },
+    "virtual_files": {
+      "name": "virtual_files",
+      "columns": {
+        "archive_path": {
+          "name": "archive_path",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "document_id": {
+          "name": "document_id",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "extracted_text": {
+          "name": "extracted_text",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "file_size": {
+          "name": "file_size",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "filename": {
+          "name": "filename",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "id": {
+          "name": "id",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "mime_type": {
+          "name": "mime_type",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "status": {
+          "name": "status",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "synopsis": {
+          "name": "synopsis",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "tags": {
+          "name": "tags",
+          "col_type": "TEXT",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "version_id": {
+          "name": "version_id",
+          "col_type": "INTEGER",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        }
+      }
+    }
+  },
+  "indexes": {
+    "idx_403s_domain_time": {
+      "name": "idx_403s_domain_time",
+      "table": "rate_limit_403s",
+      "columns": [
+        "domain",
+        "timestamp_ms"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_analysis_results_doc_unique": {
+      "name": "idx_analysis_results_doc_unique",
+      "table": "document_analysis_results",
+      "columns": [
+        "document_id",
+        "version_id",
+        "analysis_type",
+        "backend",
+        "<expr>"
+      ],
+      "unique": true,
+      "partial": "page_id IS NULL"
+    },
+    "idx_analysis_results_document": {
+      "name": "idx_analysis_results_document",
+      "table": "document_analysis_results",
+      "columns": [
+        "document_id"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_analysis_results_model": {
+      "name": "idx_analysis_results_model",
+      "table": "document_analysis_results",
+      "columns": [
+        "model"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_analysis_results_page": {
+      "name": "idx_analysis_results_page",
+      "table": "document_analysis_results",
+      "columns": [
+        "page_id"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_analysis_results_page_unique": {
+      "name": "idx_analysis_results_page_unique",
+      "table": "document_analysis_results",
+      "columns": [
+        "page_id",
+        "analysis_type",
+        "backend",
+        "<expr>"
+      ],
+      "unique": true,
+      "partial": "page_id IS NOT NULL"
+    },
+    "idx_analysis_results_status": {
+      "name": "idx_analysis_results_status",
+      "table": "document_analysis_results",
+      "columns": [
+        "status"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_analysis_results_type": {
+      "name": "idx_analysis_results_type",
+      "table": "document_analysis_results",
+      "columns": [
+        "analysis_type"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_analysis_results_type_backend": {
+      "name": "idx_analysis_results_type_backend",
+      "table": "document_analysis_results",
+      "columns": [
+        "analysis_type",
+        "backend"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_annotations_completed": {
+      "name": "idx_annotations_completed",
+      "table": "document_annotations",
+      "columns": [
+        "completed_at"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_annotations_type": {
+      "name": "idx_annotations_type",
+      "table": "document_annotations",
+      "columns": [
+        "annotation_type"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_archive_checks_checked_at": {
+      "name": "idx_archive_checks_checked_at",
+      "table": "archive_checks",
+      "columns": [
+        "checked_at"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_archive_checks_result": {
+      "name": "idx_archive_checks_result",
+      "table": "archive_checks",
+      "columns": [
+        "result"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_archive_checks_source": {
+      "name": "idx_archive_checks_source",
+      "table": "archive_checks",
+      "columns": [
+        "archive_source"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_archive_checks_version": {
+      "name": "idx_archive_checks_version",
+      "table": "archive_checks",
+      "columns": [
+        "document_version_id"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_archive_checks_version_source": {
+      "name": "idx_archive_checks_version_source",
+      "table": "archive_checks",
+      "columns": [
+        "document_version_id",
+        "archive_source"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_archive_snapshots_captured_at": {
+      "name": "idx_archive_snapshots_captured_at",
+      "table": "archive_snapshots",
+      "columns": [
+        "captured_at"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_archive_snapshots_original_url": {
+      "name": "idx_archive_snapshots_original_url",
+      "table": "archive_snapshots",
+      "columns": [
+        "original_url"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_archive_snapshots_service": {
+      "name": "idx_archive_snapshots_service",
+      "table": "archive_snapshots",
+      "columns": [
+        "service"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_archive_snapshots_service_url": {
+      "name": "idx_archive_snapshots_service_url",
+      "table": "archive_snapshots",
+      "columns": [
+        "service",
+        "original_url"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_config_history_created_at": {
+      "name": "idx_config_history_created_at",
+      "table": "configuration_history",
+      "columns": [
+        "created_at"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_config_history_hash": {
+      "name": "idx_config_history_hash",
+      "table": "configuration_history",
+      "columns": [
+        "hash"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_crawl_requests_source": {
+      "name": "idx_crawl_requests_source",
+      "table": "crawl_requests",
+      "columns": [
+        "source_id",
+        "request_at"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_crawl_requests_url": {
+      "name": "idx_crawl_requests_url",
+      "table": "crawl_requests",
+      "columns": [
+        "url"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_crawl_urls_discovered": {
+      "name": "idx_crawl_urls_discovered",
+      "table": "crawl_urls",
+      "columns": [
+        "discovered_at"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_crawl_urls_parent": {
+      "name": "idx_crawl_urls_parent",
+      "table": "crawl_urls",
+      "columns": [
+        "parent_url"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_crawl_urls_retry": {
+      "name": "idx_crawl_urls_retry",
+      "table": "crawl_urls",
+      "columns": [
+        "next_retry_at"
+      ],
+      "unique": false,
+      "partial": "status = 'failed'"
+    },
+    "idx_crawl_urls_source_status": {
+      "name": "idx_crawl_urls_source_status",
+      "table": "crawl_urls",
+      "columns": [
+        "source_id",
+        "status"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_document_pages_document": {
+      "name": "idx_document_pages_document",
+      "table": "document_pages",
+      "columns": [
+        "document_id"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_document_pages_ocr_status": {
+      "name": "idx_document_pages_ocr_status",
+      "table": "document_pages",
+      "columns": [
+        "ocr_status"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_document_pages_unique": {
+      "name": "idx_document_pages_unique",
+      "table": "document_pages",
+      "columns": [
+        "document_id",
+        "version_id",
+        "page_number"
+      ],
+      "unique": true,
+      "partial": null
+    },
+    "idx_document_pages_version": {
+      "name": "idx_document_pages_version",
+      "table": "document_pages",
+      "columns": [
+        "version_id"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_document_versions_archive_snapshot": {
+      "name": "idx_document_versions_archive_snapshot",
+      "table": "document_versions",
+      "columns": [
+        "archive_snapshot_id"
+      ],
+      "unique": false,
+      "partial": "archive_snapshot_id IS NOT NULL"
+    },
+    "idx_document_versions_earliest_archived": {
+      "name": "idx_document_versions_earliest_archived",
+      "table": "document_versions",
+      "columns": [
+        "earliest_archived_at"
+      ],
+      "unique": false,
+      "partial": "earliest_archived_at IS NOT NULL"
+    },
+    "idx_documents_category": {
+      "name": "idx_documents_category",
+      "table": "documents",
+      "columns": [
+        "category_id"
+      ],
+      "unique": false,
+      "partial": "category_id IS NOT NULL"
+    },
+    "idx_documents_category_source_updated": {
+      "name": "idx_documents_category_source_updated",
+      "table": "documents",
+      "columns": [
+        "category_id",
+        "source_id",
+        "updated_at"
+      ],
+      "unique": false,
+      "partial": "category_id IS NOT NULL"
+    },
+    "idx_documents_category_updated": {
+      "name": "idx_documents_category_updated",
+      "table": "documents",
+      "columns": [
+        "category_id",
+        "updated_at"
+      ],
+      "unique": false,
+      "partial": "category_id IS NOT NULL"
+    },
+    "idx_documents_estimated_date": {
+      "name": "idx_documents_estimated_date",
+      "table": "documents",
+      "columns": [
+        "estimated_date"
+      ],
+      "unique": false,
+      "partial": "estimated_date IS NOT NULL"
+    },
+    "idx_documents_source": {
+      "name": "idx_documents_source",
+      "table": "documents",
+      "columns": [
+        "source_id"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_documents_source_status": {
+      "name": "idx_documents_source_status",
+      "table": "documents",
+      "columns": [
+        "source_id",
+        "status"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_documents_source_updated": {
+      "name": "idx_documents_source_updated",
+      "table": "documents",
+      "columns": [
+        "source_id",
+        "updated_at"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_documents_status": {
+      "name": "idx_documents_status",
+      "table": "documents",
+      "columns": [
+        "status"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_documents_synopsis_null": {
+      "name": "idx_documents_synopsis_null",
+      "table": "documents",
+      "columns": [
+        "source_id"
+      ],
+      "unique": false,
+      "partial": "synopsis IS NULL"
+    },
+    "idx_documents_updated_at": {
+      "name": "idx_documents_updated_at",
+      "table": "documents",
+      "columns": [
+        "updated_at"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_documents_url": {
+      "name": "idx_documents_url",
+      "table": "documents",
+      "columns": [
+        "source_url"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_documents_with_tags": {
+      "name": "idx_documents_with_tags",
+      "table": "documents",
+      "columns": [
+        "id"
+      ],
+      "unique": false,
+      "partial": "tags IS NOT NULL AND tags != '[]'"
+    },
+    "idx_page_ocr_results_backend": {
+      "name": "idx_page_ocr_results_backend",
+      "table": "page_ocr_results",
+      "columns": [
+        "backend"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_page_ocr_results_hash_backend": {
+      "name": "idx_page_ocr_results_hash_backend",
+      "table": "page_ocr_results",
+      "columns": [
+        "image_hash",
+        "backend"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_page_ocr_results_image_hash": {
+      "name": "idx_page_ocr_results_image_hash",
+      "table": "page_ocr_results",
+      "columns": [
+        "image_hash"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_page_ocr_results_model": {
+      "name": "idx_page_ocr_results_model",
+      "table": "page_ocr_results",
+      "columns": [
+        "model"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_page_ocr_results_page": {
+      "name": "idx_page_ocr_results_page",
+      "table": "page_ocr_results",
+      "columns": [
+        "page_id"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_page_ocr_results_page_quality": {
+      "name": "idx_page_ocr_results_page_quality",
+      "table": "page_ocr_results",
+      "columns": [
+        "page_id",
+        "quality_score"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_page_ocr_results_quality": {
+      "name": "idx_page_ocr_results_quality",
+      "table": "page_ocr_results",
+      "columns": [
+        "quality_score"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_page_ocr_results_unique": {
+      "name": "idx_page_ocr_results_unique",
+      "table": "page_ocr_results",
+      "columns": [
+        "page_id",
+        "backend",
+        "<expr>"
+      ],
+      "unique": true,
+      "partial": null
+    },
+    "idx_pages_doc_version": {
+      "name": "idx_pages_doc_version",
+      "table": "document_pages",
+      "columns": [
+        "document_id",
+        "version_id"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_pages_with_text": {
+      "name": "idx_pages_with_text",
+      "table": "document_pages",
+      "columns": [
+        "document_id"
+      ],
+      "unique": false,
+      "partial": "final_text IS NOT NULL"
+    },
+    "idx_service_status_heartbeat": {
+      "name": "idx_service_status_heartbeat",
+      "table": "service_status",
+      "columns": [
+        "last_heartbeat"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_service_status_source": {
+      "name": "idx_service_status_source",
+      "table": "service_status",
+      "columns": [
+        "source_id"
+      ],
+      "unique": false,
+      "partial": "source_id IS NOT NULL"
+    },
+    "idx_service_status_type": {
+      "name": "idx_service_status_type",
+      "table": "service_status",
+      "columns": [
+        "service_type"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_versions_doc_mime": {
+      "name": "idx_versions_doc_mime",
+      "table": "document_versions",
+      "columns": [
+        "document_id",
+        "mime_type"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_versions_document": {
+      "name": "idx_versions_document",
+      "table": "document_versions",
+      "columns": [
+        "document_id"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_versions_hash": {
+      "name": "idx_versions_hash",
+      "table": "document_versions",
+      "columns": [
+        "content_hash"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_versions_mime_type": {
+      "name": "idx_versions_mime_type",
+      "table": "document_versions",
+      "columns": [
+        "mime_type"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_virtual_files_document": {
+      "name": "idx_virtual_files_document",
+      "table": "virtual_files",
+      "columns": [
+        "document_id"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_virtual_files_status": {
+      "name": "idx_virtual_files_status",
+      "table": "virtual_files",
+      "columns": [
+        "status"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_virtual_files_version": {
+      "name": "idx_virtual_files_version",
+      "table": "virtual_files",
+      "columns": [
+        "version_id"
+      ],
+      "unique": false,
+      "partial": null
+    }
+  },
+  "triggers": [
+    "tr_category_count_delete",
+    "tr_category_count_insert",
+    "tr_category_count_update",
+    "tr_documents_delete",
+    "tr_documents_insert"
+  ]
+}
