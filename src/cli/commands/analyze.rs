@@ -646,22 +646,71 @@ pub async fn cmd_analyze(
     let methods: Vec<String> = method
         .map(|m| m.split(',').map(|s| s.trim().to_string()).collect())
         .unwrap_or_else(|| vec!["ocr".to_string()]);
+    use crate::ocr::FallbackOcrBackend;
     use crate::services::{AnalysisEvent, AnalysisService};
     use tokio::sync::mpsc;
 
-    // Check for required tools upfront
-    let tools = TextExtractor::check_tools();
-    let missing: Vec<_> = tools.iter().filter(|(_, avail)| !avail).collect();
+    // Load config early so we can check the right backends
+    let config = Config::load().await;
 
-    if !missing.is_empty() {
-        println!("{} Required OCR tools are missing:", style("✗").red());
-        for (tool, _) in &missing {
+    // Phase 1: Check PDF processing tools (always required)
+    let pdf_tools = TextExtractor::check_pdf_tools();
+    let missing_pdf: Vec<_> = pdf_tools.iter().filter(|(_, avail)| !avail).collect();
+
+    if !missing_pdf.is_empty() {
+        println!("{} Required PDF tools are missing:", style("✗").red());
+        for (tool, _) in &missing_pdf {
             println!("  - {}", tool);
         }
         println!();
-        println!("Install the missing tools, then run: foiacquire ocr-check");
+        println!("Install poppler-utils, then run: foiacquire ocr-check");
         return Err(anyhow::anyhow!(
-            "Missing required tools. Run 'foiacquire ocr-check' for install instructions."
+            "Missing required PDF tools. Run 'foiacquire ocr-check' for install instructions."
+        ));
+    }
+
+    // Phase 2: Check that at least one configured OCR backend is available
+    let configured_names: Vec<&str> = config
+        .analysis
+        .ocr
+        .backends
+        .iter()
+        .flat_map(|entry| entry.backends())
+        .collect();
+
+    let any_backend_available = configured_names
+        .iter()
+        .any(|name| FallbackOcrBackend::check_backend_available(name));
+
+    if !any_backend_available {
+        println!(
+            "{} No configured OCR backends are available:",
+            style("✗").red()
+        );
+        for name in &configured_names {
+            println!("  - {} (not available)", name);
+        }
+        println!();
+
+        // List any backends that *are* available as alternatives
+        let all_known = ["tesseract", "groq", "gemini", "deepseek"];
+        let available: Vec<_> = all_known
+            .iter()
+            .filter(|n| FallbackOcrBackend::check_backend_available(n))
+            .collect();
+        if !available.is_empty() {
+            println!(
+                "Available alternatives: {}",
+                available
+                    .iter()
+                    .map(|n| n.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        println!("Run 'foiacquire ocr-check' for setup instructions.");
+        return Err(anyhow::anyhow!(
+            "No configured OCR backends available. Run 'foiacquire ocr-check' for details."
         ));
     }
 
@@ -677,9 +726,6 @@ pub async fn cmd_analyze(
     let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
     let config_history = ctx.config_history();
-
-    // Track config hash for DB-based change detection
-    let config = Config::load().await;
     let mut current_config_hash = config.hash();
 
     let service = AnalysisService::with_ocr_config(doc_repo, config.analysis.ocr.clone());

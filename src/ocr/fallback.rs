@@ -92,6 +92,14 @@ impl FallbackOcrBackend {
         }
     }
 
+    /// Check if a named backend is available (has required binaries/API keys).
+    pub fn check_backend_available(name: &str) -> bool {
+        let config = OcrConfig::default();
+        Self::create_backend(name, &config)
+            .map(|b| b.is_available())
+            .unwrap_or(false)
+    }
+
     /// Get the list of available backend types in the chain.
     #[allow(dead_code)]
     pub fn available_backends(&self) -> Vec<OcrBackendType> {

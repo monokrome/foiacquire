@@ -59,8 +59,8 @@ pub async fn cmd_serve(
     // Determine hidden service configuration
     let mut hs_config = config.privacy.hidden_service.clone();
 
-    // CLI flags override config
-    if no_hidden_service {
+    // CLI flags and direct mode override config
+    if no_hidden_service || config.privacy.direct {
         hs_config.provider = HiddenServiceProvider::None;
     } else if use_arti {
         hs_config.provider = HiddenServiceProvider::Arti;

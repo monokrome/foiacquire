@@ -514,6 +514,15 @@ impl TextExtractor {
             .map(|tool| (tool.to_string(), check_binary(tool)))
             .collect()
     }
+
+    /// Check only PDF processing tools (Poppler utilities).
+    /// These are always required regardless of OCR backend.
+    pub fn check_pdf_tools() -> Vec<(String, bool)> {
+        ["pdftotext", "pdftoppm", "pdfinfo"]
+            .iter()
+            .map(|tool| (tool.to_string(), check_binary(tool)))
+            .collect()
+    }
 }
 
 #[cfg(test)]
