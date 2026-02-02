@@ -12,7 +12,7 @@ pub async fn cmd_init(settings: &Settings) -> anyhow::Result<()> {
 
     // Run database migrations
     println!("{} Running migrations...", style("→").cyan());
-    migrations::run_migrations(&settings.database_url()).await?;
+    migrations::run_migrations(&settings.database_url(), settings.no_tls).await?;
 
     // Create database context for source management
     let ctx = settings.create_db_context()?;

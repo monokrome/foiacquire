@@ -211,7 +211,7 @@ mod tests {
         std::fs::create_dir_all(&docs_dir).unwrap();
 
         let db_url = format!("sqlite:{}", db_path.display());
-        migrations::run_migrations(&db_url).await.unwrap();
+        migrations::run_migrations(&db_url, false).await.unwrap();
         (dir, db_path)
     }
 

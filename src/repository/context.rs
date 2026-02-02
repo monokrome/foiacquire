@@ -32,9 +32,9 @@ impl DbContext {
     /// Supports:
     /// - SQLite: file paths or `sqlite:` URLs
     /// - PostgreSQL: `postgres://` or `postgresql://` URLs
-    pub fn from_url(url: &str, documents_dir: &Path) -> Result<Self, DbError> {
+    pub fn from_url(url: &str, documents_dir: &Path, no_tls: bool) -> Result<Self, DbError> {
         Ok(Self {
-            pool: DbPool::from_url(url)?,
+            pool: DbPool::from_url(url, no_tls)?,
             documents_dir: documents_dir.to_path_buf(),
         })
     }

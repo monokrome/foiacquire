@@ -80,7 +80,7 @@ pub async fn cmd_migrate(settings: &Settings, check: bool, force: bool) -> anyho
     }
 
     println!("\n{} Running migrations...", style("→").cyan());
-    match migrations::run_migrations(&settings.database_url()).await {
+    match migrations::run_migrations(&settings.database_url(), settings.no_tls).await {
         Ok(()) => {
             println!("{} Migration complete!", style("✓").green());
         }
@@ -162,6 +162,7 @@ pub async fn cmd_db_copy(
     tables: Option<String>,
     analyze: bool,
     skip_duplicates: Option<String>,
+    no_tls: bool,
 ) -> anyhow::Result<()> {
     println!("{} Copying database:", style("→").cyan());
     println!("  From: {}", redact_url_password(source_url));
@@ -257,6 +258,7 @@ pub async fn cmd_db_copy(
                 source_is_postgres,
                 target_is_postgres,
                 options,
+                no_tls,
             )
             .await;
         }
@@ -266,7 +268,8 @@ pub async fn cmd_db_copy(
         unreachable!("validate_database_url should have caught this");
     }
 
-    // SQLite to SQLite
+    // SQLite to SQLite (no_tls only applies to postgres)
+    let _ = no_tls;
     let source_pool = SqlitePool::new(source_url);
     let target_pool = SqlitePool::new(target_url);
 
@@ -491,14 +494,15 @@ async fn copy_with_postgres(
     source_is_postgres: bool,
     target_is_postgres: bool,
     options: CopyOptions,
+    no_tls: bool,
 ) -> anyhow::Result<()> {
     use crate::repository::migration_postgres::PostgresMigrator;
 
     match (source_is_postgres, target_is_postgres) {
         (true, true) => {
             // Postgres to Postgres
-            let source = PostgresMigrator::new(source_url).await?;
-            let mut target = PostgresMigrator::new(target_url).await?;
+            let source = PostgresMigrator::new(source_url, no_tls).await?;
+            let mut target = PostgresMigrator::new(target_url, no_tls).await?;
             target.set_batch_size(options.batch_size);
             println!(
                 "{} Initializing target schema...",
@@ -516,7 +520,7 @@ async fn copy_with_postgres(
         }
         (true, false) => {
             // Postgres to SQLite
-            let source = PostgresMigrator::new(source_url).await?;
+            let source = PostgresMigrator::new(source_url, no_tls).await?;
             let target_pool = SqlitePool::new(target_url);
             let target = SqliteMigrator::new(target_pool);
             copy_tables(&source, &target, &options).await
@@ -525,7 +529,7 @@ async fn copy_with_postgres(
             // SQLite to Postgres
             let source_pool = SqlitePool::new(source_url);
             let source = SqliteMigrator::new(source_pool);
-            let mut target = PostgresMigrator::new(target_url).await?;
+            let mut target = PostgresMigrator::new(target_url, no_tls).await?;
             target.set_batch_size(options.batch_size);
             println!(
                 "{} Initializing target schema...",

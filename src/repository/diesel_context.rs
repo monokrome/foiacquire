@@ -36,8 +36,8 @@ impl DieselDbContext {
     /// Supports:
     /// - SQLite URLs like `sqlite:path/to/db.sqlite` or just file paths
     /// - PostgreSQL URLs like `postgres://user:pass@host/db`
-    pub fn from_url(database_url: &str) -> Result<Self, DieselError> {
-        let pool = DbPool::from_url(database_url)?;
+    pub fn from_url(database_url: &str, no_tls: bool) -> Result<Self, DieselError> {
+        let pool = DbPool::from_url(database_url, no_tls)?;
         Ok(Self { pool })
     }
 
@@ -47,7 +47,7 @@ impl DieselDbContext {
     /// For PostgreSQL or explicit URLs, use `from_url()` instead.
     pub fn from_sqlite_path(db_path: &Path) -> Result<Self, DieselError> {
         let url = format!("sqlite:{}", db_path.display());
-        Self::from_url(&url)
+        Self::from_url(&url, false)
     }
 
     /// Create a context with an existing pool.
@@ -210,7 +210,7 @@ mod tests {
 
         // Initialize schema via migrations
         let db_url = format!("sqlite:{}", db_path.display());
-        migrations::run_migrations(&db_url).await.unwrap();
+        migrations::run_migrations(&db_url, false).await.unwrap();
 
         let ctx = DieselDbContext::from_sqlite_path(&db_path).unwrap();
 

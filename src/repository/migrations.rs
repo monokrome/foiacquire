@@ -7,21 +7,23 @@ use tracing::info;
 use super::pool::DieselError;
 
 /// Run pending migrations for a database URL.
-pub async fn run_migrations(database_url: &str) -> Result<(), DieselError> {
+pub async fn run_migrations(database_url: &str, no_tls: bool) -> Result<(), DieselError> {
     let url = database_url.to_string();
 
     if super::util::is_postgres_url(&url) {
         #[cfg(feature = "postgres")]
         {
-            run_postgres_migrations_async(&url).await
+            run_postgres_migrations_async(&url, no_tls).await
         }
         #[cfg(not(feature = "postgres"))]
         {
+            let _ = no_tls;
             Err(DieselError::QueryBuilderError(
                 "PostgreSQL support not compiled. Use --features postgres".into(),
             ))
         }
     } else {
+        let _ = no_tls;
         run_sqlite_migrations_async(&url).await
     }
 }
@@ -74,20 +76,16 @@ async fn run_sqlite_migrations_async(database_url: &str) -> Result<(), DieselErr
 
 /// Run PostgreSQL migrations asynchronously.
 #[cfg(feature = "postgres")]
-async fn run_postgres_migrations_async(database_url: &str) -> Result<(), DieselError> {
+async fn run_postgres_migrations_async(
+    database_url: &str,
+    no_tls: bool,
+) -> Result<(), DieselError> {
     use cetane::backend::Postgres;
     use cetane::migrator::Migrator;
-    use tokio_postgres::NoTls;
 
-    let (client, connection) = tokio_postgres::connect(database_url, NoTls)
+    let client = super::pg_tls::connect_raw(database_url, no_tls)
         .await
         .map_err(migration_error)?;
-
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            tracing::error!("PostgreSQL connection error: {}", e);
-        }
-    });
 
     let backend = Postgres;
     let registry = crate::migrations::registry();

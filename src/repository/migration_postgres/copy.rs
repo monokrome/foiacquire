@@ -6,7 +6,6 @@
 use futures_util::pin_mut;
 use futures_util::SinkExt;
 use tokio_postgres::CopyInSink;
-use tokio_postgres::NoTls;
 
 use super::PostgresMigrator;
 use crate::repository::migration::{
@@ -23,15 +22,9 @@ impl PostgresMigrator {
         &self,
         copy_sql: &str,
     ) -> Result<CopyInSink<bytes::Bytes>, DieselError> {
-        let (client, connection) = tokio_postgres::connect(&self.database_url, NoTls)
+        let client = crate::repository::pg_tls::connect_raw(&self.database_url, self.no_tls)
             .await
             .map_err(pg_error)?;
-
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                eprintln!("PostgreSQL connection error: {}", e);
-            }
-        });
 
         client.copy_in(copy_sql).await.map_err(pg_error)
     }

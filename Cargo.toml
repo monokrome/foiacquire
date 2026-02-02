@@ -148,6 +148,9 @@ lapin = { version = "2", optional = true }
 
 # PostgreSQL COPY protocol support (optional, for fast bulk loads)
 tokio-postgres = { version = "0.7", optional = true }
+tokio-postgres-rustls = { version = "0.13", optional = true }
+rustls = { version = "0.23", default-features = false, optional = true }
+rustls-native-certs = { version = "0.8", optional = true }
 futures-util = { version = "0.3", optional = true }
 bytes = { version = "1", optional = true }
 
@@ -162,7 +165,7 @@ hostname = "0.4.2"
 default = ["browser"]
 browser = ["chromiumoxide"]
 # Note: diesel-async/postgres enables diesel/postgres_backend (types only, no libpq/OpenSSL needed)
-postgres = ["diesel-async/postgres", "dep:tokio-postgres", "dep:futures-util", "dep:bytes"]
+postgres = ["diesel-async/postgres", "dep:tokio-postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:rustls-native-certs", "dep:futures-util", "dep:bytes"]
 redis-backend = ["redis"]
 amqp-broker = ["lapin"]
 ocr-ocrs = ["ocrs", "rten", "rten-imageproc", "image"]

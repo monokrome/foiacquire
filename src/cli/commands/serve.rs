@@ -45,7 +45,7 @@ pub async fn cmd_serve(
     } else {
         // Run database migrations
         println!("{} Running database migrations...", style("→").cyan(),);
-        match migrations::run_migrations(&settings.database_url()).await {
+        match migrations::run_migrations(&settings.database_url(), settings.no_tls).await {
             Ok(()) => {
                 println!("  {} Database ready", style("✓").green(),);
             }

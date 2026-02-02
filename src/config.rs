@@ -252,6 +252,8 @@ pub struct Settings {
     pub rate_limit_backend: Option<String>,
     /// Worker queue broker URL (None = local DB, "amqp://..." = RabbitMQ).
     pub broker_url: Option<String>,
+    /// Disable TLS for PostgreSQL connections.
+    pub no_tls: bool,
 }
 
 impl Default for Settings {
@@ -273,6 +275,7 @@ impl Default for Settings {
             request_delay_ms: 500,
             rate_limit_backend: None, // In-memory by default
             broker_url: None,         // Local DB by default
+            no_tls: false,
         }
     }
 }
@@ -412,7 +415,7 @@ impl Settings {
     /// This is the preferred way to get a DieselDbContext from settings.
     /// Returns an error if the database URL is invalid.
     pub fn create_db_context(&self) -> Result<DieselDbContext, diesel::result::Error> {
-        DieselDbContext::from_url(&self.database_url())
+        DieselDbContext::from_url(&self.database_url(), self.no_tls)
     }
 
     /// Create a database context and verify the connection works.
@@ -1029,6 +1032,17 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
     if let Some(broker) = std::env::var("BROKER_URL").ok().filter(|s| !s.is_empty()) {
         tracing::debug!("Using BROKER_URL from environment: {}", broker);
         settings.broker_url = Some(broker);
+    }
+
+    // FOIACQUIRE_NO_TLS disables TLS for PostgreSQL connections
+    if std::env::var("FOIACQUIRE_NO_TLS")
+        .unwrap_or_default()
+        .eq_ignore_ascii_case("1")
+        || std::env::var("FOIACQUIRE_NO_TLS")
+            .unwrap_or_default()
+            .eq_ignore_ascii_case("true")
+    {
+        settings.no_tls = true;
     }
 
     (settings, config)

@@ -14,6 +14,8 @@ use diesel_async::pooled_connection::deadpool::Pool as DeadPool;
 #[cfg(feature = "postgres")]
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 #[cfg(feature = "postgres")]
+use diesel_async::pooled_connection::ManagerConfig;
+#[cfg(feature = "postgres")]
 use diesel_async::AsyncPgConnection;
 
 #[cfg(feature = "postgres")]
@@ -79,9 +81,19 @@ pub struct PgPool {
 #[allow(dead_code)]
 impl PgPool {
     /// Create a new PostgreSQL pool.
-    pub fn new(database_url: &str, max_size: usize) -> Result<Self, DbError> {
-        let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
-        let pool = DeadPool::builder(config)
+    pub fn new(database_url: &str, max_size: usize, no_tls: bool) -> Result<Self, DbError> {
+        let mgr = if no_tls {
+            AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url)
+        } else {
+            let mut manager_config = ManagerConfig::default();
+            manager_config.custom_setup =
+                Box::new(super::pg_tls::establish_tls_connection);
+            AsyncDieselConnectionManager::<AsyncPgConnection>::new_with_config(
+                database_url,
+                manager_config,
+            )
+        };
+        let pool = DeadPool::builder(mgr)
             .max_size(max_size)
             .build()
             .map_err(to_diesel_error)?;
@@ -118,14 +130,15 @@ impl DbPool {
     /// Returns an error if:
     /// - A PostgreSQL URL is provided but the `postgres` feature is not enabled
     /// - The URL format is not recognized
-    pub fn from_url(url: &str) -> Result<Self, DbError> {
+    pub fn from_url(url: &str, no_tls: bool) -> Result<Self, DbError> {
         // Validate the URL is supported by this build
         validate_database_url(url)?;
 
         #[cfg(feature = "postgres")]
         if is_postgres_url(url) {
-            return Ok(DbPool::Postgres(PgPool::new(url, 10)?));
+            return Ok(DbPool::Postgres(PgPool::new(url, 10, no_tls)?));
         }
+        let _ = no_tls;
 
         // Validate this looks like a SQLite URL/path, not a malformed postgres URL
         if url.contains("://") && !url.starts_with("sqlite:") {
@@ -231,16 +244,16 @@ mod tests {
     #[test]
     fn test_pool_detection() {
         // SQLite paths
-        assert!(DbPool::from_url("/path/to/db.sqlite").unwrap().is_sqlite());
-        assert!(DbPool::from_url("sqlite:/path/to/db").unwrap().is_sqlite());
+        assert!(DbPool::from_url("/path/to/db.sqlite", false).unwrap().is_sqlite());
+        assert!(DbPool::from_url("sqlite:/path/to/db", false).unwrap().is_sqlite());
 
         // PostgreSQL URLs (only with feature)
         #[cfg(feature = "postgres")]
         {
-            assert!(DbPool::from_url("postgres://localhost/test")
+            assert!(DbPool::from_url("postgres://localhost/test", true)
                 .unwrap()
                 .is_postgres());
-            assert!(DbPool::from_url("postgresql://localhost/test")
+            assert!(DbPool::from_url("postgresql://localhost/test", true)
                 .unwrap()
                 .is_postgres());
         }

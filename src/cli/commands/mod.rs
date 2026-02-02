@@ -65,6 +65,10 @@ pub struct Cli {
     #[arg(short = 'D', long, global = true)]
     direct: bool,
 
+    /// Disable TLS for PostgreSQL connections
+    #[arg(long, global = true)]
+    no_tls: bool,
+
     /// Use Tor without obfuscation (detectable as Tor traffic)
     #[arg(long, global = true)]
     no_obfuscation: bool,
@@ -738,7 +742,11 @@ pub async fn run() -> anyhow::Result<()> {
         use_cwd: cli.cwd,
         data: cli.data,
     };
-    let (settings, mut config) = load_settings_with_options(options).await;
+    let (mut settings, mut config) = load_settings_with_options(options).await;
+
+    if cli.no_tls {
+        settings.no_tls = true;
+    }
 
     // Apply CLI privacy overrides
     config.privacy = config.privacy.with_cli_overrides(
@@ -837,6 +845,7 @@ pub async fn run() -> anyhow::Result<()> {
                     tables,
                     analyze,
                     skip_duplicates,
+                    settings.no_tls,
                 )
                 .await
             }

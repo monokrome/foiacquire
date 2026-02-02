@@ -13,9 +13,8 @@ mod exporter;
 mod importer;
 
 use diesel_async::pooled_connection::deadpool::Pool;
-use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+use diesel_async::pooled_connection::{AsyncDieselConnectionManager, ManagerConfig};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use tokio_postgres::NoTls;
 
 use super::util::{pg_to_diesel_error as pg_error, to_diesel_error};
 use super::DieselError;
@@ -25,13 +24,24 @@ pub struct PostgresMigrator {
     pub(crate) pool: Pool<AsyncPgConnection>,
     pub(crate) database_url: String,
     pub(crate) batch_size: usize,
+    pub(crate) no_tls: bool,
 }
 
 impl PostgresMigrator {
     /// Create a new PostgreSQL migrator.
-    pub async fn new(database_url: &str) -> Result<Self, DieselError> {
-        let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
-        let pool = Pool::builder(config)
+    pub async fn new(database_url: &str, no_tls: bool) -> Result<Self, DieselError> {
+        let mgr = if no_tls {
+            AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url)
+        } else {
+            let mut manager_config = ManagerConfig::default();
+            manager_config.custom_setup =
+                Box::new(super::pg_tls::establish_tls_connection);
+            AsyncDieselConnectionManager::<AsyncPgConnection>::new_with_config(
+                database_url,
+                manager_config,
+            )
+        };
+        let pool = Pool::builder(mgr)
             .max_size(10)
             .build()
             .map_err(to_diesel_error)?;
@@ -39,6 +49,7 @@ impl PostgresMigrator {
             pool,
             database_url: database_url.to_string(),
             batch_size: 1,
+            no_tls,
         })
     }
 
@@ -144,15 +155,9 @@ impl PostgresMigrator {
             return Ok(HashSet::new());
         }
 
-        let (client, connection) = tokio_postgres::connect(&self.database_url, NoTls)
+        let client = super::pg_tls::connect_raw(&self.database_url, self.no_tls)
             .await
             .map_err(pg_error)?;
-
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                eprintln!("PostgreSQL connection error: {}", e);
-            }
-        });
 
         let mut existing = HashSet::new();
         for chunk in ids.chunks(1000) {
@@ -193,15 +198,9 @@ impl PostgresMigrator {
             return Ok(HashSet::new());
         }
 
-        let (client, connection) = tokio_postgres::connect(&self.database_url, NoTls)
+        let client = super::pg_tls::connect_raw(&self.database_url, self.no_tls)
             .await
             .map_err(pg_error)?;
-
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                eprintln!("PostgreSQL connection error: {}", e);
-            }
-        });
 
         let mut existing = HashSet::new();
         for chunk in ids.chunks(1000) {

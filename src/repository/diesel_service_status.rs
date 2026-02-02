@@ -194,7 +194,7 @@ mod tests {
         let db_path = dir.path().join("test.db");
 
         let db_url = format!("sqlite:{}", db_path.display());
-        migrations::run_migrations(&db_url).await.unwrap();
+        migrations::run_migrations(&db_url, false).await.unwrap();
         let ctx = DieselDbContext::from_sqlite_path(&db_path).unwrap();
         (ctx, dir)
     }
