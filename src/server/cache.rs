@@ -47,8 +47,6 @@ pub struct StatsCache {
     all_tags: RwLock<Option<CacheEntry<Vec<(String, usize)>>>>,
     /// Source counts: source_id -> count
     source_counts: RwLock<Option<CacheEntry<HashMap<String, u64>>>>,
-    /// Browse counts: cache_key -> count (keyed by filter params)
-    browse_counts: RwLock<HashMap<String, CacheEntry<u64>>>,
     /// TTL for cache entries
     ttl: Duration,
 }
@@ -59,43 +57,7 @@ impl StatsCache {
         Self {
             all_tags: RwLock::new(None),
             source_counts: RwLock::new(None),
-            browse_counts: RwLock::new(HashMap::new()),
             ttl: DEFAULT_TTL,
-        }
-    }
-
-    /// Build a cache key for browse count from filter parameters.
-    pub fn browse_count_key(
-        source_id: Option<&str>,
-        types: &[String],
-        tags: &[String],
-        query: Option<&str>,
-    ) -> String {
-        format!(
-            "src:{}_types:{}_tags:{}_q:{}",
-            source_id.unwrap_or("*"),
-            types.join(","),
-            tags.join(","),
-            query.unwrap_or("")
-        )
-    }
-
-    /// Get cached browse count, or None if expired/missing.
-    pub fn get_browse_count(&self, key: &str) -> Option<u64> {
-        self.browse_counts
-            .read()
-            .ok()
-            .and_then(|guard| guard.get(key).and_then(|e| e.get()))
-    }
-
-    /// Set browse count in cache.
-    pub fn set_browse_count(&self, key: String, count: u64) {
-        if let Ok(mut guard) = self.browse_counts.write() {
-            guard.insert(key, CacheEntry::new(count, self.ttl));
-            // Prune expired entries occasionally (when cache grows large)
-            if guard.len() > 100 {
-                guard.retain(|_, entry| !entry.is_expired());
-            }
         }
     }
 

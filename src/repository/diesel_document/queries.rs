@@ -35,23 +35,23 @@ impl DieselDocumentRepository {
     // Counting Operations
     // ========================================================================
 
-    /// Count all documents.
+    /// Count all documents using the trigger-maintained document_counts table.
     pub async fn count(&self) -> Result<u64, DieselError> {
-        use diesel::dsl::count_star;
         with_conn!(self.pool, conn, {
-            let count: i64 = documents::table
-                .select(count_star())
-                .first(&mut conn)
-                .await?;
-            Ok(count as u64)
+            let row: CountRow = diesel::sql_query(
+                "SELECT COALESCE(SUM(count), 0) as count FROM document_counts",
+            )
+            .get_result(&mut conn)
+            .await?;
+            Ok(row.count as u64)
         })
     }
 
-    /// Get document counts per source.
+    /// Get document counts per source from the trigger-maintained document_counts table.
     pub async fn get_all_source_counts(&self) -> Result<HashMap<String, u64>, DieselError> {
         with_conn!(self.pool, conn, {
             let rows: Vec<SourceCount> = diesel::sql_query(
-                "SELECT source_id, COUNT(*) as count FROM documents GROUP BY source_id",
+                "SELECT source_id, count FROM document_counts",
             )
             .load(&mut conn)
             .await?;
@@ -129,16 +129,16 @@ impl DieselDocumentRepository {
         })
     }
 
-    /// Count documents by source.
+    /// Count documents by source from the trigger-maintained document_counts table.
     pub async fn count_by_source(&self, source_id: &str) -> Result<u64, DieselError> {
-        use diesel::dsl::count_star;
         with_conn!(self.pool, conn, {
-            let count: i64 = documents::table
-                .filter(documents::source_id.eq(source_id))
-                .select(count_star())
-                .first(&mut conn)
-                .await?;
-            Ok(count as u64)
+            let row: CountRow = diesel::sql_query(
+                "SELECT COALESCE(count, 0) as count FROM document_counts WHERE source_id = $1",
+            )
+            .bind::<diesel::sql_types::Text, _>(source_id)
+            .get_result(&mut conn)
+            .await?;
+            Ok(row.count as u64)
         })
     }
 
@@ -276,6 +276,8 @@ impl DieselDocumentRepository {
     }
 
     /// Get category statistics - count documents by category_id.
+    /// Get category stats. Uses the trigger-maintained file_categories.doc_count
+    /// when no source filter is applied; falls back to GROUP BY for per-source stats.
     pub async fn get_category_stats(
         &self,
         source_id: Option<&str>,
@@ -301,7 +303,7 @@ impl DieselDocumentRepository {
             } else {
                 diesel_async::RunQueryDsl::load(
                     diesel::sql_query(
-                        "SELECT category_id, COUNT(*) as count FROM documents GROUP BY category_id",
+                        "SELECT id as category_id, doc_count as count FROM file_categories WHERE doc_count > 0",
                     ),
                     &mut conn,
                 )
@@ -438,6 +440,20 @@ impl DieselDocumentRepository {
         tags: &[String],
         search_query: Option<&str>,
     ) -> Result<u64, DieselError> {
+        let has_filters = status.is_some()
+            || !categories.is_empty()
+            || !tags.is_empty()
+            || search_query.is_some_and(|q| !q.is_empty());
+
+        // Use pre-computed counts when no filters are active
+        if !has_filters {
+            return if let Some(sid) = source_id {
+                self.count_by_source(sid).await
+            } else {
+                self.count().await
+            };
+        }
+
         use diesel::dsl::count_star;
         with_conn!(self.pool, conn, {
             let mut query = documents::table.select(count_star()).into_boxed();
@@ -471,7 +487,7 @@ impl DieselDocumentRepository {
 
     /// Optimized browse that only loads columns needed for listing.
     /// Avoids loading `extracted_text` which can be very large (OCR text).
-    /// Uses a single JOIN query instead of N+1 version queries.
+    /// Two-step query: fetch document page first, then batch-load latest versions.
     pub async fn browse_fast(
         &self,
         source_id: Option<&str>,
@@ -481,58 +497,91 @@ impl DieselDocumentRepository {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<super::BrowseRow>, DieselError> {
-        // Build WHERE conditions
-        let mut conditions = Vec::new();
-
-        if let Some(sid) = source_id {
-            conditions.push(format!("d.source_id = '{}'", sid.replace('\'', "''")));
-        }
-
-        if !categories.is_empty() {
-            let cats: Vec<String> = categories
-                .iter()
-                .map(|c| format!("'{}'", c.replace('\'', "''")))
-                .collect();
-            conditions.push(format!("d.category_id IN ({})", cats.join(",")));
-        }
-
-        for tag in tags {
-            conditions.push(format!("d.tags LIKE '%{}%'", tag.replace('\'', "''")));
-        }
-
-        let where_clause = if conditions.is_empty() {
-            String::new()
-        } else {
-            format!("WHERE {}", conditions.join(" AND "))
-        };
-
-        // Query that JOINs documents with latest version, selecting only needed columns
-        let query = format!(
-            r#"SELECT
-                d.id,
-                d.title,
-                d.source_id,
-                d.synopsis,
-                d.tags,
-                dv.original_filename,
-                dv.mime_type,
-                dv.file_size,
-                dv.acquired_at
-            FROM documents d
-            INNER JOIN document_versions dv ON d.id = dv.document_id
-            INNER JOIN (
-                SELECT document_id, MAX(id) as max_id
-                FROM document_versions
-                GROUP BY document_id
-            ) latest ON dv.document_id = latest.document_id AND dv.id = latest.max_id
-            {}
-            ORDER BY d.updated_at DESC
-            LIMIT {} OFFSET {}"#,
-            where_clause, limit, offset
-        );
+        use crate::schema::document_versions;
 
         with_conn!(self.pool, conn, {
-            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await
+            // Step 1: fetch the page of documents (no version join, uses updated_at index)
+            let mut query = documents::table
+                .select((
+                    documents::id,
+                    documents::title,
+                    documents::source_id,
+                    documents::synopsis,
+                    documents::tags,
+                ))
+                .order(documents::updated_at.desc())
+                .limit(limit as i64)
+                .offset(offset as i64)
+                .into_boxed();
+
+            if let Some(sid) = source_id {
+                query = query.filter(documents::source_id.eq(sid));
+            }
+            if !categories.is_empty() {
+                query = query.filter(documents::category_id.eq_any(categories));
+            }
+            for tag in tags {
+                let pattern = format!("%{}%", tag);
+                query = query.filter(documents::tags.like(pattern));
+            }
+
+            #[allow(clippy::type_complexity)]
+            let doc_rows: Vec<(String, String, String, Option<String>, Option<String>)> =
+                query.load(&mut conn).await?;
+
+            if doc_rows.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let doc_ids: Vec<&str> = doc_rows.iter().map(|r| r.0.as_str()).collect();
+
+            // Step 2: fetch all versions for these documents, ordered by id desc
+            let version_rows: Vec<(String, Option<String>, String, i32, String)> =
+                document_versions::table
+                    .filter(document_versions::document_id.eq_any(&doc_ids))
+                    .order(document_versions::id.desc())
+                    .select((
+                        document_versions::document_id,
+                        document_versions::original_filename,
+                        document_versions::mime_type,
+                        document_versions::file_size,
+                        document_versions::acquired_at,
+                    ))
+                    .load(&mut conn)
+                    .await?;
+
+            // Take only the latest version per document (first seen per document_id)
+            let mut latest_versions: HashMap<&str, (Option<String>, String, i32, String)> =
+                HashMap::new();
+            for (doc_id, filename, mime, size, acquired) in &version_rows {
+                latest_versions
+                    .entry(doc_id.as_str())
+                    .or_insert_with(|| {
+                        (filename.clone(), mime.clone(), *size, acquired.clone())
+                    });
+            }
+
+            // Combine in document order
+            let results: Vec<super::BrowseRow> = doc_rows
+                .into_iter()
+                .filter_map(|(id, title, source_id, synopsis, tags)| {
+                    let (filename, mime, size, acquired) =
+                        latest_versions.remove(id.as_str())?;
+                    Some(super::BrowseRow {
+                        id,
+                        title,
+                        source_id,
+                        synopsis,
+                        tags,
+                        original_filename: filename,
+                        mime_type: mime,
+                        file_size: size,
+                        acquired_at: acquired,
+                    })
+                })
+                .collect();
+
+            Ok(results)
         })
     }
 
@@ -631,7 +680,8 @@ impl DieselDocumentRepository {
                 let results: Vec<TagRow> = diesel_async::RunQueryDsl::load(
                     diesel::sql_query(
                         r#"SELECT DISTINCT value as tag
-                           FROM documents, json_each(json_extract(metadata, '$.tags'))
+                           FROM documents, json_each(documents.tags)
+                           WHERE documents.tags IS NOT NULL AND documents.tags != '[]'
                            ORDER BY value"#,
                     ),
                     &mut conn,
@@ -644,7 +694,8 @@ impl DieselDocumentRepository {
                 let results: Vec<TagRow> = diesel_async::RunQueryDsl::load(
                     diesel::sql_query(
                         r#"SELECT DISTINCT tag
-                           FROM documents, jsonb_array_elements_text(metadata->'tags') as tag
+                           FROM documents, jsonb_array_elements_text(documents.tags::jsonb) as tag
+                           WHERE documents.tags IS NOT NULL AND documents.tags != '[]'
                            ORDER BY tag"#,
                     ),
                     &mut conn,

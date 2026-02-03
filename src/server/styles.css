@@ -1,29 +1,35 @@
 /* CSS styles for the web interface - minimal text-based design. */
 :root {
-    --bg: #fff;
-    --text: #222;
-    --text-muted: #666;
-    --link: #0066cc;
-    --link-hover: #004499;
-    --border: #ccc;
-    --ruler-bg: #f5f5f5;
-    --ruler-tick: #999;
-    --ruler-active: #0066cc;
-    --highlight: #fffbcc;
+    --bg: #1a1528;
+    --bg-gradient: linear-gradient(35deg, #1e1830, #120e1c);
+    --text: #e0dce6;
+    --text-muted: #9990a8;
+    --link: #a08cde;
+    --link-hover: #bfaff0;
+    --border: #2e2840;
+    --ruler-bg: #1f1930;
+    --ruler-tick: #5a5070;
+    --ruler-active: #a08cde;
+    --highlight: #262038;
 }
 
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
     :root {
-        --bg: #1a1a1a;
-        --text: #e0e0e0;
-        --text-muted: #888;
-        --link: #6ab0ff;
-        --link-hover: #8dc4ff;
-        --border: #444;
-        --ruler-bg: #252525;
-        --ruler-tick: #666;
-        --ruler-active: #6ab0ff;
-        --highlight: #3a3520;
+        --bg: #fff;
+        --bg-gradient: none;
+        --text: #222;
+        --text-muted: #666;
+        --link: #0066cc;
+        --link-hover: #004499;
+        --border: #ccc;
+        --ruler-bg: #f5f5f5;
+        --ruler-tick: #999;
+        --ruler-active: #0066cc;
+        --highlight: #fffbcc;
+    }
+
+    body {
+        background: var(--bg);
     }
 }
 
@@ -32,9 +38,11 @@
 body {
     font-family: 'Lucida Console', 'Courier New', monospace;
     font-size: 14px;
-    background: var(--bg);
+    background: var(--bg-gradient);
+    background-attachment: fixed;
     color: var(--text);
     line-height: 1.5;
+    min-height: 100vh;
 }
 
 a { color: var(--link); text-decoration: none; }
@@ -580,15 +588,15 @@ code {
 }
 
 .status-badge.complete {
-    color: #2a7f2a;
-    background: rgba(42, 127, 42, 0.1);
-    border-color: #2a7f2a;
+    color: #4caf50;
+    background: rgba(76, 175, 80, 0.15);
+    border-color: #4caf50;
 }
 
 .status-badge.failed {
-    color: #cc3333;
-    background: rgba(204, 51, 51, 0.1);
-    border-color: #cc3333;
+    color: #ff6b6b;
+    background: rgba(255, 107, 107, 0.15);
+    border-color: #ff6b6b;
 }
 
 .status-badge.unsupported {
@@ -596,17 +604,17 @@ code {
     background: transparent;
 }
 
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
     .status-badge.complete {
-        color: #4caf50;
-        background: rgba(76, 175, 80, 0.15);
-        border-color: #4caf50;
+        color: #2a7f2a;
+        background: rgba(42, 127, 42, 0.1);
+        border-color: #2a7f2a;
     }
 
     .status-badge.failed {
-        color: #ff6b6b;
-        background: rgba(255, 107, 107, 0.15);
-        border-color: #ff6b6b;
+        color: #cc3333;
+        background: rgba(204, 51, 51, 0.1);
+        border-color: #cc3333;
     }
 }
 
@@ -745,18 +753,18 @@ code {
 }
 
 .ocr-status.status-ocr_complete {
-    color: #2a7f2a;
-    border-color: #2a7f2a;
+    color: #4caf50;
+    border-color: #4caf50;
 }
 
 .ocr-status.status-pending {
-    color: #cc9900;
-    border-color: #cc9900;
+    color: #ffcc00;
+    border-color: #ffcc00;
 }
 
 .ocr-status.status-failed {
-    color: #cc3333;
-    border-color: #cc3333;
+    color: #ff6b6b;
+    border-color: #ff6b6b;
 }
 
 .page-content {
@@ -1016,11 +1024,11 @@ code {
 }
 
 .reocr-success {
-    color: #2a7f2a;
+    color: #4caf50;
 }
 
 .reocr-error {
-    color: #cc3333;
+    color: #ff6b6b;
 }
 
 /* OCR comparison tabs */
@@ -1064,13 +1072,13 @@ code {
     justify-content: space-between;
 }
 
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
     .reocr-success {
-        color: #4caf50;
+        color: #2a7f2a;
     }
 
     .reocr-error {
-        color: #ff6b6b;
+        color: #cc3333;
     }
 }
 
@@ -1105,19 +1113,19 @@ code {
     }
 }
 
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
     .ocr-status.status-ocr_complete {
-        color: #4caf50;
-        border-color: #4caf50;
+        color: #2a7f2a;
+        border-color: #2a7f2a;
     }
 
     .ocr-status.status-pending {
-        color: #ffcc00;
-        border-color: #ffcc00;
+        color: #cc9900;
+        border-color: #cc9900;
     }
 
     .ocr-status.status-failed {
-        color: #ff6b6b;
-        border-color: #ff6b6b;
+        color: #cc3333;
+        border-color: #cc3333;
     }
 }
