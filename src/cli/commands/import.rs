@@ -94,12 +94,10 @@ pub async fn cmd_import(
     // If source_id provided, verify it exists
     if let Some(sid) = source_id {
         if source_repo.get(sid).await?.is_none() {
-            println!(
-                "{} Source '{}' not found. Use 'source list' to see available sources.",
-                style("✗").red(),
+            anyhow::bail!(
+                "Source '{}' not found. Use 'source list' to see available sources.",
                 sid
             );
-            return Ok(());
         }
     }
 
@@ -489,6 +487,7 @@ pub async fn cmd_import(
     }
     if total_errors > 0 {
         println!("  Errors:             {}", style(total_errors).red());
+        anyhow::bail!("{} error(s) during import", total_errors);
     }
 
     Ok(())
