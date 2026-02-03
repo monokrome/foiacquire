@@ -38,11 +38,10 @@ impl DieselDocumentRepository {
     /// Count all documents using the trigger-maintained document_counts table.
     pub async fn count(&self) -> Result<u64, DieselError> {
         with_conn!(self.pool, conn, {
-            let row: CountRow = diesel::sql_query(
-                "SELECT COALESCE(SUM(count), 0) as count FROM document_counts",
-            )
-            .get_result(&mut conn)
-            .await?;
+            let row: CountRow =
+                diesel::sql_query("SELECT COALESCE(SUM(count), 0) as count FROM document_counts")
+                    .get_result(&mut conn)
+                    .await?;
             Ok(row.count as u64)
         })
     }
@@ -50,11 +49,10 @@ impl DieselDocumentRepository {
     /// Get document counts per source from the trigger-maintained document_counts table.
     pub async fn get_all_source_counts(&self) -> Result<HashMap<String, u64>, DieselError> {
         with_conn!(self.pool, conn, {
-            let rows: Vec<SourceCount> = diesel::sql_query(
-                "SELECT source_id, count FROM document_counts",
-            )
-            .load(&mut conn)
-            .await?;
+            let rows: Vec<SourceCount> =
+                diesel::sql_query("SELECT source_id, count FROM document_counts")
+                    .load(&mut conn)
+                    .await?;
 
             let mut counts = HashMap::new();
             for SourceCount { source_id, count } in rows {
@@ -526,8 +524,13 @@ impl DieselDocumentRepository {
             }
 
             #[allow(clippy::type_complexity)]
-            let doc_rows: Vec<(String, String, String, Option<String>, Option<String>)> =
-                query.load(&mut conn).await?;
+            let doc_rows: Vec<(
+                String,
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+            )> = query.load(&mut conn).await?;
 
             if doc_rows.is_empty() {
                 return Ok(Vec::new());
@@ -556,17 +559,14 @@ impl DieselDocumentRepository {
             for (doc_id, filename, mime, size, acquired) in &version_rows {
                 latest_versions
                     .entry(doc_id.as_str())
-                    .or_insert_with(|| {
-                        (filename.clone(), mime.clone(), *size, acquired.clone())
-                    });
+                    .or_insert_with(|| (filename.clone(), mime.clone(), *size, acquired.clone()));
             }
 
             // Combine in document order
             let results: Vec<super::BrowseRow> = doc_rows
                 .into_iter()
                 .filter_map(|(id, title, source_id, synopsis, tags)| {
-                    let (filename, mime, size, acquired) =
-                        latest_versions.remove(id.as_str())?;
+                    let (filename, mime, size, acquired) = latest_versions.remove(id.as_str())?;
                     Some(super::BrowseRow {
                         id,
                         title,

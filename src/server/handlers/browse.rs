@@ -55,9 +55,7 @@ pub async fn browse_documents(
             &tags,
             params.q.as_deref(),
         ),
-        state
-            .doc_repo
-            .get_category_stats(params.source.as_deref()),
+        state.doc_repo.get_category_stats(params.source.as_deref()),
         async {
             if has_filters {
                 return (Vec::new(), Vec::new());
@@ -97,10 +95,7 @@ pub async fn browse_documents(
         Err(_) => browse_rows.len() as u64,
     };
 
-    let type_stats: Vec<(String, u64)> = cat_stats_result
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
+    let type_stats: Vec<(String, u64)> = cat_stats_result.unwrap_or_default().into_iter().collect();
 
     let (all_tags, sources) = tags_and_sources;
 
