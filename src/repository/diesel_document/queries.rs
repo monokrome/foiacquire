@@ -498,7 +498,8 @@ impl DieselDocumentRepository {
         use crate::schema::document_versions;
 
         with_conn!(self.pool, conn, {
-            // Step 1: fetch the page of documents (no version join, uses updated_at index)
+            // Step 1: fetch the page of documents that have at least one version
+            // Use EXISTS subquery to filter out versionless documents
             let mut query = documents::table
                 .select((
                     documents::id,
@@ -506,6 +507,11 @@ impl DieselDocumentRepository {
                     documents::source_id,
                     documents::synopsis,
                     documents::tags,
+                ))
+                .filter(diesel::dsl::exists(
+                    document_versions::table
+                        .filter(document_versions::document_id.eq(documents::id))
+                        .select(document_versions::id),
                 ))
                 .order(documents::updated_at.desc())
                 .limit(limit as i64)
