@@ -2809,6 +2809,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "foiacquire-annotate"
+version = "0.11.3"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "foiacquire",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "foiacquire-cli"
 version = "0.11.3"
 dependencies = [
@@ -2822,6 +2838,7 @@ dependencies = [
  "dotenvy",
  "foiacquire",
  "foiacquire-analysis",
+ "foiacquire-annotate",
  "foiacquire-import",
  "foiacquire-scrape",
  "hex",

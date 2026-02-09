@@ -2,9 +2,9 @@
 
 use async_trait::async_trait;
 
-use crate::models::Document;
-use crate::repository::DieselDocumentRepository;
-use crate::utils::UrlFinder;
+use foiacquire::models::Document;
+use foiacquire::repository::DieselDocumentRepository;
+use foiacquire::utils::UrlFinder;
 
 use super::annotator::Annotator;
 use super::types::{AnnotationError, AnnotationOutput};

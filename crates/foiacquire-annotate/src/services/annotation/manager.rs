@@ -2,7 +2,7 @@
 
 use tokio::sync::mpsc;
 
-use crate::repository::DieselDocumentRepository;
+use foiacquire::repository::DieselDocumentRepository;
 
 use super::annotator::Annotator;
 use super::types::{AnnotationEvent, AnnotationOutput, BatchAnnotationResult};

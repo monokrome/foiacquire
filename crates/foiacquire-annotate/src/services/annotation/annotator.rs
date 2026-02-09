@@ -2,8 +2,8 @@
 
 use async_trait::async_trait;
 
-use crate::models::Document;
-use crate::repository::DieselDocumentRepository;
+use foiacquire::models::Document;
+use foiacquire::repository::DieselDocumentRepository;
 
 use super::types::{AnnotationError, AnnotationOutput};
 

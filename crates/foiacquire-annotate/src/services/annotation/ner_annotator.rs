@@ -2,12 +2,12 @@
 
 use async_trait::async_trait;
 
-use crate::models::Document;
-use crate::repository::diesel_models::NewDocumentEntity;
-use crate::repository::DieselDocumentRepository;
-#[cfg(feature = "gis")]
-use crate::services::geolookup;
 use crate::services::ner::{EntityType, NerBackend, NerResult, RegexNerBackend};
+use foiacquire::models::Document;
+use foiacquire::repository::diesel_models::NewDocumentEntity;
+use foiacquire::repository::DieselDocumentRepository;
+#[cfg(feature = "gis")]
+use foiacquire::services::geolookup;
 
 use super::annotator::Annotator;
 use super::types::{AnnotationError, AnnotationOutput};

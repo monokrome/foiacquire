@@ -2,9 +2,9 @@
 
 use async_trait::async_trait;
 
-use crate::llm::{LlmClient, LlmConfig};
-use crate::models::{Document, DocumentStatus};
-use crate::repository::DieselDocumentRepository;
+use foiacquire::llm::{LlmClient, LlmConfig};
+use foiacquire::models::{Document, DocumentStatus};
+use foiacquire::repository::DieselDocumentRepository;
 
 use super::annotator::Annotator;
 use super::types::{AnnotationError, AnnotationOutput};

@@ -8,7 +8,7 @@ use foiacquire::repository::diesel_document::entities::EntityFilter;
 use foiacquire::repository::diesel_models::NewDocumentEntity;
 #[cfg(feature = "gis")]
 use foiacquire::services::geolookup;
-use foiacquire::services::ner::{EntityType, NerResult};
+use foiacquire_annotate::services::ner::{EntityType, NerResult};
 
 /// Backfill the document_entities table from existing NER annotation metadata.
 ///

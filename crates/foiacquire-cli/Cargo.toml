@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 foiacquire = { path = "../foiacquire", default-features = false }
 foiacquire-analysis = { path = "../foiacquire-analysis", default-features = false }
+foiacquire-annotate = { path = "../foiacquire-annotate", default-features = false }
 foiacquire-import = { path = "../foiacquire-import" }
 foiacquire-scrape = { path = "../foiacquire-scrape", default-features = false }
 
@@ -43,7 +44,7 @@ uuid = { workspace = true }
 
 [features]
 default = ["browser"]
-gis = ["foiacquire/gis"]
+gis = ["foiacquire/gis", "foiacquire-annotate/gis"]
 browser = ["foiacquire/browser", "foiacquire-scrape/browser"]
 postgres = ["foiacquire/postgres"]
 redis-backend = ["foiacquire/redis-backend", "foiacquire-scrape/redis-backend"]

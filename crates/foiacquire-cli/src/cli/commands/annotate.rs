@@ -7,7 +7,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use tokio::sync::mpsc;
 
 use foiacquire::config::{Config, Settings};
-use foiacquire::services::annotation::{
+use foiacquire_annotate::services::annotation::{
     AnnotationEvent, AnnotationManager, Annotator, DateAnnotator, LlmAnnotator, NerAnnotator,
 };
 
