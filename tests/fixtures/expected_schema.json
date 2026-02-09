@@ -612,6 +612,67 @@
         }
       }
     },
+    "document_entities": {
+      "name": "document_entities",
+      "columns": {
+        "created_at": {
+          "name": "created_at",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "document_id": {
+          "name": "document_id",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "entity_text": {
+          "name": "entity_text",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "entity_type": {
+          "name": "entity_type",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        },
+        "id": {
+          "name": "id",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": true
+        },
+        "latitude": {
+          "name": "latitude",
+          "col_type": "REAL",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "longitude": {
+          "name": "longitude",
+          "col_type": "REAL",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
+        "normalized_text": {
+          "name": "normalized_text",
+          "col_type": "TEXT",
+          "not_null": true,
+          "default_value": null,
+          "primary_key": false
+        }
+      }
+    },
     "document_pages": {
       "name": "document_pages",
       "columns": {
@@ -1707,6 +1768,26 @@
         "status"
       ],
       "unique": false,
+      "partial": null
+    },
+    "idx_document_entities_doc_id": {
+      "name": "idx_document_entities_doc_id",
+      "table": "document_entities",
+      "columns": [
+        "document_id"
+      ],
+      "unique": false,
+      "partial": null
+    },
+    "idx_document_entities_type_text_doc": {
+      "name": "idx_document_entities_type_text_doc",
+      "table": "document_entities",
+      "columns": [
+        "entity_type",
+        "normalized_text",
+        "document_id"
+      ],
+      "unique": true,
       "partial": null
     },
     "idx_document_pages_document": {

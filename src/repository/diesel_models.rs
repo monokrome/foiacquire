@@ -399,6 +399,34 @@ pub struct ServiceStatusRecord {
     pub error_count: i32,
 }
 
+/// Document entity record from the database.
+#[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
+#[diesel(table_name = schema::document_entities)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct DocumentEntityRecord {
+    pub id: i32,
+    pub document_id: String,
+    pub entity_type: String,
+    pub entity_text: String,
+    pub normalized_text: String,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub created_at: String,
+}
+
+/// New document entity for insertion.
+#[derive(Insertable, Debug)]
+#[diesel(table_name = schema::document_entities)]
+pub struct NewDocumentEntity<'a> {
+    pub document_id: &'a str,
+    pub entity_type: &'a str,
+    pub entity_text: &'a str,
+    pub normalized_text: &'a str,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub created_at: &'a str,
+}
+
 /// Document analysis result record from the database.
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::document_analysis_results)]

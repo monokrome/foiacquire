@@ -246,6 +246,153 @@ impl DieselDocumentRepository {
     }
 
     // ========================================================================
+    // Generic Annotation Queries
+    // ========================================================================
+
+    /// Count documents needing a specific annotation type.
+    ///
+    /// A document needs annotation when `metadata.annotations[type]` is missing
+    /// or has a version less than the requested version.
+    /// For "llm_summary", also requires status = 'ocr_complete'.
+    pub async fn count_documents_needing_annotation(
+        &self,
+        annotation_type: &str,
+        version: i32,
+        source_id: Option<&str>,
+    ) -> Result<u64, DieselError> {
+        // For llm_summary, delegate to existing specialized query
+        if annotation_type == "llm_summary" {
+            return self.count_needing_summarization(source_id).await;
+        }
+
+        // For date_detection, delegate to existing specialized query
+        if annotation_type == "date_detection" {
+            return self
+                .count_documents_needing_date_estimation(source_id)
+                .await;
+        }
+
+        // Generic: check metadata.annotations[type].version < requested version
+        let source_filter = source_id
+            .map(|s| format!("AND source_id = '{}'", s.replace('\'', "''")))
+            .unwrap_or_default();
+
+        with_conn_split!(self.pool,
+            sqlite: conn => {
+                let query = format!(
+                    r#"SELECT COUNT(*) as count FROM documents
+                       WHERE (
+                           json_extract(metadata, '$.annotations.{annotation_type}.version') IS NULL
+                           OR json_extract(metadata, '$.annotations.{annotation_type}.version') < {version}
+                       )
+                       {source_filter}"#,
+                    annotation_type = annotation_type.replace('\'', "''"),
+                    version = version,
+                    source_filter = source_filter,
+                );
+                let result: Vec<CountRow> =
+                    diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                        .await
+                        .unwrap_or_default();
+                #[allow(clippy::get_first)]
+                Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
+            },
+            postgres: conn => {
+                let query = format!(
+                    r#"SELECT COUNT(*) as count FROM documents
+                       WHERE (
+                           (metadata->'annotations'->'{annotation_type}'->>'version')::int IS NULL
+                           OR (metadata->'annotations'->'{annotation_type}'->>'version')::int < {version}
+                       )
+                       {source_filter}"#,
+                    annotation_type = annotation_type.replace('\'', "''"),
+                    version = version,
+                    source_filter = source_filter,
+                );
+                let result: Vec<CountRow> =
+                    diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                        .await
+                        .unwrap_or_default();
+                #[allow(clippy::get_first)]
+                Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
+            }
+        )
+    }
+
+    /// Get documents needing a specific annotation type.
+    pub async fn get_documents_needing_annotation(
+        &self,
+        annotation_type: &str,
+        version: i32,
+        source_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Document>, DieselError> {
+        // For llm_summary, delegate to existing specialized query
+        if annotation_type == "llm_summary" {
+            return self.get_needing_summarization(limit).await;
+        }
+
+        // For date_detection, delegate to existing specialized query
+        if annotation_type == "date_detection" {
+            return self
+                .get_documents_needing_date_estimation(source_id, limit)
+                .await;
+        }
+
+        // Generic: check metadata.annotations[type].version < requested version
+        let source_filter = source_id
+            .map(|s| format!("AND source_id = '{}'", s.replace('\'', "''")))
+            .unwrap_or_default();
+
+        let ids: Vec<DocIdRow> = with_conn_split!(self.pool,
+            sqlite: conn => {
+                let query = format!(
+                    r#"SELECT id FROM documents
+                       WHERE (
+                           json_extract(metadata, '$.annotations.{annotation_type}.version') IS NULL
+                           OR json_extract(metadata, '$.annotations.{annotation_type}.version') < {version}
+                       )
+                       {source_filter}
+                       LIMIT {limit}"#,
+                    annotation_type = annotation_type.replace('\'', "''"),
+                    version = version,
+                    source_filter = source_filter,
+                    limit = limit,
+                );
+                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                    .await
+                    .unwrap_or_default()
+            },
+            postgres: conn => {
+                let query = format!(
+                    r#"SELECT id FROM documents
+                       WHERE (
+                           (metadata->'annotations'->'{annotation_type}'->>'version')::int IS NULL
+                           OR (metadata->'annotations'->'{annotation_type}'->>'version')::int < {version}
+                       )
+                       {source_filter}
+                       LIMIT {limit}"#,
+                    annotation_type = annotation_type.replace('\'', "''"),
+                    version = version,
+                    source_filter = source_filter,
+                    limit = limit,
+                );
+                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                    .await
+                    .unwrap_or_default()
+            }
+        );
+
+        let mut docs = Vec::with_capacity(ids.len());
+        for row in ids {
+            if let Ok(Some(doc)) = self.get(&row.id).await {
+                docs.push(doc);
+            }
+        }
+        Ok(docs)
+    }
+
+    // ========================================================================
     // Statistics Operations
     // ========================================================================
 

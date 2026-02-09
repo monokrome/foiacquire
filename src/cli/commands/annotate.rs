@@ -4,11 +4,97 @@ use std::sync::Arc;
 
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
+use tokio::sync::mpsc;
 
 use crate::config::{Config, Settings};
+use crate::services::annotation::{
+    AnnotationEvent, AnnotationManager, Annotator, DateAnnotator, LlmAnnotator, NerAnnotator,
+};
 
 use super::helpers::truncate;
 use super::scrape::ReloadMode;
+
+/// Spawn a task that drives a progress bar from annotation events.
+///
+/// Returns a `JoinHandle` the caller should `.await` after the batch completes.
+fn spawn_progress_handler(
+    mut event_rx: mpsc::Receiver<AnnotationEvent>,
+    action_label: &str,
+) -> tokio::task::JoinHandle<()> {
+    let label = action_label.to_string();
+    let pb = Arc::new(tokio::sync::Mutex::new(None::<ProgressBar>));
+    let pb_clone = pb.clone();
+
+    tokio::spawn(async move {
+        while let Some(event) = event_rx.recv().await {
+            match event {
+                AnnotationEvent::Started { total_documents } => {
+                    let progress = ProgressBar::new(total_documents as u64);
+                    progress.set_style(
+                        ProgressStyle::default_bar()
+                            .template(
+                                "{spinner:.green} [{bar:30.cyan/blue}] {pos}/{len} {wide_msg}",
+                            )
+                            .unwrap()
+                            .progress_chars("█▓░"),
+                    );
+                    progress.set_message(format!("{}...", label));
+                    *pb_clone.lock().await = Some(progress);
+                }
+                AnnotationEvent::DocumentStarted { title, .. } => {
+                    if let Some(ref progress) = *pb_clone.lock().await {
+                        progress.set_message(truncate(&title, 40));
+                    }
+                }
+                AnnotationEvent::DocumentCompleted { .. }
+                | AnnotationEvent::DocumentSkipped { .. } => {
+                    if let Some(ref progress) = *pb_clone.lock().await {
+                        progress.inc(1);
+                    }
+                }
+                AnnotationEvent::DocumentFailed { document_id, error } => {
+                    if let Some(ref progress) = *pb_clone.lock().await {
+                        progress.println(format!(
+                            "{} Document {} failed: {}",
+                            style("✗").red(),
+                            &document_id[..8.min(document_id.len())],
+                            error
+                        ));
+                        progress.inc(1);
+                    }
+                }
+                AnnotationEvent::Complete {
+                    succeeded,
+                    failed,
+                    remaining,
+                    ..
+                } => {
+                    if let Some(ref progress) = *pb_clone.lock().await {
+                        progress.finish_and_clear();
+                    }
+                    *pb_clone.lock().await = None;
+
+                    println!(
+                        "{} {} complete: {} succeeded, {} failed",
+                        style("✓").green(),
+                        label,
+                        succeeded,
+                        failed
+                    );
+
+                    if remaining > 0 {
+                        println!(
+                            "  {} {} documents still need {}",
+                            style("→").dim(),
+                            remaining,
+                            label.to_lowercase()
+                        );
+                    }
+                }
+            }
+        }
+    })
+}
 
 /// Annotate documents using LLM.
 #[allow(clippy::too_many_arguments)]
@@ -23,14 +109,11 @@ pub async fn cmd_annotate(
     interval: u64,
     reload: ReloadMode,
 ) -> anyhow::Result<()> {
-    use crate::services::{AnnotationEvent, AnnotationService};
-    use tokio::sync::mpsc;
-
     let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
+    let manager = AnnotationManager::new(doc_repo.clone());
 
     // Set up config watcher for stop-process and inplace modes
-    // Try file watching first, fall back to DB polling if no config file
     let mut config_watcher =
         if daemon && matches!(reload, ReloadMode::StopProcess | ReloadMode::Inplace) {
             prefer::watch("foiacquire").await.ok()
@@ -58,8 +141,7 @@ pub async fn cmd_annotate(
         return Ok(());
     }
 
-    // Create initial service
-    let mut service = AnnotationService::new(doc_repo.clone(), llm_config.clone());
+    let mut annotator = LlmAnnotator::new(llm_config.clone());
     let config_history = ctx.config_history();
 
     println!(
@@ -70,21 +152,20 @@ pub async fn cmd_annotate(
         llm_config.model()
     );
 
-    // Check if LLM service is available
-    if !service.is_available().await {
+    if !annotator.is_available().await {
         println!(
             "{} {}",
             style("✗").red(),
-            service.llm_config().availability_hint()
+            annotator.llm_config().availability_hint()
         );
         return Ok(());
     }
 
-    // If specific doc_id provided, process just that document (no daemon mode)
+    // Single document mode
     if let Some(id) = doc_id {
         println!("{} Processing single document: {}", style("→").cyan(), id);
         let (event_tx, _event_rx) = mpsc::channel::<AnnotationEvent>(100);
-        return service.process_single(id, event_tx).await;
+        return manager.process_single(&annotator, id, event_tx).await;
     }
 
     if daemon {
@@ -97,7 +178,7 @@ pub async fn cmd_annotate(
     }
 
     loop {
-        // For next-run and inplace modes, reload config at start of each cycle
+        // Reload config in daemon mode
         if daemon && matches!(reload, ReloadMode::NextRun | ReloadMode::Inplace) {
             let fresh_config = Config::load().await;
             let mut new_llm_config = fresh_config.llm.clone();
@@ -119,12 +200,11 @@ pub async fn cmd_annotate(
                 );
                 llm_config = new_llm_config;
                 current_config_hash = fresh_config.hash();
-                service = AnnotationService::new(doc_repo.clone(), llm_config.clone());
+                annotator = LlmAnnotator::new(llm_config.clone());
             }
         }
 
-        // Check if there's work to do
-        let total_count = service.count_needing_annotation(source_id).await?;
+        let total_count = manager.count_needing(&annotator, source_id).await?;
 
         if total_count == 0 {
             if daemon {
@@ -156,85 +236,13 @@ pub async fn cmd_annotate(
             effective_limit
         );
 
-        // Create event channel for progress tracking
-        let (event_tx, mut event_rx) = mpsc::channel::<AnnotationEvent>(100);
+        let (event_tx, event_rx) = mpsc::channel::<AnnotationEvent>(100);
+        let event_handler = spawn_progress_handler(event_rx, "Annotation");
 
-        // State for progress bar
-        let pb = Arc::new(tokio::sync::Mutex::new(None::<ProgressBar>));
-        let pb_clone = pb.clone();
+        let _result = manager
+            .run_batch(&annotator, source_id, limit, event_tx)
+            .await?;
 
-        // Spawn event handler for UI
-        let event_handler = tokio::spawn(async move {
-            while let Some(event) = event_rx.recv().await {
-                match event {
-                    AnnotationEvent::Started { total_documents } => {
-                        let progress = ProgressBar::new(total_documents as u64);
-                        progress.set_style(
-                            ProgressStyle::default_bar()
-                                .template(
-                                    "{spinner:.green} [{bar:30.cyan/blue}] {pos}/{len} {wide_msg}",
-                                )
-                                .unwrap()
-                                .progress_chars("█▓░"),
-                        );
-                        progress.set_message("Annotating...");
-                        *pb_clone.lock().await = Some(progress);
-                    }
-                    AnnotationEvent::DocumentStarted { title, .. } => {
-                        if let Some(ref progress) = *pb_clone.lock().await {
-                            progress.set_message(truncate(&title, 40));
-                        }
-                    }
-                    AnnotationEvent::DocumentCompleted { .. }
-                    | AnnotationEvent::DocumentSkipped { .. } => {
-                        if let Some(ref progress) = *pb_clone.lock().await {
-                            progress.inc(1);
-                        }
-                    }
-                    AnnotationEvent::DocumentFailed { document_id, error } => {
-                        if let Some(ref progress) = *pb_clone.lock().await {
-                            progress.println(format!(
-                                "{} Document {} failed: {}",
-                                style("✗").red(),
-                                &document_id[..8.min(document_id.len())],
-                                error
-                            ));
-                            progress.inc(1);
-                        }
-                    }
-                    AnnotationEvent::Complete {
-                        succeeded,
-                        failed,
-                        remaining,
-                    } => {
-                        if let Some(ref progress) = *pb_clone.lock().await {
-                            progress.finish_and_clear();
-                        }
-                        *pb_clone.lock().await = None;
-
-                        println!(
-                            "{} Annotation complete: {} succeeded, {} failed",
-                            style("✓").green(),
-                            succeeded,
-                            failed
-                        );
-
-                        if remaining > 0 {
-                            println!(
-                                "  {} {} documents still need annotation",
-                                style("→").dim(),
-                                remaining
-                            );
-                        }
-                    }
-                }
-            }
-        });
-
-        // Run service
-        let _result = service.annotate(source_id, limit, event_tx).await?;
-
-        // Wait for event handler to finish
         if let Err(e) = event_handler.await {
             tracing::warn!("Event handler task failed: {}", e);
         }
@@ -243,7 +251,7 @@ pub async fn cmd_annotate(
             break;
         }
 
-        // Sleep with config watching for stop-process and inplace modes
+        // Sleep with config watching
         println!(
             "{} Sleeping for {}s before next check...",
             style("→").dim(),
@@ -251,7 +259,6 @@ pub async fn cmd_annotate(
         );
 
         if let Some(ref mut watcher) = config_watcher {
-            // File-based config watching
             tokio::select! {
                 _ = tokio::time::sleep(std::time::Duration::from_secs(interval)) => {}
                 result = watcher.recv() => {
@@ -269,7 +276,6 @@ pub async fn cmd_annotate(
                                     "{} Config file changed, reloading...",
                                     style("↻").cyan()
                                 );
-                                // Config will be reloaded at start of next iteration
                             }
                             ReloadMode::NextRun => {}
                         }
@@ -277,10 +283,8 @@ pub async fn cmd_annotate(
                 }
             }
         } else if daemon && matches!(reload, ReloadMode::StopProcess | ReloadMode::Inplace) {
-            // DB-based config polling (no config file available)
             tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
 
-            // Check if config changed in DB
             if let Ok(Some(latest_hash)) = config_history.get_latest_hash().await {
                 if latest_hash != current_config_hash {
                     match reload {
@@ -297,7 +301,6 @@ pub async fn cmd_annotate(
                                 style("↻").cyan()
                             );
                             current_config_hash = latest_hash;
-                            // Config will be reloaded at start of next iteration
                         }
                         ReloadMode::NextRun => {}
                     }
@@ -318,15 +321,13 @@ pub async fn cmd_detect_dates(
     limit: usize,
     dry_run: bool,
 ) -> anyhow::Result<()> {
-    use crate::services::date_detection::{detect_date, DateConfidence};
-
     let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
 
-    // Count documents needing date estimation
-    let total_count = doc_repo
-        .count_documents_needing_date_estimation(source_id)
-        .await?;
+    let annotator = DateAnnotator::new(dry_run);
+    let manager = AnnotationManager::new(doc_repo);
+
+    let total_count = manager.count_needing(&annotator, source_id).await?;
 
     if total_count == 0 {
         println!("{} No documents need date estimation", style("!").yellow());
@@ -354,119 +355,71 @@ pub async fn cmd_detect_dates(
         );
     }
 
-    // Fetch documents needing estimation
-    let documents = doc_repo
-        .get_documents_needing_date_estimation(source_id, effective_limit)
+    let (event_tx, event_rx) = mpsc::channel::<AnnotationEvent>(100);
+    let event_handler = spawn_progress_handler(event_rx, "Date detection");
+
+    let result = manager
+        .run_batch(&annotator, source_id, limit, event_tx)
         .await?;
 
-    let pb = ProgressBar::new(documents.len() as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{bar:30.cyan/blue}] {pos}/{len} {wide_msg}")
-            .unwrap()
-            .progress_chars("█▓░"),
-    );
-    pb.set_message("Analyzing...");
-
-    let mut detected = 0u64;
-    let mut no_date = 0u64;
-
-    for doc in documents {
-        pb.set_message(truncate(&doc.id, 36));
-
-        // Extract date detection inputs from document
-        let version = doc.current_version();
-        let filename = version.and_then(|v| v.original_filename.clone());
-        let server_date = version.and_then(|v| v.server_date);
-        let acquired_at = version.map(|v| v.acquired_at).unwrap_or(doc.created_at);
-        let source_url = Some(doc.source_url.clone());
-
-        // Run date detection
-        let estimate = detect_date(
-            server_date,
-            acquired_at,
-            filename.as_deref(),
-            source_url.as_deref(),
-        );
-        let doc_id = &doc.id;
-
-        if let Some(est) = estimate {
-            detected += 1;
-
-            if dry_run {
-                let confidence_str = match est.confidence {
-                    DateConfidence::High => style("high").green(),
-                    DateConfidence::Medium => style("medium").yellow(),
-                    DateConfidence::Low => style("low").red(),
-                };
-                pb.println(format!(
-                    "  {} {} → {} ({}, {})",
-                    style("✓").green(),
-                    &doc_id[..8],
-                    est.date.format("%Y-%m-%d"),
-                    confidence_str,
-                    est.source.as_str()
-                ));
-            } else {
-                // Update database with detected date
-                doc_repo
-                    .update_estimated_date(
-                        doc_id,
-                        est.date,
-                        est.confidence.as_str(),
-                        est.source.as_str(),
-                    )
-                    .await?;
-                // Record that we processed this document
-                doc_repo
-                    .record_annotation(
-                        doc_id,
-                        "date_detection",
-                        1,
-                        Some(&format!("detected:{}", est.source.as_str())),
-                        None,
-                    )
-                    .await?;
-            }
-        } else {
-            no_date += 1;
-            if !dry_run {
-                // Record that we tried but found no date
-                doc_repo
-                    .record_annotation(doc_id, "date_detection", 1, Some("no_date"), None)
-                    .await?;
-            }
-        }
-
-        pb.inc(1);
+    if let Err(e) = event_handler.await {
+        tracing::warn!("Event handler task failed: {}", e);
     }
 
-    pb.finish_and_clear();
-
-    println!(
-        "{} Date detection complete: {} detected, {} no date found",
-        style("✓").green(),
-        detected,
-        no_date
-    );
-
-    if dry_run && detected > 0 {
+    if dry_run && result.succeeded > 0 {
         println!(
             "  {} Run without --dry-run to update database",
             style("→").dim()
         );
     }
 
-    // Use saturating subtraction to avoid underflow
-    // (can happen if count query and get query have slightly different criteria)
-    let processed = detected + no_date;
-    if processed < total_count {
-        let remaining = total_count - processed;
+    Ok(())
+}
+
+/// Extract named entities from documents.
+pub async fn cmd_extract_entities(
+    settings: &Settings,
+    source_id: Option<&str>,
+    limit: usize,
+) -> anyhow::Result<()> {
+    let ctx = settings.create_db_context()?;
+    let doc_repo = ctx.documents();
+
+    let annotator = NerAnnotator::new();
+    let manager = AnnotationManager::new(doc_repo);
+
+    let total_count = manager.count_needing(&annotator, source_id).await?;
+
+    if total_count == 0 {
         println!(
-            "  {} {} documents still need date estimation",
-            style("→").dim(),
-            remaining
+            "{} No documents need entity extraction",
+            style("!").yellow()
         );
+        println!("  Documents need OCR complete status with extracted text");
+        return Ok(());
+    }
+
+    let effective_limit = if limit > 0 {
+        limit
+    } else {
+        total_count as usize
+    };
+
+    println!(
+        "{} Extracting entities from up to {} documents",
+        style("→").cyan(),
+        effective_limit
+    );
+
+    let (event_tx, event_rx) = mpsc::channel::<AnnotationEvent>(100);
+    let event_handler = spawn_progress_handler(event_rx, "Entity extraction");
+
+    let _result = manager
+        .run_batch(&annotator, source_id, limit, event_tx)
+        .await?;
+
+    if let Err(e) = event_handler.await {
+        tracing::warn!("Event handler task failed: {}", e);
     }
 
     Ok(())
@@ -481,7 +434,6 @@ pub async fn cmd_annotate_reset(
     let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
 
-    // Count how many documents would be affected
     let count = doc_repo.count_annotated(source_id).await?;
 
     if count == 0 {

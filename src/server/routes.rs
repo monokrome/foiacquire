@@ -81,6 +81,15 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/export/documents", get(handlers::export_documents))
         .route("/api/export/annotations", get(handlers::export_annotations))
         .route("/api/export/stats", get(handlers::export_stats))
+        // Entities API - NER-extracted entity search
+        .route("/api/entities/search", get(handlers::search_entities))
+        .route("/api/entities/types", get(handlers::entity_types))
+        .route("/api/entities/top", get(handlers::top_entities))
+        .route("/api/entities/locations", get(handlers::entity_locations))
+        .route(
+            "/api/documents/:doc_id/entities",
+            get(handlers::document_entities),
+        )
         // Legacy/existing API endpoints
         .route("/api/timeline", get(handlers::timeline_aggregate))
         .route("/api/timeline/:source_id", get(handlers::timeline_source))

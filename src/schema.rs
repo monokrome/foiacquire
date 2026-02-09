@@ -61,6 +61,19 @@ diesel::table! {
 }
 
 diesel::table! {
+    document_entities (id) {
+        id -> Integer,
+        document_id -> Text,
+        entity_type -> Text,
+        entity_text -> Text,
+        normalized_text -> Text,
+        latitude -> Nullable<Double>,
+        longitude -> Nullable<Double>,
+        created_at -> Text,
+    }
+}
+
+diesel::table! {
     document_analysis_results (id) {
         id -> Integer,
         page_id -> Nullable<Integer>,
@@ -243,6 +256,7 @@ diesel::table! {
     }
 }
 
+diesel::joinable!(document_entities -> documents (document_id));
 diesel::joinable!(document_pages -> documents (document_id));
 diesel::joinable!(document_versions -> documents (document_id));
 diesel::joinable!(document_versions -> archive_snapshots (archive_snapshot_id));
@@ -264,6 +278,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     crawl_requests,
     crawl_urls,
     document_analysis_results,
+    document_entities,
     document_pages,
     document_versions,
     documents,

@@ -6,6 +6,7 @@ mod browse;
 mod documents;
 mod documents_api;
 mod duplicates;
+mod entities_api;
 mod export_api;
 mod helpers;
 mod ocr;
@@ -27,6 +28,9 @@ pub use browse::browse_documents;
 pub use documents::{document_detail, document_versions};
 pub use documents_api::{get_document, get_document_content, list_documents};
 pub use duplicates::list_duplicates;
+pub use entities_api::{
+    document_entities, entity_locations, entity_types, search_entities, top_entities,
+};
 pub use export_api::{export_annotations, export_documents, export_stats};
 pub use ocr::{api_reocr_document, api_reocr_status};
 pub use pages::api_document_pages;

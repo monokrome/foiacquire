@@ -10,6 +10,7 @@
 //! - `analysis.rs`: Analysis result operations
 
 mod analysis;
+pub mod entities;
 mod pages;
 mod queries;
 mod versions;

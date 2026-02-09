@@ -8,10 +8,12 @@ mod config_cmd;
 mod db;
 mod discover;
 mod documents;
+mod entities;
 mod helpers;
 mod import;
 mod init;
 mod llm;
+mod regions;
 mod scrape;
 mod serve;
 mod source;
@@ -324,6 +326,42 @@ enum Commands {
         /// Only show what would be detected, don't update database
         #[arg(long)]
         dry_run: bool,
+    },
+
+    /// Extract named entities (organizations, people, locations) from documents
+    ExtractEntities {
+        /// Source ID (optional, processes all sources if not specified)
+        source_id: Option<String>,
+        /// Limit number of documents to process (0 = unlimited)
+        #[arg(short, long, default_value = "0")]
+        limit: usize,
+    },
+
+    /// Backfill the document_entities table from existing NER annotations
+    BackfillEntities {
+        /// Source ID (optional, processes all sources if not specified)
+        source_id: Option<String>,
+        /// Limit number of documents to process (0 = unlimited)
+        #[arg(short, long, default_value = "0")]
+        limit: usize,
+    },
+
+    /// Search documents by extracted entities
+    SearchEntities {
+        /// Entity text to search for
+        query: String,
+        /// Filter by entity type (person, organization, location, file_number)
+        #[arg(short = 't', long = "type")]
+        entity_type: Option<String>,
+        /// Spatial search: lat,lon,radius_km (e.g., 55.75,37.61,100)
+        #[arg(long)]
+        near: Option<String>,
+        /// Filter by source ID
+        #[arg(short, long)]
+        source: Option<String>,
+        /// Limit number of results
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
     },
 
     /// List available LLM models
@@ -755,6 +793,13 @@ enum DbCommands {
         #[arg(long, default_value = "1000")]
         batch_size: usize,
     },
+
+    /// Load region boundary data (countries, US states) for spatial queries
+    LoadRegions {
+        /// Custom GeoJSON file to load (instead of embedded data)
+        #[arg(long)]
+        file: Option<String>,
+    },
 }
 
 /// Run the CLI.
@@ -786,7 +831,12 @@ pub async fn run() -> anyhow::Result<()> {
     // Check Tor availability when needed (skip for commands that don't need outbound network)
     let needs_tor = !matches!(
         cli.command,
-        Commands::Init | Commands::Source { .. } | Commands::Config { .. } | Commands::Serve { .. }
+        Commands::Init
+            | Commands::Source { .. }
+            | Commands::Config { .. }
+            | Commands::Serve { .. }
+            | Commands::BackfillEntities { .. }
+            | Commands::SearchEntities { .. }
     );
     if needs_tor {
         if let Err(e) = config.privacy.check_tor_availability() {
@@ -884,6 +934,9 @@ pub async fn run() -> anyhow::Result<()> {
                 same_source,
                 batch_size,
             } => db::cmd_db_dedup(&settings, dry_run, &keep, same_source, batch_size).await,
+            DbCommands::LoadRegions { file } => {
+                regions::cmd_load_regions(&settings, file.as_deref()).await
+            }
         },
         Commands::Scrape {
             source_ids,
@@ -1017,6 +1070,29 @@ pub async fn run() -> anyhow::Result<()> {
             limit,
             dry_run,
         } => annotate::cmd_detect_dates(&settings, source_id.as_deref(), limit, dry_run).await,
+        Commands::ExtractEntities { source_id, limit } => {
+            annotate::cmd_extract_entities(&settings, source_id.as_deref(), limit).await
+        }
+        Commands::BackfillEntities { source_id, limit } => {
+            entities::cmd_backfill_entities(&settings, source_id.as_deref(), limit).await
+        }
+        Commands::SearchEntities {
+            query,
+            entity_type,
+            near,
+            source,
+            limit,
+        } => {
+            entities::cmd_search_entities(
+                &settings,
+                &query,
+                entity_type.as_deref(),
+                near.as_deref(),
+                source.as_deref(),
+                limit,
+            )
+            .await
+        }
         Commands::LlmModels => llm::cmd_llm_models(&settings).await,
         Commands::Archive {
             source_id,
