@@ -111,7 +111,7 @@ echo ""
 
 # 6. Check for HttpClient constructors to ensure they read env
 echo "6. Checking HttpClient constructors respect environment..."
-if ! grep -q "with_env_overrides" src/scrapers/http_client/mod.rs; then
+if ! grep -q "with_env_overrides" src/http_client/mod.rs; then
     echo -e "${RED}❌ HttpClient doesn't appear to call with_env_overrides${NC}"
     VIOLATIONS=$((VIOLATIONS + 1))
 else
