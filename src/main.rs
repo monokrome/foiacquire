@@ -21,6 +21,7 @@ mod schema;
 mod scrapers;
 mod server;
 mod services;
+mod storage;
 mod utils;
 
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
