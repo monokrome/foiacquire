@@ -128,6 +128,32 @@ impl prefer::FromValue for OcrConfig {
 }
 
 fn default_ocr_backends() -> Vec<BackendEntry> {
+    if let Ok(val) = std::env::var("ANALYSIS_OCR_BACKENDS") {
+        let backends: Vec<BackendEntry> = val
+            .split(',')
+            .map(|s| BackendEntry::Single(s.trim().to_string()))
+            .filter(|e| !matches!(e, BackendEntry::Single(s) if s.is_empty()))
+            .collect();
+        if !backends.is_empty() {
+            return backends;
+        }
+    }
+
+    if std::env::var("GROQ_API_KEY").is_ok() {
+        return vec![BackendEntry::Single("groq".to_string())];
+    }
+    if std::env::var("GEMINI_API_KEY").is_ok() {
+        return vec![BackendEntry::Single("gemini".to_string())];
+    }
+    if std::process::Command::new("which")
+        .arg("tesseract")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return vec![BackendEntry::Single("tesseract".to_string())];
+    }
+
     vec![BackendEntry::Single("tesseract".to_string())]
 }
 
@@ -139,20 +165,14 @@ impl Default for OcrConfig {
     }
 }
 
-impl OcrConfig {
-    /// Check if this is the default config.
-    pub fn is_default(&self) -> bool {
-        self.backends.len() == 1
-            && matches!(&self.backends[0], BackendEntry::Single(s) if s == "tesseract")
-    }
-}
 
 /// Analysis configuration for text extraction methods.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, prefer::FromValue)]
 pub struct AnalysisConfig {
     /// OCR backend configuration with fallback support.
-    #[serde(default, skip_serializing_if = "OcrConfig::is_default")]
-    #[prefer(default)]
+    /// Device-local: auto-detected from available backends, never synced to DB.
+    #[serde(skip)]
+    #[prefer(skip)]
     pub ocr: OcrConfig,
     /// Named analysis methods (custom commands).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -238,7 +258,8 @@ pub struct Settings {
     /// Database filename.
     pub database_filename: String,
     /// Database URL (overrides data_dir/database_filename if set).
-    /// Supports sqlite:// URLs. Set via DATABASE_URL env var or config.
+    /// Supports sqlite:// and postgres:// URLs.
+    /// Set via DATABASE_URL env var or the `database` field in config files.
     pub database_url: Option<String>,
     /// Directory for storing documents.
     pub documents_dir: PathBuf,
@@ -441,7 +462,9 @@ pub struct Config {
     /// Data directory path.
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "target")]
     pub data_dir: Option<String>,
-    /// Database filename.
+    /// Database filename or URL.
+    /// Accepts a plain filename (e.g. "foiacquire.db") which is joined with data_dir,
+    /// or a full database URL (e.g. "sqlite:///path/to/db", "postgres://user:pass@host/db").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database: Option<String>,
     /// User agent string.
@@ -621,7 +644,15 @@ impl Config {
             settings.documents_dir = settings.data_dir.join(DOCUMENTS_SUBDIR);
         }
         if let Some(ref database) = self.database {
-            settings.database_filename = database.clone();
+            if database.contains("://") {
+                if let Err(e) = validate_database_url(database) {
+                    tracing::error!("Invalid database URL in config: {}", e);
+                } else {
+                    settings.database_url = Some(database.clone());
+                }
+            } else {
+                settings.database_filename = database.clone();
+            }
         }
         if let Some(ref user_agent) = self.user_agent {
             settings.user_agent = user_agent.clone();
@@ -684,14 +715,16 @@ impl Config {
             }
         }
 
-        // Convert database path to relative
+        // Convert database path to relative (skip URL values)
         if let Some(ref database) = config.database {
-            let db_path = Path::new(database);
-            if db_path.is_absolute() {
-                if let Ok(canonical_db) = fs::canonicalize(db_path) {
-                    if let Ok(canonical_base) = fs::canonicalize(base_dir) {
-                        if let Ok(rel) = canonical_db.strip_prefix(&canonical_base) {
-                            config.database = Some(format!("./{}", rel.display()));
+            if !database.contains("://") {
+                let db_path = Path::new(database);
+                if db_path.is_absolute() {
+                    if let Ok(canonical_db) = fs::canonicalize(db_path) {
+                        if let Ok(canonical_base) = fs::canonicalize(base_dir) {
+                            if let Ok(rel) = canonical_db.strip_prefix(&canonical_base) {
+                                config.database = Some(format!("./{}", rel.display()));
+                            }
                         }
                     }
                 }
@@ -1015,7 +1048,7 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
 
     // DATABASE_URL environment variable takes highest precedence
     if let Some(database_url) = db_env.url {
-        tracing::debug!("Using DATABASE_URL from environment: {}", database_url);
+        tracing::debug!("Using DATABASE_URL from environment: {}", crate::repository::util::redact_url_password(&database_url));
         settings.database_url = Some(database_url);
     }
 
@@ -1024,13 +1057,13 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
         .ok()
         .filter(|s| !s.is_empty())
     {
-        tracing::debug!("Using RATE_LIMIT_BACKEND from environment: {}", backend);
+        tracing::debug!("Using RATE_LIMIT_BACKEND from environment: {}", crate::repository::util::redact_url_password(&backend));
         settings.rate_limit_backend = Some(backend);
     }
 
     // BROKER_URL environment variable takes precedence over config
     if let Some(broker) = std::env::var("BROKER_URL").ok().filter(|s| !s.is_empty()) {
-        tracing::debug!("Using BROKER_URL from environment: {}", broker);
+        tracing::debug!("Using BROKER_URL from environment: {}", crate::repository::util::redact_url_password(&broker));
         settings.broker_url = Some(broker);
     }
 
@@ -1041,4 +1074,106 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
     }
 
     (settings, config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn default_settings() -> Settings {
+        Settings {
+            data_dir: PathBuf::from("/tmp/test"),
+            documents_dir: PathBuf::from("/tmp/test/documents"),
+            database_filename: DEFAULT_DATABASE_FILENAME.to_string(),
+            database_url: None,
+            user_agent: "test".to_string(),
+            request_timeout: 30,
+            request_delay_ms: 500,
+            rate_limit_backend: None,
+            broker_url: None,
+            no_tls: false,
+        }
+    }
+
+    #[test]
+    fn apply_database_filename_sets_database_filename() {
+        let config = Config {
+            database: Some("custom.db".to_string()),
+            ..Config::default()
+        };
+        let mut settings = default_settings();
+        let base = PathBuf::from("/tmp");
+        config.apply_to_settings(&mut settings, &base);
+
+        assert_eq!(settings.database_filename, "custom.db");
+        assert!(settings.database_url.is_none());
+    }
+
+    #[test]
+    fn apply_sqlite_url_sets_database_url() {
+        let config = Config {
+            database: Some("sqlite:///tmp/test.db".to_string()),
+            ..Config::default()
+        };
+        let mut settings = default_settings();
+        let base = PathBuf::from("/tmp");
+        config.apply_to_settings(&mut settings, &base);
+
+        assert_eq!(
+            settings.database_url,
+            Some("sqlite:///tmp/test.db".to_string())
+        );
+        assert_eq!(settings.database_filename, DEFAULT_DATABASE_FILENAME);
+    }
+
+    #[test]
+    fn apply_postgres_url_without_feature() {
+        let config = Config {
+            database: Some("postgres://user:pass@host/db".to_string()),
+            ..Config::default()
+        };
+        let mut settings = default_settings();
+        let base = PathBuf::from("/tmp");
+        config.apply_to_settings(&mut settings, &base);
+
+        // Without postgres feature, validation fails and URL is not set
+        #[cfg(not(feature = "postgres"))]
+        {
+            assert!(settings.database_url.is_none());
+            assert_eq!(settings.database_filename, DEFAULT_DATABASE_FILENAME);
+        }
+
+        // With postgres feature, URL is set
+        #[cfg(feature = "postgres")]
+        {
+            assert_eq!(
+                settings.database_url,
+                Some("postgres://user:pass@host/db".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn to_json_relative_preserves_url_values() {
+        let config = Config {
+            database: Some("sqlite:///absolute/path/to/db".to_string()),
+            ..Config::default()
+        };
+        let base = PathBuf::from("/tmp");
+        let json = config.to_json_relative(&base);
+
+        assert!(json.contains("sqlite:///absolute/path/to/db"));
+    }
+
+    #[test]
+    fn apply_no_database_leaves_defaults() {
+        let config = Config::default();
+        let mut settings = default_settings();
+        let base = PathBuf::from("/tmp");
+        config.apply_to_settings(&mut settings, &base);
+
+        assert_eq!(settings.database_filename, DEFAULT_DATABASE_FILENAME);
+        assert!(settings.database_url.is_none());
+    }
 }
