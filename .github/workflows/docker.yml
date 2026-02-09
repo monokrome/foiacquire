@@ -183,17 +183,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Build binaries first - only 2 unique feature sets needed
+  # Build binary
   build-binary:
-    name: Build Binary (${{ matrix.name }})
+    name: Build Binary
     needs: lint
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
           - name: standard
-            features: "browser,postgres"
-          - name: redis
             features: "browser,postgres,redis-backend"
     steps:
       - uses: actions/checkout@v4
@@ -245,10 +243,6 @@ jobs:
             binary: standard
             tesseract: "true"
             tor: "true"
-          - tag: redis
-            binary: redis
-            tesseract: "false"
-            tor: "true"
           # Clearnet variants (no Tor)
           - tag: clearnet
             binary: standard
@@ -257,10 +251,6 @@ jobs:
           - tag: tesseract-clearnet
             binary: standard
             tesseract: "true"
-            tor: "false"
-          - tag: redis-clearnet
-            binary: redis
-            tesseract: "false"
             tor: "false"
     steps:
       - uses: actions/checkout@v4
