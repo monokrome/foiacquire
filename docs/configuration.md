@@ -31,7 +31,7 @@ The configuration file is discovered in this order:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `target` | string | `~/Documents/foia/` | Base directory for data and documents |
-| `database` | string | `foiacquire.db` | Database filename (SQLite) |
+| `database` | string | `foiacquire.db` | Database filename or URL (e.g. `sqlite:///path/to/db`, `postgres://...`) |
 | `user_agent` | string | `FOIAcquire/0.6...` | HTTP User-Agent header |
 | `request_timeout` | integer | `30` | HTTP request timeout in seconds |
 | `request_delay_ms` | integer | `500` | Delay between requests in milliseconds |
@@ -85,6 +85,12 @@ FOIACQUIRE_DIRECT=1 foiacquire scrape fbi_vault
 | `LLM_TAGS_PROMPT` | Custom tags prompt template |
 | `GROQ_API_KEY` | Groq API key (auto-selects Groq provider) |
 | `OPENAI_API_KEY` | OpenAI API key (auto-selects OpenAI provider) |
+
+### Analysis
+
+| Variable | Description |
+|----------|-------------|
+| `ANALYSIS_OCR_BACKENDS` | Comma-separated OCR backends to use (e.g., `groq`, `groq,tesseract`). Overrides auto-detection. |
 
 ### General
 
@@ -361,9 +367,23 @@ SQLite is used by default. The database file is created in the target directory:
 }
 ```
 
+The `database` field also accepts full URLs:
+
+```json
+{
+  "database": "sqlite:///absolute/path/to/foiacquire.db"
+}
+```
+
 ### PostgreSQL
 
-Set `DATABASE_URL` environment variable:
+Use a full URL in the config file or `DATABASE_URL` environment variable:
+
+```json
+{
+  "database": "postgres://user:password@localhost:5432/foiacquire"
+}
+```
 
 ```bash
 export DATABASE_URL="postgres://user:password@localhost:5432/foiacquire"
@@ -374,6 +394,8 @@ Or in Docker:
 ```bash
 docker run -e DATABASE_URL=postgres://... foiacquire scrape
 ```
+
+`DATABASE_URL` takes precedence over the config file `database` field when both are set.
 
 PostgreSQL requires the `postgres` feature at build time.
 
