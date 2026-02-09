@@ -6,9 +6,7 @@ use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 
-use super::{
-    CountRow, DieselDocumentRepository, DocIdRow, MimeCount, SourceCount, StatusCount, TagRow,
-};
+use super::{CountRow, DieselDocumentRepository, DocIdRow, MimeCount, StatusCount, TagRow};
 use crate::models::{Document, DocumentStatus};
 use crate::repository::diesel_models::DocumentRecord;
 use crate::repository::document::DocumentNavigation;
@@ -35,30 +33,32 @@ impl DieselDocumentRepository {
     // Counting Operations
     // ========================================================================
 
-    /// Count all documents using the trigger-maintained document_counts table.
+    /// Count all documents.
     pub async fn count(&self) -> Result<u64, DieselError> {
+        use diesel::dsl::count_star;
         with_conn!(self.pool, conn, {
-            let row: CountRow =
-                diesel::sql_query("SELECT COALESCE(SUM(count), 0) as count FROM document_counts")
-                    .get_result(&mut conn)
-                    .await?;
-            Ok(row.count as u64)
+            let count: i64 = documents::table
+                .select(count_star())
+                .get_result(&mut conn)
+                .await?;
+            Ok(count as u64)
         })
     }
 
-    /// Get document counts per source from the trigger-maintained document_counts table.
+    /// Get document counts per source.
     pub async fn get_all_source_counts(&self) -> Result<HashMap<String, u64>, DieselError> {
+        use diesel::dsl::count_star;
         with_conn!(self.pool, conn, {
-            let rows: Vec<SourceCount> =
-                diesel::sql_query("SELECT source_id, count FROM document_counts")
-                    .load(&mut conn)
-                    .await?;
+            let rows: Vec<(String, i64)> = documents::table
+                .group_by(documents::source_id)
+                .select((documents::source_id, count_star()))
+                .load(&mut conn)
+                .await?;
 
-            let mut counts = HashMap::new();
-            for SourceCount { source_id, count } in rows {
-                counts.insert(source_id, count as u64);
-            }
-            Ok(counts)
+            Ok(rows
+                .into_iter()
+                .map(|(id, count)| (id, count as u64))
+                .collect())
         })
     }
 
@@ -127,16 +127,16 @@ impl DieselDocumentRepository {
         })
     }
 
-    /// Count documents by source from the trigger-maintained document_counts table.
+    /// Count documents by source.
     pub async fn count_by_source(&self, source_id: &str) -> Result<u64, DieselError> {
+        use diesel::dsl::count_star;
         with_conn!(self.pool, conn, {
-            let row: CountRow = diesel::sql_query(
-                "SELECT COALESCE(count, 0) as count FROM document_counts WHERE source_id = $1",
-            )
-            .bind::<diesel::sql_types::Text, _>(source_id)
-            .get_result(&mut conn)
-            .await?;
-            Ok(row.count as u64)
+            let count: i64 = documents::table
+                .filter(documents::source_id.eq(source_id))
+                .select(count_star())
+                .get_result(&mut conn)
+                .await?;
+            Ok(count as u64)
         })
     }
 

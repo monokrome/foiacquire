@@ -544,14 +544,6 @@ pub(crate) struct StatusCount {
 }
 
 #[derive(diesel::QueryableByName)]
-pub(crate) struct SourceCount {
-    #[diesel(sql_type = diesel::sql_types::Text)]
-    pub source_id: String,
-    #[diesel(sql_type = diesel::sql_types::BigInt)]
-    pub count: i64,
-}
-
-#[derive(diesel::QueryableByName)]
 pub(crate) struct MimeCount {
     #[diesel(sql_type = diesel::sql_types::Text)]
     pub mime_type: String,

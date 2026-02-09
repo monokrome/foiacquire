@@ -165,7 +165,6 @@ impl Default for OcrConfig {
     }
 }
 
-
 /// Analysis configuration for text extraction methods.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, prefer::FromValue)]
 pub struct AnalysisConfig {
@@ -1048,7 +1047,10 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
 
     // DATABASE_URL environment variable takes highest precedence
     if let Some(database_url) = db_env.url {
-        tracing::debug!("Using DATABASE_URL from environment: {}", crate::repository::util::redact_url_password(&database_url));
+        tracing::debug!(
+            "Using DATABASE_URL from environment: {}",
+            crate::repository::util::redact_url_password(&database_url)
+        );
         settings.database_url = Some(database_url);
     }
 
@@ -1057,13 +1059,19 @@ pub async fn load_settings_with_options(options: LoadOptions) -> (Settings, Conf
         .ok()
         .filter(|s| !s.is_empty())
     {
-        tracing::debug!("Using RATE_LIMIT_BACKEND from environment: {}", crate::repository::util::redact_url_password(&backend));
+        tracing::debug!(
+            "Using RATE_LIMIT_BACKEND from environment: {}",
+            crate::repository::util::redact_url_password(&backend)
+        );
         settings.rate_limit_backend = Some(backend);
     }
 
     // BROKER_URL environment variable takes precedence over config
     if let Some(broker) = std::env::var("BROKER_URL").ok().filter(|s| !s.is_empty()) {
-        tracing::debug!("Using BROKER_URL from environment: {}", crate::repository::util::redact_url_password(&broker));
+        tracing::debug!(
+            "Using BROKER_URL from environment: {}",
+            crate::repository::util::redact_url_password(&broker)
+        );
         settings.broker_url = Some(broker);
     }
 
