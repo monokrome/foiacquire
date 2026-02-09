@@ -2,11 +2,11 @@
 
 use console::style;
 
-use foiacquire::ocr::TextExtractor;
+use foiacquire_analysis::ocr::TextExtractor;
 
 /// Check analysis tool availability.
 pub async fn cmd_analyze_check() -> anyhow::Result<()> {
-    use foiacquire::ocr::{DeepSeekBackend, OcrBackend, TesseractBackend};
+    use foiacquire_analysis::ocr::{DeepSeekBackend, OcrBackend, TesseractBackend};
 
     println!("\n{}", style("OCR Tool Status").bold());
     println!("{}", "-".repeat(50));
@@ -47,7 +47,7 @@ pub async fn cmd_analyze_check() -> anyhow::Result<()> {
     // OCRS (models auto-download on first use)
     #[cfg(feature = "ocr-ocrs")]
     {
-        use foiacquire::ocr::OcrsBackend;
+        use foiacquire_analysis::ocr::OcrsBackend;
         let ocrs = OcrsBackend::new();
         let ocrs_status = if ocrs.is_available() {
             style("✓ available").green()
@@ -72,7 +72,7 @@ pub async fn cmd_analyze_check() -> anyhow::Result<()> {
     // PaddleOCR (models auto-download on first use)
     #[cfg(feature = "ocr-paddle")]
     {
-        use foiacquire::ocr::PaddleBackend;
+        use foiacquire_analysis::ocr::PaddleBackend;
         let paddle = PaddleBackend::new();
         let paddle_status = if paddle.is_available() {
             style("✓ available").green()

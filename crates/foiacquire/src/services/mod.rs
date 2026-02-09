@@ -3,15 +3,12 @@
 //! This module contains domain logic separated from UI concerns.
 //! Services can be used by CLI, web server, or other interfaces.
 
-pub mod analysis;
 pub mod annotation;
 pub mod date_detection;
 #[cfg(feature = "gis")]
 pub mod geolookup;
 pub mod ner;
 
-#[allow(unused_imports)]
-pub use analysis::{AnalysisEvent, AnalysisResult, AnalysisService};
 #[allow(unused_imports)]
 pub use annotation::{
     AnnotationError, AnnotationEvent, AnnotationManager, AnnotationOutput, BatchAnnotationResult,

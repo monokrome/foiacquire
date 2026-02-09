@@ -1,9 +1,9 @@
 //! OCR processing helper functions.
 
-use crate::config::OcrConfig;
-use crate::models::{Document, DocumentPage, PageOcrStatus};
 use crate::ocr::{FallbackOcrBackend, OcrBackend, OcrConfig as OcrBackendConfig, TextExtractor};
-use crate::repository::DieselDocumentRepository;
+use foiacquire::config::OcrConfig;
+use foiacquire::models::{Document, DocumentPage, PageOcrStatus};
+use foiacquire::repository::DieselDocumentRepository;
 
 use super::types::PageOcrResult;
 

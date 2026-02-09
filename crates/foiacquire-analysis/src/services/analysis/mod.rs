@@ -14,12 +14,12 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::analysis::AnalysisManager;
-use crate::repository::DieselDocumentRepository;
+use foiacquire::repository::DieselDocumentRepository;
 
 pub use processing::{extract_document_text_per_page, ocr_document_page_with_config};
 pub use types::{AnalysisEvent, AnalysisResult};
 
-use crate::config::OcrConfig;
+use foiacquire::config::OcrConfig;
 
 /// Service for document analysis (MIME detection, text extraction, OCR).
 pub struct AnalysisService {

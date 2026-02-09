@@ -94,7 +94,7 @@ impl AnalysisManager {
     /// Register custom backends from analysis config.
     pub fn register_customs_from_config(
         &mut self,
-        methods: &HashMap<String, super::super::config::AnalysisMethodConfig>,
+        methods: &HashMap<String, foiacquire::config::AnalysisMethodConfig>,
     ) {
         for (name, method_config) in methods {
             // Skip built-in methods

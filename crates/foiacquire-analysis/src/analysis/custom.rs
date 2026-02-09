@@ -92,7 +92,7 @@ impl CustomBackend {
     fn apply_privacy_env(&self, cmd: &mut Command) {
         // Check for embedded Arti first
         #[cfg(feature = "embedded-tor")]
-        if let Some(proxy_url) = crate::privacy::get_arti_socks_url() {
+        if let Some(proxy_url) = foiacquire::privacy::get_arti_socks_url() {
             cmd.env("SOCKS_PROXY", &proxy_url);
             cmd.env("ALL_PROXY", &proxy_url);
             return;

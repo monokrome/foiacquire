@@ -6,7 +6,7 @@ use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use foiacquire::config::{Config, Settings};
-use foiacquire::ocr::TextExtractor;
+use foiacquire_analysis::ocr::TextExtractor;
 
 use crate::cli::commands::scrape::ReloadMode;
 
@@ -28,8 +28,8 @@ pub async fn cmd_analyze(
     let methods: Vec<String> = method
         .map(|m| m.split(',').map(|s| s.trim().to_string()).collect())
         .unwrap_or_else(|| vec!["ocr".to_string()]);
-    use foiacquire::ocr::FallbackOcrBackend;
-    use foiacquire::services::{AnalysisEvent, AnalysisService};
+    use foiacquire_analysis::ocr::FallbackOcrBackend;
+    use foiacquire_analysis::services::{AnalysisEvent, AnalysisService};
     use tokio::sync::mpsc;
 
     // Load config early so we can check the right backends

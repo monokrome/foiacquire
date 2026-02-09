@@ -3,8 +3,8 @@
 use async_trait::async_trait;
 
 use crate::models::Document;
-use crate::ocr::UrlFinder;
 use crate::repository::DieselDocumentRepository;
+use crate::utils::UrlFinder;
 
 use super::annotator::Annotator;
 use super::types::{AnnotationError, AnnotationOutput};

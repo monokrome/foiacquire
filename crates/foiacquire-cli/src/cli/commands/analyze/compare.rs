@@ -16,7 +16,7 @@ struct PageResult {
 /// Backend configuration for comparison (includes device setting).
 struct BackendConfig {
     name: String,
-    backend_type: foiacquire::ocr::OcrBackendType,
+    backend_type: foiacquire_analysis::ocr::OcrBackendType,
     use_gpu: bool,
 }
 
@@ -25,7 +25,7 @@ struct BackendConfig {
 /// Examples: tesseract, deepseek:gpu, deepseek:cpu, paddleocr:gpu
 /// Defaults: deepseek -> gpu, others -> cpu
 fn parse_backend_configs(backends_str: &str) -> Result<Vec<BackendConfig>, String> {
-    use foiacquire::ocr::OcrBackendType;
+    use foiacquire_analysis::ocr::OcrBackendType;
 
     let mut configs = Vec::new();
     for spec in backends_str.split(',').map(|s| s.trim()) {
@@ -123,7 +123,7 @@ pub async fn cmd_analyze_compare(
     backends_str: &str,
     deepseek_path: Option<std::path::PathBuf>,
 ) -> anyhow::Result<()> {
-    use foiacquire::ocr::{
+    use foiacquire_analysis::ocr::{
         DeepSeekBackend, OcrBackend, OcrBackendType, OcrConfig, TesseractBackend,
     };
 
@@ -219,7 +219,7 @@ pub async fn cmd_analyze_compare(
                 }
                 #[cfg(feature = "ocr-ocrs")]
                 OcrBackendType::Ocrs => {
-                    use foiacquire::ocr::OcrsBackend;
+                    use foiacquire_analysis::ocr::OcrsBackend;
                     let backend = OcrsBackend::new();
                     if is_pdf {
                         backend.ocr_pdf_page(file, page)
@@ -238,7 +238,7 @@ pub async fn cmd_analyze_compare(
                 }
                 #[cfg(feature = "ocr-paddle")]
                 OcrBackendType::PaddleOcr => {
-                    use foiacquire::ocr::PaddleBackend;
+                    use foiacquire_analysis::ocr::PaddleBackend;
                     let backend = PaddleBackend::new();
                     if is_pdf {
                         backend.ocr_pdf_page(file, page)
@@ -256,7 +256,7 @@ pub async fn cmd_analyze_compare(
                     break;
                 }
                 OcrBackendType::Gemini => {
-                    use foiacquire::ocr::GeminiBackend;
+                    use foiacquire_analysis::ocr::GeminiBackend;
                     let backend = GeminiBackend::new();
                     if !backend.is_available() {
                         errors.insert(backend_name.clone(), backend.availability_hint());
@@ -270,7 +270,7 @@ pub async fn cmd_analyze_compare(
                     }
                 }
                 OcrBackendType::Groq => {
-                    use foiacquire::ocr::GroqBackend;
+                    use foiacquire_analysis::ocr::GroqBackend;
                     let backend = GroqBackend::new();
                     if !backend.is_available() {
                         errors.insert(backend_name.clone(), backend.availability_hint());

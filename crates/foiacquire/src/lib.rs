@@ -6,7 +6,6 @@
 // not Result<Self, Error> as std::str::FromStr requires.
 #![allow(clippy::should_implement_trait)]
 
-pub mod analysis;
 #[cfg(feature = "browser")]
 pub mod browser;
 pub mod config;

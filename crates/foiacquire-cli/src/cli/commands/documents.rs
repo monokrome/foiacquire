@@ -34,10 +34,10 @@ fn extract_and_ocr_from_archive(
     entry_path: &str,
     entry_mime: &str,
     run_ocr: bool,
-    text_extractor: &foiacquire::ocr::TextExtractor,
+    text_extractor: &foiacquire_analysis::ocr::TextExtractor,
 ) -> (Option<String>, foiacquire::models::VirtualFileStatus) {
     use foiacquire::models::VirtualFileStatus;
-    use foiacquire::ocr::ArchiveExtractor;
+    use foiacquire_analysis::ocr::ArchiveExtractor;
 
     if !run_ocr {
         return (None, VirtualFileStatus::Pending);
@@ -64,10 +64,10 @@ fn extract_and_ocr_from_email(
     attachment_name: &str,
     attachment_mime: &str,
     run_ocr: bool,
-    text_extractor: &foiacquire::ocr::TextExtractor,
+    text_extractor: &foiacquire_analysis::ocr::TextExtractor,
 ) -> (Option<String>, foiacquire::models::VirtualFileStatus) {
     use foiacquire::models::VirtualFileStatus;
-    use foiacquire::ocr::EmailExtractor;
+    use foiacquire_analysis::ocr::EmailExtractor;
 
     if !run_ocr {
         return (None, VirtualFileStatus::Pending);
@@ -93,10 +93,10 @@ async fn process_archive(
     doc: &Document,
     doc_repo: &DieselDocumentRepository,
     run_ocr: bool,
-    text_extractor: &foiacquire::ocr::TextExtractor,
+    text_extractor: &foiacquire_analysis::ocr::TextExtractor,
 ) -> Option<(usize, usize)> {
     use foiacquire::models::{VirtualFile, VirtualFileStatus};
-    use foiacquire::ocr::ArchiveExtractor;
+    use foiacquire_analysis::ocr::ArchiveExtractor;
 
     let version = doc.current_version()?;
     let version_id = doc_repo.get_current_version_id(&doc.id).await.ok()??;
@@ -153,10 +153,10 @@ async fn process_email(
     doc: &Document,
     doc_repo: &DieselDocumentRepository,
     run_ocr: bool,
-    text_extractor: &foiacquire::ocr::TextExtractor,
+    text_extractor: &foiacquire_analysis::ocr::TextExtractor,
 ) -> Option<(usize, usize)> {
     use foiacquire::models::{VirtualFile, VirtualFileStatus};
-    use foiacquire::ocr::EmailExtractor;
+    use foiacquire_analysis::ocr::EmailExtractor;
 
     let version = doc.current_version()?;
     let version_id = doc_repo.get_current_version_id(&doc.id).await.ok()??;
@@ -232,7 +232,7 @@ pub async fn cmd_archive(
     limit: usize,
     run_ocr: bool,
 ) -> anyhow::Result<()> {
-    use foiacquire::ocr::TextExtractor;
+    use foiacquire_analysis::ocr::TextExtractor;
 
     let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();

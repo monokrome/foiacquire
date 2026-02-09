@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/foiacquire",
+    "crates/foiacquire-analysis",
     "crates/foiacquire-cli",
     "crates/foiacquire-import",
     "crates/foiacquire-scrape",
