@@ -691,23 +691,6 @@ pub async fn cmd_analyze(
             println!("  - {} (not available)", name);
         }
         println!();
-
-        // List any backends that *are* available as alternatives
-        let all_known = ["tesseract", "groq", "gemini", "deepseek"];
-        let available: Vec<_> = all_known
-            .iter()
-            .filter(|n| FallbackOcrBackend::check_backend_available(n))
-            .collect();
-        if !available.is_empty() {
-            println!(
-                "Available alternatives: {}",
-                available
-                    .iter()
-                    .map(|n| n.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-        }
         println!("Run 'foiacquire ocr-check' for setup instructions.");
         return Err(anyhow::anyhow!(
             "No configured OCR backends available. Run 'foiacquire ocr-check' for details."
