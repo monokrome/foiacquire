@@ -32,6 +32,7 @@ pub enum AnalysisEvent {
         succeeded: usize,
         failed: usize,
         pages_created: usize,
+        skipped_missing: usize,
     },
 
     /// Phase 2: OCR started
@@ -70,6 +71,7 @@ pub struct AnalysisResult {
     pub mime_fixed: usize,
     pub phase1_succeeded: usize,
     pub phase1_failed: usize,
+    pub phase1_skipped_missing: usize,
     pub pages_created: usize,
     pub phase2_improved: usize,
     pub phase2_skipped: usize,

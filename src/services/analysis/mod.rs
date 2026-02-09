@@ -104,6 +104,7 @@ impl AnalysisService {
             mime_fixed: 0,
             phase1_succeeded: 0,
             phase1_failed: 0,
+            phase1_skipped_missing: 0,
             pages_created: 0,
             phase2_improved: 0,
             phase2_skipped: 0,
@@ -304,6 +305,7 @@ impl AnalysisService {
 
         let succeeded = Arc::new(AtomicUsize::new(0));
         let failed = Arc::new(AtomicUsize::new(0));
+        let skipped_missing = Arc::new(AtomicUsize::new(0));
         let pages_created = Arc::new(AtomicUsize::new(0));
         let processed = Arc::new(AtomicUsize::new(0));
 
@@ -333,6 +335,17 @@ impl AnalysisService {
                 let current = processed.load(Ordering::Relaxed);
                 if current >= max_to_process {
                     break;
+                }
+
+                // Skip documents whose files aren't on disk yet
+                let file_available = doc
+                    .current_version()
+                    .is_some_and(|v| v.file_path.exists());
+                if !file_available {
+                    tracing::debug!("Skipping {}: file not on disk yet", doc.title);
+                    skipped_missing.fetch_add(1, Ordering::Relaxed);
+                    processed.fetch_add(1, Ordering::Relaxed);
+                    continue;
                 }
 
                 let doc_repo = self.doc_repo.clone();
@@ -402,6 +415,7 @@ impl AnalysisService {
 
         result.phase1_succeeded = succeeded.load(Ordering::Relaxed);
         result.phase1_failed = failed.load(Ordering::Relaxed);
+        result.phase1_skipped_missing = skipped_missing.load(Ordering::Relaxed);
         result.pages_created = pages_created.load(Ordering::Relaxed);
 
         let _ = event_tx
@@ -409,6 +423,7 @@ impl AnalysisService {
                 succeeded: result.phase1_succeeded,
                 failed: result.phase1_failed,
                 pages_created: result.pages_created,
+                skipped_missing: result.phase1_skipped_missing,
             })
             .await;
 

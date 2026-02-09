@@ -198,7 +198,9 @@ pub async fn cmd_analyze(
                             );
                         }
                     }
-                    AnalysisEvent::Phase1Complete { .. } => {
+                    AnalysisEvent::Phase1Complete {
+                        skipped_missing, ..
+                    } => {
                         if let Some(ref progress) = *pb_clone.lock().await {
                             progress.finish_and_clear();
                         }
@@ -214,6 +216,13 @@ pub async fn cmd_analyze(
                                 "  {} {} documents failed",
                                 style("!").yellow(),
                                 phase1_failed
+                            );
+                        }
+                        if skipped_missing > 0 {
+                            println!(
+                                "  {} Skipped {} documents with missing files (will retry when they appear)",
+                                style("!").yellow(),
+                                skipped_missing
                             );
                         }
                     }
