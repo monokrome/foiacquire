@@ -20,6 +20,7 @@ dist/*
 # Non-git hidden file patterns
 .*
 !.git*
+!.dockerignore
 !.env.example
 !.jscpd.json
 !.cargo/
