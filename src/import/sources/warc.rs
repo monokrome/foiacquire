@@ -19,9 +19,8 @@ use console::style;
 use warc::{WarcHeader, WarcReader};
 
 use super::super::{ImportConfig, ImportProgress, ImportSource, ImportStats};
-use crate::cli::helpers::save_scraped_document_async;
 use crate::config::Settings;
-use crate::scrapers::ScraperResult;
+use crate::storage::{save_document_async, DocumentInput};
 
 /// A BufReader wrapper that tracks total bytes consumed.
 /// Uses Arc<AtomicU64> so position can be read even after reader is consumed.
@@ -356,15 +355,19 @@ impl WarcImportSource {
                 );
                 stats.imported += 1;
             } else {
-                // Create ScraperResult for helper
-                let result =
-                    ScraperResult::new(target_uri.clone(), title, content.to_vec(), mime_type);
+                let input = DocumentInput {
+                    url: target_uri.clone(),
+                    title,
+                    mime_type,
+                    metadata: serde_json::json!({}),
+                    original_filename: None,
+                    server_date: None,
+                };
 
-                // Save using async helper
-                match save_scraped_document_async(
+                match save_document_async(
                     &doc_repo,
                     content,
-                    &result,
+                    &input,
                     &source_id,
                     documents_dir,
                 )

@@ -2,9 +2,38 @@
 
 use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, Utc};
+
 use crate::models::{Document, DocumentVersion};
 use crate::repository::{extract_filename_parts, sanitize_filename, DieselDocumentRepository};
 use crate::scrapers::ScraperResult;
+
+/// Metadata needed to save a document to disk and database.
+///
+/// This decouples storage from `ScraperResult`, so code that doesn't
+/// depend on the scraping subsystem (e.g., WARC import) can save
+/// documents without importing scraper types.
+pub struct DocumentInput {
+    pub url: String,
+    pub title: String,
+    pub mime_type: String,
+    pub metadata: serde_json::Value,
+    pub original_filename: Option<String>,
+    pub server_date: Option<DateTime<Utc>>,
+}
+
+impl From<&ScraperResult> for DocumentInput {
+    fn from(result: &ScraperResult) -> Self {
+        Self {
+            url: result.url.clone(),
+            title: result.title.clone(),
+            mime_type: result.mime_type.clone(),
+            metadata: result.metadata.clone(),
+            original_filename: result.original_filename.clone(),
+            server_date: result.server_date,
+        }
+    }
+}
 
 /// Construct the storage path for document content.
 ///
@@ -36,10 +65,26 @@ pub fn content_storage_path_with_name(
 }
 
 /// Save scraped document content to disk and database.
+///
+/// Accepts a `&ScraperResult` for backwards compatibility with existing callers.
 pub async fn save_scraped_document_async(
     doc_repo: &DieselDocumentRepository,
     content: &[u8],
     result: &ScraperResult,
+    source_id: &str,
+    documents_dir: &Path,
+) -> anyhow::Result<bool> {
+    save_document_async(doc_repo, content, &DocumentInput::from(result), source_id, documents_dir)
+        .await
+}
+
+/// Save document content to disk and database.
+///
+/// Uses `DocumentInput` so callers don't need to depend on `ScraperResult`.
+pub async fn save_document_async(
+    doc_repo: &DieselDocumentRepository,
+    content: &[u8],
+    input: &DocumentInput,
     source_id: &str,
     documents_dir: &Path,
 ) -> anyhow::Result<bool> {
@@ -48,7 +93,7 @@ pub async fn save_scraped_document_async(
 
     // Extract basename and extension from URL or title
     let (basename, extension) =
-        extract_filename_parts(&result.url, &result.title, &result.mime_type);
+        extract_filename_parts(&input.url, &input.title, &input.mime_type);
 
     // Store in subdirectory by first 2 chars of hash (for filesystem efficiency)
     let content_path =
@@ -59,14 +104,14 @@ pub async fn save_scraped_document_async(
     let version = DocumentVersion::new_with_metadata(
         content,
         content_path,
-        result.mime_type.clone(),
-        Some(result.url.clone()),
-        result.original_filename.clone(),
-        result.server_date,
+        input.mime_type.clone(),
+        Some(input.url.clone()),
+        input.original_filename.clone(),
+        input.server_date,
     );
 
     // Check existing document
-    let existing = doc_repo.get_by_url(&result.url).await?;
+    let existing = doc_repo.get_by_url(&input.url).await?;
 
     if let Some(mut doc) = existing.into_iter().next() {
         if doc.add_version(version) {
@@ -77,10 +122,10 @@ pub async fn save_scraped_document_async(
         let doc = Document::new(
             uuid::Uuid::new_v4().to_string(),
             source_id.to_string(),
-            result.title.clone(),
-            result.url.clone(),
+            input.title.clone(),
+            input.url.clone(),
             version,
-            result.metadata.clone(),
+            input.metadata.clone(),
         );
         doc_repo.save(&doc).await?;
         Ok(true) // Created new
