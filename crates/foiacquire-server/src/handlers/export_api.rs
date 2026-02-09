@@ -12,7 +12,7 @@ use std::io::Write;
 
 use super::super::AppState;
 use super::helpers::{internal_error, parse_csv_param};
-use crate::repository::diesel_document::BrowseParams;
+use foiacquire::repository::diesel_document::BrowseParams;
 
 /// Export format options.
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]

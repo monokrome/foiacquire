@@ -11,7 +11,7 @@ use super::super::template_structs::{
     CategoryWithCount, DocumentRow, ErrorTemplate, TypeDocumentsTemplate, TypeStat, TypesTemplate,
 };
 use super::super::AppState;
-use crate::utils::{mime_to_category, MimeCategory};
+use foiacquire::utils::{mime_to_category, MimeCategory};
 
 /// Filter parameters for type listing.
 #[derive(Debug, Deserialize)]

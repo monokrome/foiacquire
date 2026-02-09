@@ -300,7 +300,7 @@ pub async fn api_type_stats(
     State(state): State<AppState>,
     Query(params): Query<SourceFilterParams>,
 ) -> impl IntoResponse {
-    use crate::utils::MimeCategory;
+    use foiacquire::utils::MimeCategory;
 
     // Use cache for unfiltered requests (the common case from the browse page)
     let stats = if params.source.is_none() {

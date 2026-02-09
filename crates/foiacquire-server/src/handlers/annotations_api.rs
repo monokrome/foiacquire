@@ -9,7 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use super::super::AppState;
-use crate::repository::diesel_document::BrowseParams;
+use foiacquire::repository::diesel_document::BrowseParams;
 
 /// Query params for annotations listing.
 #[derive(Debug, Deserialize)]

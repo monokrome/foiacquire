@@ -37,7 +37,7 @@ pub async fn api_reocr_document(
     Path(document_id): Path<String>,
     axum::Json(request): axum::Json<ReOcrRequest>,
 ) -> impl IntoResponse {
-    use crate::ocr::{DeepSeekBackend, OcrBackend, OcrConfig};
+    use foiacquire_analysis::ocr::{DeepSeekBackend, OcrBackend, OcrConfig};
 
     if request.backend != "deepseek" {
         return axum::Json(ReOcrResponse {

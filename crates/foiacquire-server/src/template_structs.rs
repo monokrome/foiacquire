@@ -5,10 +5,10 @@
 
 use askama::Template;
 
-use crate::models::{Document, VirtualFile, VirtualFileStatus};
-use crate::repository::diesel_document::BrowseRow;
-use crate::repository::parse_datetime;
-use crate::utils::{format_size, mime_icon};
+use foiacquire::models::{Document, VirtualFile, VirtualFileStatus};
+use foiacquire::repository::diesel_document::BrowseRow;
+use foiacquire::repository::parse_datetime;
+use foiacquire::utils::{format_size, mime_icon};
 
 /// Helper struct for document rows in listings.
 pub struct DocumentRow {

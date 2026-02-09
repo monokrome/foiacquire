@@ -4,7 +4,7 @@ use axum::{http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 
 use super::super::AppState;
-use crate::models::{Document, DocumentVersion};
+use foiacquire::models::{Document, DocumentVersion};
 
 /// Create an internal server error response.
 pub fn internal_error(e: impl std::fmt::Display) -> impl IntoResponse {

@@ -7,6 +7,7 @@ members = [
     "crates/foiacquire-cli",
     "crates/foiacquire-import",
     "crates/foiacquire-scrape",
+    "crates/foiacquire-server",
 ]
 
 [workspace.package]

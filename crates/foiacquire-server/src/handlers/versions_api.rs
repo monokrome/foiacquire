@@ -28,8 +28,8 @@ pub struct VersionResponse {
     pub earliest_archived_at: Option<String>,
 }
 
-impl From<crate::models::DocumentVersion> for VersionResponse {
-    fn from(v: crate::models::DocumentVersion) -> Self {
+impl From<foiacquire::models::DocumentVersion> for VersionResponse {
+    fn from(v: foiacquire::models::DocumentVersion) -> Self {
         Self {
             id: v.id,
             content_hash: v.content_hash,

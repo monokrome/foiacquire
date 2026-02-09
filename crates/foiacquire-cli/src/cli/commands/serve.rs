@@ -87,7 +87,7 @@ pub async fn cmd_serve(
             port
         );
         println!("  Press Ctrl+C to stop");
-        return foiacquire::server::serve(settings, &host, port).await;
+        return foiacquire_server::serve(settings, &host, port).await;
     }
 
     match hs_config.provider {
@@ -176,7 +176,7 @@ async fn start_with_ctor(
     println!();
 
     // Start the actual server
-    let result = foiacquire::server::serve(settings, host, port).await;
+    let result = foiacquire_server::serve(settings, host, port).await;
 
     // Shutdown hidden service when server stops
     hs.shutdown();
@@ -211,7 +211,7 @@ async fn start_with_arti(
         port
     );
     println!("  Press Ctrl+C to stop");
-    foiacquire::server::serve(settings, host, port).await
+    foiacquire_server::serve(settings, host, port).await
 }
 
 /// Parse a bind address that can be:

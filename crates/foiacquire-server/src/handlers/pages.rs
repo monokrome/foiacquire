@@ -73,7 +73,7 @@ pub async fn api_document_pages(
         }
     };
 
-    let all_pages: Vec<crate::models::DocumentPage> =
+    let all_pages: Vec<foiacquire::models::DocumentPage> =
         match state.doc_repo.get_pages(&doc_id, version_id as i32).await {
             Ok(p) => p,
             Err(e) => {

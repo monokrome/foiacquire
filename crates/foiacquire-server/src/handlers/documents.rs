@@ -13,7 +13,7 @@ use super::super::template_structs::{
 };
 use super::super::AppState;
 use super::helpers::{find_sources_with_hash, VersionInfo};
-use crate::utils::format_size;
+use foiacquire::utils::format_size;
 
 /// Query params for document detail navigation context.
 #[derive(Debug, Clone, Deserialize, Default)]

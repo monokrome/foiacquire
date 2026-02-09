@@ -19,8 +19,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::config::Settings;
-use crate::repository::{DieselCrawlRepository, DieselDocumentRepository, DieselSourceRepository};
+use foiacquire::config::Settings;
+use foiacquire::repository::{
+    DieselCrawlRepository, DieselDocumentRepository, DieselSourceRepository,
+};
 
 use cache::StatsCache;
 

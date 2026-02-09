@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use super::super::AppState;
 use super::helpers::{bad_request, internal_error, not_found, paginate, PaginatedResponse};
-use crate::repository::diesel_document::entities::EntityFilter;
+use foiacquire::repository::diesel_document::entities::EntityFilter;
 #[cfg(feature = "gis")]
-use crate::services::geolookup;
+use foiacquire::services::geolookup;
 
 /// Query parameters for entity search.
 #[derive(Debug, Deserialize)]

@@ -48,19 +48,9 @@ url = { workspace = true }
 urlencoding = { workspace = true }
 regex = { workspace = true }
 infer = { workspace = true }
-axum = { workspace = true }
-tower = { workspace = true }
-tower-http = { workspace = true }
-mime_guess = { workspace = true }
-askama = { workspace = true }
 tempfile = { workspace = true }
 zip = { workspace = true }
 mail-parser = { workspace = true }
-image = { workspace = true, optional = true }
-ocrs = { workspace = true, optional = true }
-rten = { workspace = true, optional = true }
-rten-imageproc = { workspace = true, optional = true }
-paddle-ocr-rs = { workspace = true, optional = true }
 uuid = { workspace = true }
 shellexpand = { workspace = true }
 dirs = { workspace = true }
@@ -91,9 +81,6 @@ browser = ["chromiumoxide"]
 postgres = ["diesel-async/postgres", "dep:tokio-postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:rustls-native-certs", "dep:futures-util", "dep:bytes"]
 redis-backend = ["redis"]
 amqp-broker = ["lapin"]
-ocr-ocrs = ["ocrs", "rten", "rten-imageproc", "image"]
-ocr-paddle = ["paddle-ocr-rs", "image"]
-ocr-all = ["ocr-ocrs", "ocr-paddle"]
 # Tor/privacy features
 # SECURITY: Embedded Tor via Arti is DISABLED by default due to RUSTSEC-2023-0071
 # (Marvin Attack timing side-channel in rsa crate). Use C-Tor for hidden services

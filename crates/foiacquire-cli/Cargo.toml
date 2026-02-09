@@ -18,6 +18,7 @@ foiacquire-analysis = { path = "../foiacquire-analysis", default-features = fals
 foiacquire-annotate = { path = "../foiacquire-annotate", default-features = false }
 foiacquire-import = { path = "../foiacquire-import" }
 foiacquire-scrape = { path = "../foiacquire-scrape", default-features = false }
+foiacquire-server = { path = "../foiacquire-server", default-features = false }
 
 anyhow = { workspace = true }
 chrono = { workspace = true }
@@ -44,13 +45,13 @@ uuid = { workspace = true }
 
 [features]
 default = ["browser"]
-gis = ["foiacquire/gis", "foiacquire-annotate/gis"]
+gis = ["foiacquire/gis", "foiacquire-annotate/gis", "foiacquire-server/gis"]
 browser = ["foiacquire/browser", "foiacquire-scrape/browser"]
 postgres = ["foiacquire/postgres"]
 redis-backend = ["foiacquire/redis-backend", "foiacquire-scrape/redis-backend"]
 amqp-broker = ["foiacquire/amqp-broker"]
-ocr-ocrs = ["foiacquire/ocr-ocrs", "foiacquire-analysis/ocr-ocrs"]
-ocr-paddle = ["foiacquire/ocr-paddle", "foiacquire-analysis/ocr-paddle"]
+ocr-ocrs = ["foiacquire-analysis/ocr-ocrs"]
+ocr-paddle = ["foiacquire-analysis/ocr-paddle"]
 ocr-all = ["ocr-ocrs", "ocr-paddle"]
 embedded-tor = ["foiacquire/embedded-tor", "foiacquire-analysis/embedded-tor"]
 unsafe-dev = ["foiacquire/unsafe-dev"]

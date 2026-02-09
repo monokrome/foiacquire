@@ -11,7 +11,7 @@ use super::super::AppState;
 use super::helpers::{
     internal_error, not_found, paginate, parse_csv_param, DocumentSummary, PaginatedResponse,
 };
-use crate::repository::diesel_document::BrowseParams;
+use foiacquire::repository::diesel_document::BrowseParams;
 
 /// Query parameters for document search/listing.
 #[derive(Debug, Deserialize)]
