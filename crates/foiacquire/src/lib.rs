@@ -9,8 +9,9 @@
 pub mod analysis;
 pub mod config;
 pub mod discovery;
+#[cfg(feature = "gis")]
+pub mod gis_data;
 pub mod http_client;
-pub mod import;
 pub mod llm;
 pub mod migrations;
 pub mod models;

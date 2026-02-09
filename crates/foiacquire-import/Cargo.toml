@@ -1,0 +1,24 @@
+[package]
+name = "foiacquire-import"
+description = "Document import sources for foiacquire (WARC, Concordance, etc.)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+foiacquire = { path = "../foiacquire" }
+
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+console = { workspace = true }
+indicatif = { workspace = true }
+infer = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+warc = { workspace = true }

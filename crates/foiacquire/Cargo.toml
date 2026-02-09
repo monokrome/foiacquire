@@ -12,10 +12,6 @@ autobins = false
 name = "foiacquire"
 path = "src/lib.rs"
 
-[[bin]]
-name = "foia"
-path = "src/main.rs"
-
 [dependencies]
 tokio = { workspace = true }
 reqwest = { workspace = true }

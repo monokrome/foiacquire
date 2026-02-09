@@ -4,7 +4,7 @@
 
 set -e
 
-BINARY_NAME=$(grep -A1 '^\[\[bin\]\]' crates/foiacquire/Cargo.toml | grep 'name' | cut -d'"' -f2)
+BINARY_NAME=$(grep -A1 '^\[\[bin\]\]' crates/foiacquire-cli/Cargo.toml | grep 'name' | cut -d'"' -f2)
 
 if [ -z "$BINARY_NAME" ]; then
     echo "ERROR: Could not find [[bin]] name in Cargo.toml"

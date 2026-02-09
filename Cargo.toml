@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/foiacquire"]
+members = [
+    "crates/foiacquire",
+    "crates/foiacquire-cli",
+    "crates/foiacquire-import",
+]
 
 [workspace.package]
 version = "0.11.3"

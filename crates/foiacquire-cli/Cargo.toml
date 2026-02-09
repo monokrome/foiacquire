@@ -1,0 +1,53 @@
+[package]
+name = "foiacquire-cli"
+description = "CLI interface for foiacquire FOIA document acquisition system"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+autobins = false
+
+[[bin]]
+name = "foia"
+path = "src/main.rs"
+
+[dependencies]
+foiacquire = { path = "../foiacquire", default-features = false }
+foiacquire-import = { path = "../foiacquire-import" }
+
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+console = { workspace = true }
+crossterm = { workspace = true }
+diesel = { workspace = true }
+diesel-async = { workspace = true }
+dotenvy = { workspace = true }
+hex = { workspace = true }
+indicatif = { workspace = true }
+infer = { workspace = true }
+prefer = { workspace = true }
+ratatui = { workspace = true }
+regex = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+
+[features]
+default = ["browser"]
+gis = ["foiacquire/gis"]
+browser = ["foiacquire/browser"]
+postgres = ["foiacquire/postgres"]
+redis-backend = ["foiacquire/redis-backend"]
+amqp-broker = ["foiacquire/amqp-broker"]
+ocr-ocrs = ["foiacquire/ocr-ocrs"]
+ocr-paddle = ["foiacquire/ocr-paddle"]
+ocr-all = ["ocr-ocrs", "ocr-paddle"]
+embedded-tor = ["foiacquire/embedded-tor"]
+unsafe-dev = ["foiacquire/unsafe-dev"]

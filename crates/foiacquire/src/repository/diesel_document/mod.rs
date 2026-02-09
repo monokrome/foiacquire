@@ -45,7 +45,7 @@ pub struct OcrResult {
 /// Diesel-based document repository with compile-time query checking.
 #[derive(Clone)]
 pub struct DieselDocumentRepository {
-    pub(crate) pool: DbPool,
+    pub pool: DbPool,
 }
 
 impl DieselDocumentRepository {
@@ -559,7 +559,7 @@ pub(crate) struct TagRow {
 }
 
 #[derive(diesel::QueryableByName)]
-pub(crate) struct DocIdRow {
+pub struct DocIdRow {
     #[diesel(sql_type = diesel::sql_types::Text)]
     pub id: String,
 }

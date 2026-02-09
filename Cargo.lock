@@ -2781,6 +2781,55 @@ dependencies = [
 ]
 
 [[package]]
+name = "foiacquire-cli"
+version = "0.11.3"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "console 0.15.11",
+ "crossterm 0.28.1",
+ "diesel",
+ "diesel-async",
+ "dotenvy",
+ "foiacquire",
+ "foiacquire-import",
+ "hex",
+ "indicatif",
+ "infer",
+ "prefer",
+ "ratatui",
+ "regex",
+ "reqwest",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "uuid 1.18.1",
+]
+
+[[package]]
+name = "foiacquire-import"
+version = "0.11.3"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "console 0.15.11",
+ "foiacquire",
+ "indicatif",
+ "infer",
+ "regex",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid 1.18.1",
+ "warc",
+]
+
+[[package]]
 name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
