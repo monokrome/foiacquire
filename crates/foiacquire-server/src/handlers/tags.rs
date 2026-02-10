@@ -10,6 +10,7 @@ use super::super::template_structs::{
     DocumentRow, ErrorTemplate, TagDocumentsTemplate, TagWithCount, TagsTemplate,
 };
 use super::super::AppState;
+use super::api_types::{ApiResponse, TagCount};
 
 /// List all tags with document counts.
 pub async fn list_tags(State(state): State<AppState>) -> impl IntoResponse {
@@ -83,8 +84,15 @@ pub async fn list_tag_documents(
 }
 
 /// API endpoint to get all tags as JSON.
+#[utoipa::path(
+    get,
+    path = "/api/tags",
+    responses(
+        (status = 200, description = "All tags with counts", body = Vec<TagCount>)
+    ),
+    tag = "Status"
+)]
 pub async fn api_tags(State(state): State<AppState>) -> impl IntoResponse {
-    // Get tags, converting to expected format with counts
     let tags: Vec<(String, usize)> = match state.stats_cache.get_all_tags() {
         Some(cached) => cached,
         None => {
@@ -96,14 +104,9 @@ pub async fn api_tags(State(state): State<AppState>) -> impl IntoResponse {
         }
     };
 
-    let tags_json: Vec<_> = tags
+    let tags_list: Vec<TagCount> = tags
         .into_iter()
-        .map(|(tag, count)| {
-            serde_json::json!({
-                "tag": tag,
-                "count": count
-            })
-        })
+        .map(|(tag, count)| TagCount { tag, count })
         .collect();
-    axum::Json(tags_json).into_response()
+    ApiResponse::ok(tags_list).into_response()
 }

@@ -6,15 +6,17 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 use super::super::AppState;
+use super::api_types::ApiResponse;
 use super::helpers::{
     internal_error, not_found, paginate, parse_csv_param, DocumentSummary, PaginatedResponse,
 };
 use foiacquire::repository::diesel_document::BrowseParams;
 
 /// Query parameters for document search/listing.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct DocumentsQuery {
     /// Filter by source ID
     pub source: Option<String>,
@@ -37,6 +39,15 @@ pub struct DocumentsQuery {
 }
 
 /// List/search documents with filters and pagination.
+#[utoipa::path(
+    get,
+    path = "/api/documents",
+    params(DocumentsQuery),
+    responses(
+        (status = 200, description = "Paginated list of documents", body = PaginatedResponse<DocumentSummary>)
+    ),
+    tag = "Documents"
+)]
 pub async fn list_documents(
     State(state): State<AppState>,
     Query(params): Query<DocumentsQuery>,
@@ -45,7 +56,6 @@ pub async fn list_documents(
     let types = parse_csv_param(params.types.as_ref());
     let tags = parse_csv_param(params.tags.as_ref());
 
-    // Get documents with filters
     let documents = match state
         .doc_repo
         .browse(BrowseParams {
@@ -65,7 +75,6 @@ pub async fn list_documents(
         Err(e) => return internal_error(e).into_response(),
     };
 
-    // Get total count
     let total = state
         .doc_repo
         .browse_count(
@@ -84,25 +93,35 @@ pub async fn list_documents(
 }
 
 /// Get a single document by ID.
+#[utoipa::path(
+    get,
+    path = "/api/documents/{doc_id}",
+    params(("doc_id" = String, Path, description = "Document ID")),
+    responses(
+        (status = 200, description = "Document details", body = DocumentSummary),
+        (status = 404, description = "Document not found")
+    ),
+    tag = "Documents"
+)]
 pub async fn get_document(
     State(state): State<AppState>,
     Path(doc_id): Path<String>,
 ) -> impl IntoResponse {
     match state.doc_repo.get(&doc_id).await {
-        Ok(Some(doc)) => Json(DocumentSummary::from(doc)).into_response(),
+        Ok(Some(doc)) => ApiResponse::ok(DocumentSummary::from(doc)).into_response(),
         Ok(None) => not_found("Document not found").into_response(),
         Err(e) => internal_error(e).into_response(),
     }
 }
 
 /// Get document content/text.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct ContentQuery {
     /// Version ID (optional, defaults to current)
     pub version: Option<i64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct DocumentContentResponse {
     pub id: String,
     pub extracted_text: Option<String>,
@@ -110,13 +129,26 @@ pub struct DocumentContentResponse {
     pub pages: Vec<PageContent>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct PageContent {
     pub page_number: u32,
     pub text: Option<String>,
 }
 
 /// Get document text content (extracted text and OCR results).
+#[utoipa::path(
+    get,
+    path = "/api/documents/{doc_id}/content",
+    params(
+        ("doc_id" = String, Path, description = "Document ID"),
+        ContentQuery,
+    ),
+    responses(
+        (status = 200, description = "Document text content", body = DocumentContentResponse),
+        (status = 404, description = "Document not found")
+    ),
+    tag = "Documents"
+)]
 pub async fn get_document_content(
     State(state): State<AppState>,
     Path(doc_id): Path<String>,
@@ -133,7 +165,6 @@ pub async fn get_document_content(
         .or_else(|| doc.current_version().map(|v| v.id))
         .unwrap_or(0);
 
-    // Get pages with OCR text
     let pages = state
         .doc_repo
         .get_pages(&doc_id, version_id as i32)
@@ -150,7 +181,7 @@ pub async fn get_document_content(
 
     let page_count = doc.current_version().and_then(|v| v.page_count);
 
-    Json(DocumentContentResponse {
+    ApiResponse::ok(DocumentContentResponse {
         id: doc.id,
         extracted_text: doc.extracted_text,
         page_count,

@@ -5,17 +5,18 @@ use axum::{
     extract::{Query, State},
     http::{header, StatusCode},
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use std::io::Write;
+use utoipa::{IntoParams, ToSchema};
 
 use super::super::AppState;
+use super::api_types::{AnnotationExport, ApiResponse, ExportStatsResponse};
 use super::helpers::{internal_error, parse_csv_param};
 use foiacquire::repository::diesel_document::BrowseParams;
 
 /// Export format options.
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ExportFormat {
     #[default]
@@ -25,7 +26,7 @@ pub enum ExportFormat {
 }
 
 /// Query params for export.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct ExportQuery {
     /// Export format (json, jsonl, csv)
     #[serde(default)]
@@ -44,7 +45,7 @@ pub struct ExportQuery {
 }
 
 /// Document export record.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ExportDocument {
     pub id: String,
     pub source_id: String,
@@ -64,6 +65,15 @@ pub struct ExportDocument {
 }
 
 /// Export documents in various formats.
+#[utoipa::path(
+    get,
+    path = "/api/export/documents",
+    params(ExportQuery),
+    responses(
+        (status = 200, description = "Exported documents (format varies by query param)", content_type = "application/json")
+    ),
+    tag = "Export"
+)]
 pub async fn export_documents(
     State(state): State<AppState>,
     Query(params): Query<ExportQuery>,
@@ -72,7 +82,6 @@ pub async fn export_documents(
     let types = parse_csv_param(params.types.as_ref());
     let tags = parse_csv_param(params.tags.as_ref());
 
-    // Fetch documents
     let documents = match state
         .doc_repo
         .browse(BrowseParams {
@@ -88,7 +97,6 @@ pub async fn export_documents(
         Err(e) => return internal_error(e).into_response(),
     };
 
-    // Convert to export format
     let export_docs: Vec<ExportDocument> = documents
         .into_iter()
         .map(|doc| {
@@ -160,7 +168,6 @@ pub async fn export_documents(
         }
         ExportFormat::Csv => {
             let mut output = Vec::new();
-            // Write header
             writeln!(
                 output,
                 "id,source_id,title,source_url,status,synopsis,tags,created_at,updated_at,mime_type,file_size,page_count,content_hash"
@@ -210,7 +217,6 @@ pub async fn export_documents(
     }
 }
 
-/// Escape a string for CSV output.
 fn escape_csv(s: &str) -> String {
     if s.contains(',') || s.contains('"') || s.contains('\n') {
         format!("\"{}\"", s.replace('"', "\"\""))
@@ -220,6 +226,14 @@ fn escape_csv(s: &str) -> String {
 }
 
 /// Export metadata statistics.
+#[utoipa::path(
+    get,
+    path = "/api/export/stats",
+    responses(
+        (status = 200, description = "Export statistics", body = ExportStatsResponse)
+    ),
+    tag = "Export"
+)]
 pub async fn export_stats(State(state): State<AppState>) -> impl IntoResponse {
     let total = state.doc_repo.count().await.unwrap_or(0);
     let type_stats = state.doc_repo.get_type_stats().await.unwrap_or_default();
@@ -234,16 +248,25 @@ pub async fn export_stats(State(state): State<AppState>) -> impl IntoResponse {
         .await
         .unwrap_or_default();
 
-    Json(serde_json::json!({
-        "total_documents": total,
-        "by_type": type_stats,
-        "by_source": source_counts,
-        "by_status": status_counts,
-    }))
+    ApiResponse::ok(ExportStatsResponse {
+        total_documents: total,
+        by_type: type_stats,
+        by_source: source_counts,
+        by_status: status_counts,
+    })
     .into_response()
 }
 
 /// Export annotations only (for backup/transfer).
+#[utoipa::path(
+    get,
+    path = "/api/export/annotations",
+    params(ExportQuery),
+    responses(
+        (status = 200, description = "Exported annotations", content_type = "application/json")
+    ),
+    tag = "Export"
+)]
 pub async fn export_annotations(
     State(state): State<AppState>,
     Query(params): Query<ExportQuery>,
@@ -265,17 +288,14 @@ pub async fn export_annotations(
         Err(e) => return internal_error(e).into_response(),
     };
 
-    // Only include documents with annotations
-    let annotations: Vec<_> = documents
+    let annotations: Vec<AnnotationExport> = documents
         .into_iter()
         .filter(|d| d.synopsis.is_some() || !d.tags.is_empty())
-        .map(|d| {
-            serde_json::json!({
-                "id": d.id,
-                "source_url": d.source_url,
-                "synopsis": d.synopsis,
-                "tags": d.tags
-            })
+        .map(|d| AnnotationExport {
+            id: d.id,
+            source_url: d.source_url,
+            synopsis: d.synopsis,
+            tags: d.tags,
         })
         .collect();
 

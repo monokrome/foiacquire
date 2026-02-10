@@ -6,35 +6,57 @@ use axum::{
     response::IntoResponse,
 };
 use serde::Deserialize;
+use utoipa::IntoParams;
 
 use super::super::AppState;
+use super::api_types::{
+    ApiResponse, CategoryStat, CrawlState, CrawlStats, DocumentStats, FailedUrl, MimeTypeStat,
+    RecentDocument, RecentUrl, RequestStats, SourceCrawlStat, SourceInfo, SourceStatusResponse,
+    StatusResponse, TagCount,
+};
 
 /// Health check endpoint for container orchestration.
+#[utoipa::path(
+    get,
+    path = "/health",
+    responses(
+        (status = 200, description = "Server is healthy")
+    ),
+    tag = "Health"
+)]
 pub async fn health() -> impl IntoResponse {
     StatusCode::OK
 }
 
 /// Parameters for recent documents.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct RecentParams {
     pub limit: Option<usize>,
     pub source: Option<String>,
 }
 
 /// Source filter parameters.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct SourceFilterParams {
     pub source: Option<String>,
 }
 
 /// Tag search parameters.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct TagSearchParams {
     pub q: Option<String>,
     pub limit: Option<usize>,
 }
 
 /// API endpoint to get all sources with document counts.
+#[utoipa::path(
+    get,
+    path = "/api/sources",
+    responses(
+        (status = 200, description = "All sources with document counts", body = Vec<SourceInfo>)
+    ),
+    tag = "Status"
+)]
 pub async fn api_sources(State(state): State<AppState>) -> impl IntoResponse {
     let source_counts = match state.stats_cache.get_source_counts() {
         Some(counts) => counts,
@@ -49,7 +71,7 @@ pub async fn api_sources(State(state): State<AppState>) -> impl IntoResponse {
         }
     };
 
-    let sources: Vec<_> = state
+    let sources: Vec<SourceInfo> = state
         .source_repo
         .get_all()
         .await
@@ -57,18 +79,26 @@ pub async fn api_sources(State(state): State<AppState>) -> impl IntoResponse {
         .into_iter()
         .map(|s| {
             let count = source_counts.get(&s.id).copied().unwrap_or(0);
-            serde_json::json!({
-                "id": s.id,
-                "name": s.name,
-                "count": count
-            })
+            SourceInfo {
+                id: s.id,
+                name: s.name,
+                count,
+            }
         })
         .collect();
 
-    axum::Json(sources).into_response()
+    ApiResponse::ok(sources).into_response()
 }
 
 /// API endpoint to get overall database status.
+#[utoipa::path(
+    get,
+    path = "/api/status",
+    responses(
+        (status = 200, description = "Overall system status", body = StatusResponse)
+    ),
+    tag = "Status"
+)]
 pub async fn api_status(State(state): State<AppState>) -> impl IntoResponse {
     let doc_count = state.doc_repo.count().await.unwrap_or(0);
     let needing_ocr = state.doc_repo.count_needing_ocr(None).await.unwrap_or(0);
@@ -89,81 +119,82 @@ pub async fn api_status(State(state): State<AppState>) -> impl IntoResponse {
         total_pending += stats.urls_pending;
         total_failed += stats.urls_failed;
         total_discovered += stats.urls_discovered;
-        source_stats.push(serde_json::json!({
-            "source_id": source_id,
-            "discovered": stats.urls_discovered,
-            "fetched": stats.urls_fetched,
-            "pending": stats.urls_pending,
-            "failed": stats.urls_failed,
-            "has_pending": stats.crawl_state.has_pending_urls,
-        }));
+        source_stats.push(SourceCrawlStat {
+            source_id: source_id.clone(),
+            discovered: stats.urls_discovered,
+            fetched: stats.urls_fetched,
+            pending: stats.urls_pending,
+            failed: stats.urls_failed,
+            has_pending: stats.crawl_state.has_pending_urls,
+        });
     }
 
-    let recent_urls: Vec<_> = state
+    let recent_urls: Vec<RecentUrl> = state
         .crawl_repo
         .get_recent_downloads(None, 10)
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|u| {
-            serde_json::json!({
-                "url": u.url,
-                "source_id": u.source_id,
-                "fetched_at": u.fetched_at.map(|dt| dt.to_rfc3339()),
-                "document_id": u.document_id,
-            })
+        .map(|u| RecentUrl {
+            url: u.url,
+            source_id: Some(u.source_id),
+            fetched_at: u.fetched_at.map(|dt| dt.to_rfc3339()),
+            document_id: u.document_id,
         })
         .collect();
 
-    let failed_urls: Vec<_> = state
+    let failed_urls: Vec<FailedUrl> = state
         .crawl_repo
         .get_failed_urls(None, 10)
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|u| {
-            serde_json::json!({
-                "url": u.url,
-                "source_id": u.source_id,
-                "error": u.last_error,
-                "retry_count": u.retry_count,
-            })
+        .map(|u| FailedUrl {
+            url: u.url,
+            source_id: Some(u.source_id),
+            error: u.last_error,
+            retry_count: u.retry_count,
         })
         .collect();
 
-    let type_stats: Vec<_> = state
+    let type_stats: Vec<MimeTypeStat> = state
         .doc_repo
         .get_type_stats()
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|(mime, count)| {
-            serde_json::json!({
-                "mime_type": mime,
-                "count": count
-            })
-        })
+        .map(|(mime_type, count)| MimeTypeStat { mime_type, count })
         .collect();
 
-    axum::Json(serde_json::json!({
-        "documents": {
-            "total": doc_count,
-            "needing_ocr": needing_ocr,
-            "needing_summarization": needing_summary,
+    ApiResponse::ok(StatusResponse {
+        documents: DocumentStats {
+            total: doc_count,
+            needing_ocr,
+            needing_summarization: needing_summary,
         },
-        "crawl": {
-            "total_discovered": total_discovered,
-            "total_pending": total_pending,
-            "total_failed": total_failed,
-            "sources": source_stats,
+        crawl: CrawlStats {
+            total_discovered,
+            total_pending,
+            total_failed,
+            sources: source_stats,
         },
-        "recent_downloads": recent_urls,
-        "recent_failures": failed_urls,
-        "type_stats": type_stats,
-    }))
+        recent_downloads: recent_urls,
+        recent_failures: failed_urls,
+        type_stats,
+    })
+    .into_response()
 }
 
 /// API endpoint to get status for a specific source.
+#[utoipa::path(
+    get,
+    path = "/api/status/{source_id}",
+    params(("source_id" = String, Path, description = "Source ID")),
+    responses(
+        (status = 200, description = "Source-specific status", body = SourceStatusResponse)
+    ),
+    tag = "Status"
+)]
 pub async fn api_source_status(
     State(state): State<AppState>,
     Path(source_id): Path<String>,
@@ -187,81 +218,84 @@ pub async fn api_source_status(
     let crawl_state = state.crawl_repo.get_crawl_state(&source_id).await.ok();
     let request_stats = state.crawl_repo.get_request_stats(&source_id).await.ok();
 
-    let recent_urls: Vec<_> = state
+    let recent_urls: Vec<RecentUrl> = state
         .crawl_repo
         .get_recent_downloads(Some(&source_id), 20)
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|u| {
-            serde_json::json!({
-                "url": u.url,
-                "fetched_at": u.fetched_at.map(|dt| dt.to_rfc3339()),
-                "document_id": u.document_id,
-            })
+        .map(|u| RecentUrl {
+            url: u.url,
+            source_id: None,
+            fetched_at: u.fetched_at.map(|dt| dt.to_rfc3339()),
+            document_id: u.document_id,
         })
         .collect();
 
-    let failed_urls: Vec<_> = state
+    let failed_urls: Vec<FailedUrl> = state
         .crawl_repo
         .get_failed_urls(Some(&source_id), 20)
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|u| {
-            serde_json::json!({
-                "url": u.url,
-                "error": u.last_error,
-                "retry_count": u.retry_count,
-            })
+        .map(|u| FailedUrl {
+            url: u.url,
+            source_id: None,
+            error: u.last_error,
+            retry_count: u.retry_count,
         })
         .collect();
 
-    let type_stats: Vec<_> = state
+    let type_stats: Vec<MimeTypeStat> = state
         .doc_repo
         .get_type_stats()
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|(mime, count)| {
-            serde_json::json!({
-                "mime_type": mime,
-                "count": count
-            })
-        })
+        .map(|(mime_type, count)| MimeTypeStat { mime_type, count })
         .collect();
 
-    axum::Json(serde_json::json!({
-        "source_id": source_id,
-        "documents": {
-            "total": doc_count,
-            "needing_ocr": needing_ocr,
-            "needing_summarization": needing_summary,
+    ApiResponse::ok(SourceStatusResponse {
+        source_id,
+        documents: DocumentStats {
+            total: doc_count,
+            needing_ocr,
+            needing_summarization: needing_summary,
         },
-        "crawl": crawl_state.map(|s| serde_json::json!({
-            "discovered": s.urls_discovered,
-            "fetched": s.urls_fetched,
-            "pending": s.urls_pending,
-            "failed": s.urls_failed,
-            "has_pending": s.has_pending_urls,
-            "last_crawl_started": s.last_crawl_started,
-            "last_crawl_completed": s.last_crawl_completed,
-        })),
-        "request_stats": request_stats.map(|s| serde_json::json!({
-            "total_requests": s.total_requests,
-            "success_200": s.success_200,
-            "not_modified_304": s.not_modified_304,
-            "errors": s.errors,
-            "avg_duration_ms": s.avg_duration_ms,
-            "total_bytes": s.total_bytes,
-        })),
-        "recent_downloads": recent_urls,
-        "recent_failures": failed_urls,
-        "type_stats": type_stats,
-    }))
+        crawl: crawl_state.map(|s| CrawlState {
+            discovered: s.urls_discovered,
+            fetched: s.urls_fetched,
+            pending: s.urls_pending,
+            failed: s.urls_failed,
+            has_pending: s.has_pending_urls,
+            last_crawl_started: s.last_crawl_started,
+            last_crawl_completed: s.last_crawl_completed,
+        }),
+        request_stats: request_stats.map(|s| RequestStats {
+            total_requests: s.total_requests,
+            success_200: s.success_200,
+            not_modified_304: s.not_modified_304,
+            errors: s.errors,
+            avg_duration_ms: s.avg_duration_ms,
+            total_bytes: s.total_bytes,
+        }),
+        recent_downloads: recent_urls,
+        recent_failures: failed_urls,
+        type_stats,
+    })
+    .into_response()
 }
 
 /// API endpoint to get recent documents.
+#[utoipa::path(
+    get,
+    path = "/api/recent",
+    params(RecentParams),
+    responses(
+        (status = 200, description = "Recent documents", body = Vec<RecentDocument>)
+    ),
+    tag = "Status"
+)]
 pub async fn api_recent_docs(
     State(state): State<AppState>,
     Query(params): Query<RecentParams>,
@@ -271,38 +305,47 @@ pub async fn api_recent_docs(
 
     match state.doc_repo.get_recent(limit as u32).await {
         Ok(docs) => {
-            let doc_list: Vec<_> = docs
+            let doc_list: Vec<RecentDocument> = docs
                 .into_iter()
                 .filter(|d| source_id.is_none() || Some(d.source_id.as_str()) == source_id)
                 .map(|d| {
-                    let version = d.current_version();
-                    serde_json::json!({
-                        "id": d.id,
-                        "title": d.title,
-                        "source_id": d.source_id,
-                        "synopsis": d.synopsis,
-                        "tags": d.tags,
-                        "status": format!("{:?}", d.status),
-                        "updated_at": d.updated_at.to_rfc3339(),
-                        "mime_type": version.map(|v| v.mime_type.as_str()),
-                        "file_size": version.map(|v| v.file_size),
-                    })
+                    let mime_type = d.current_version().map(|v| v.mime_type.clone());
+                    let file_size = d.current_version().map(|v| v.file_size);
+                    RecentDocument {
+                        id: d.id,
+                        title: d.title,
+                        source_id: d.source_id,
+                        synopsis: d.synopsis,
+                        tags: d.tags,
+                        status: format!("{:?}", d.status),
+                        updated_at: d.updated_at.to_rfc3339(),
+                        mime_type,
+                        file_size,
+                    }
                 })
                 .collect();
-            axum::Json(doc_list).into_response()
+            ApiResponse::ok(doc_list).into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
 /// API endpoint to get document type statistics.
+#[utoipa::path(
+    get,
+    path = "/api/types",
+    params(SourceFilterParams),
+    responses(
+        (status = 200, description = "Document type statistics", body = Vec<CategoryStat>)
+    ),
+    tag = "Status"
+)]
 pub async fn api_type_stats(
     State(state): State<AppState>,
     Query(params): Query<SourceFilterParams>,
 ) -> impl IntoResponse {
     use foiacquire::utils::MimeCategory;
 
-    // Use cache for unfiltered requests (the common case from the browse page)
     let stats = if params.source.is_none() {
         match state.stats_cache.get_category_stats() {
             Some(cached) => cached,
@@ -324,23 +367,32 @@ pub async fn api_type_stats(
             .unwrap_or_default()
     };
 
-    let stats_json: Vec<_> = stats
+    let stats_list: Vec<CategoryStat> = stats
         .into_iter()
         .map(|(category, count)| {
-            let display_name = MimeCategory::from_id(&category)
-                .map(|c| c.display_name())
-                .unwrap_or(&category);
-            serde_json::json!({
-                "category": category,
-                "name": display_name,
-                "count": count
-            })
+            let name = MimeCategory::from_id(&category)
+                .map(|c| c.display_name().to_string())
+                .unwrap_or_else(|| category.clone());
+            CategoryStat {
+                category,
+                name,
+                count,
+            }
         })
         .collect();
-    axum::Json(stats_json).into_response()
+    ApiResponse::ok(stats_list).into_response()
 }
 
 /// API endpoint for tag autocomplete.
+#[utoipa::path(
+    get,
+    path = "/api/tags/search",
+    params(TagSearchParams),
+    responses(
+        (status = 200, description = "Tag search results", body = Vec<TagCount>)
+    ),
+    tag = "Status"
+)]
 pub async fn api_search_tags(
     State(state): State<AppState>,
     Query(params): Query<TagSearchParams>,
@@ -350,12 +402,15 @@ pub async fn api_search_tags(
 
     match state.doc_repo.search_tags(&query).await {
         Ok(tags) => {
-            let result: Vec<_> = tags
+            let result: Vec<TagCount> = tags
                 .iter()
                 .take(limit)
-                .map(|tag| serde_json::json!({ "tag": tag, "count": 0 }))
+                .map(|tag| TagCount {
+                    tag: tag.clone(),
+                    count: 0,
+                })
                 .collect();
-            axum::Json(result).into_response()
+            ApiResponse::ok(result).into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }

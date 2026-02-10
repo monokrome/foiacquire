@@ -2,6 +2,7 @@
 
 mod annotations_api;
 mod api;
+pub mod api_types;
 mod browse;
 mod documents;
 mod documents_api;
@@ -10,6 +11,7 @@ mod entities_api;
 mod export_api;
 mod helpers;
 mod ocr;
+pub mod openapi;
 mod pages;
 mod scrape_api;
 mod static_files;
@@ -40,3 +42,5 @@ pub use tags::{api_tags, list_tag_documents, list_tags};
 pub use timeline::{timeline_aggregate, timeline_source};
 pub use types::{list_by_type, list_types};
 pub use versions_api::{find_by_hash, get_version, list_versions};
+
+pub use openapi::openapi_spec;

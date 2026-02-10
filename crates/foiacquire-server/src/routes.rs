@@ -1,7 +1,7 @@
 //! Router configuration for the web server.
 
 use axum::{
-    routing::{get, post},
+    routing::{get, options, post},
     Router,
 };
 use tower_http::cors::CorsLayer;
@@ -101,6 +101,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/recent", get(handlers::api_recent_docs))
         .route("/api/types", get(handlers::api_type_stats))
         .route("/api/sources", get(handlers::api_sources))
+        // OpenAPI spec
+        .route("/api", options(handlers::openapi_spec))
+        .route("/api/openapi.json", get(handlers::openapi_spec))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

@@ -6,11 +6,12 @@ use axum::{
     response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 use super::super::AppState;
 
 /// Parameters for pages view/API.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct PagesParams {
     pub version: Option<i64>,
     pub offset: Option<u32>,
@@ -18,7 +19,7 @@ pub struct PagesParams {
 }
 
 /// Single page data for API response.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct PageData {
     pub page_number: u32,
     pub ocr_text: Option<String>,
@@ -30,7 +31,7 @@ pub struct PageData {
 }
 
 /// Pages API response.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct PagesResponse {
     pub pages: Vec<PageData>,
     pub total_pages: u32,
@@ -40,6 +41,19 @@ pub struct PagesResponse {
 }
 
 /// API endpoint to get paginated pages with rendered images and OCR text.
+#[utoipa::path(
+    get,
+    path = "/api/documents/{doc_id}/pages",
+    params(
+        ("doc_id" = String, Path, description = "Document ID"),
+        PagesParams,
+    ),
+    responses(
+        (status = 200, description = "Paginated page data", body = PagesResponse),
+        (status = 404, description = "Document not found")
+    ),
+    tag = "Pages"
+)]
 pub async fn api_document_pages(
     State(state): State<AppState>,
     Path(doc_id): Path<String>,
@@ -180,7 +194,6 @@ pub async fn api_document_pages(
     .into_response()
 }
 
-/// Render a PDF page to a base64-encoded PNG image.
 fn render_pdf_page_to_base64(pdf_path: &std::path::Path, page_number: u32) -> Option<String> {
     use base64::Engine;
     use std::process::Command;

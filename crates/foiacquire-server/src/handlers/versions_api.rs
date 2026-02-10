@@ -3,15 +3,16 @@
 use axum::{
     extract::{Path, State},
     response::IntoResponse,
-    Json,
 };
 use serde::Serialize;
+use utoipa::ToSchema;
 
 use super::super::AppState;
+use super::api_types::{ApiResponse, HashSearchResponse, VersionsListResponse};
 use super::helpers::{internal_error, not_found};
 
 /// Full version details for API response.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct VersionResponse {
     pub id: i64,
     pub content_hash: String,
@@ -49,6 +50,16 @@ impl From<foiacquire::models::DocumentVersion> for VersionResponse {
 }
 
 /// Get all versions of a document.
+#[utoipa::path(
+    get,
+    path = "/api/documents/{doc_id}/versions",
+    params(("doc_id" = String, Path, description = "Document ID")),
+    responses(
+        (status = 200, description = "Document version list", body = VersionsListResponse),
+        (status = 404, description = "Document not found")
+    ),
+    tag = "Versions"
+)]
 pub async fn list_versions(
     State(state): State<AppState>,
     Path(doc_id): Path<String>,
@@ -61,11 +72,11 @@ pub async fn list_versions(
                 .map(VersionResponse::from)
                 .collect();
 
-            Json(serde_json::json!({
-                "document_id": doc_id,
-                "version_count": versions.len(),
-                "versions": versions
-            }))
+            ApiResponse::ok(VersionsListResponse {
+                document_id: doc_id,
+                version_count: versions.len(),
+                versions,
+            })
             .into_response()
         }
         Ok(None) => not_found("Document not found").into_response(),
@@ -74,6 +85,19 @@ pub async fn list_versions(
 }
 
 /// Get a specific version of a document.
+#[utoipa::path(
+    get,
+    path = "/api/documents/{doc_id}/versions/{version_id}",
+    params(
+        ("doc_id" = String, Path, description = "Document ID"),
+        ("version_id" = i64, Path, description = "Version ID"),
+    ),
+    responses(
+        (status = 200, description = "Version details", body = VersionResponse),
+        (status = 404, description = "Document or version not found")
+    ),
+    tag = "Versions"
+)]
 pub async fn get_version(
     State(state): State<AppState>,
     Path((doc_id, version_id)): Path<(String, i64)>,
@@ -81,7 +105,7 @@ pub async fn get_version(
     match state.doc_repo.get(&doc_id).await {
         Ok(Some(doc)) => {
             if let Some(version) = doc.versions.into_iter().find(|v| v.id == version_id) {
-                Json(VersionResponse::from(version)).into_response()
+                ApiResponse::ok(VersionResponse::from(version)).into_response()
             } else {
                 not_found("Version not found").into_response()
             }
@@ -92,16 +116,21 @@ pub async fn get_version(
 }
 
 /// Find documents with matching content hash (duplicates).
+#[utoipa::path(
+    get,
+    path = "/api/versions/hash/{hash}",
+    params(("hash" = String, Path, description = "Content hash to search for")),
+    responses(
+        (status = 200, description = "Sources containing this hash", body = HashSearchResponse)
+    ),
+    tag = "Versions"
+)]
 pub async fn find_by_hash(
     State(state): State<AppState>,
     Path(hash): Path<String>,
 ) -> impl IntoResponse {
     match state.doc_repo.find_sources_by_hash(&hash, None).await {
-        Ok(sources) => Json(serde_json::json!({
-            "hash": hash,
-            "sources": sources
-        }))
-        .into_response(),
+        Ok(sources) => ApiResponse::ok(HashSearchResponse { hash, sources }).into_response(),
         Err(e) => internal_error(e).into_response(),
     }
 }

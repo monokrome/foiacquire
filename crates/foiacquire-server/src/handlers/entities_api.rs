@@ -6,15 +6,17 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 use super::super::AppState;
+use super::api_types::ApiResponse;
 use super::helpers::{bad_request, internal_error, not_found, paginate, PaginatedResponse};
 use foiacquire::repository::diesel_document::entities::EntityFilter;
 #[cfg(feature = "gis")]
 use foiacquire::services::geolookup;
 
 /// Query parameters for entity search.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct EntitySearchQuery {
     /// Entity text search (LIKE %q%)
     pub q: Option<String>,
@@ -26,7 +28,7 @@ pub struct EntitySearchQuery {
     pub filters: Option<String>,
     /// Raw coordinates: "lat,lon,radius_km"
     pub near: Option<String>,
-    /// Named location: "Moscow,100km" — resolved via geolookup
+    /// Named location: "Moscow,100km" -- resolved via geolookup (requires gis feature)
     pub near_location: Option<String>,
     /// Filter by source
     pub source: Option<String>,
@@ -37,7 +39,7 @@ pub struct EntitySearchQuery {
 }
 
 /// Query parameters for top entities.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct TopEntitiesQuery {
     /// Entity type to get top entries for
     pub entity_type: Option<String>,
@@ -46,14 +48,14 @@ pub struct TopEntitiesQuery {
 }
 
 /// Query parameters for location listing.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct LocationsQuery {
     pub page: Option<usize>,
     pub per_page: Option<usize>,
 }
 
 /// A matched entity in search results.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct MatchedEntity {
     pub entity_type: String,
     pub entity_text: String,
@@ -62,7 +64,7 @@ pub struct MatchedEntity {
 }
 
 /// Single entity search result with document info and matched entities.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct EntitySearchResult {
     pub document_id: String,
     pub title: String,
@@ -71,21 +73,21 @@ pub struct EntitySearchResult {
 }
 
 /// Entity type count for /api/entities/types.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct EntityTypeStats {
     pub entity_type: String,
     pub count: u64,
 }
 
 /// Top entity for /api/entities/top.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct TopEntity {
     pub entity_text: String,
     pub document_count: u64,
 }
 
 /// Geocoded location for /api/entities/locations.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct GeocodedLocation {
     pub entity_text: String,
     pub latitude: f64,
@@ -94,17 +96,24 @@ pub struct GeocodedLocation {
 }
 
 /// Search documents by entity filters.
-/// GET /api/entities/search
+#[utoipa::path(
+    get,
+    path = "/api/entities/search",
+    params(EntitySearchQuery),
+    responses(
+        (status = 200, description = "Paginated entity search results", body = PaginatedResponse<EntitySearchResult>),
+        (status = 400, description = "Missing search parameters")
+    ),
+    tag = "Entities"
+)]
 pub async fn search_entities(
     State(state): State<AppState>,
     Query(params): Query<EntitySearchQuery>,
 ) -> impl IntoResponse {
-    // Handle spatial queries (near raw coordinates)
     if let Some(near_str) = &params.near {
         return handle_near_query(&state, near_str, &params).await;
     }
 
-    // Handle spatial queries (near named location — requires gis feature)
     if let Some(near_loc) = &params.near_location {
         #[cfg(feature = "gis")]
         {
@@ -117,7 +126,6 @@ pub async fn search_entities(
         }
     }
 
-    // Build entity filters
     let mut filters = Vec::new();
 
     if let Some(q) = &params.q {
@@ -130,7 +138,6 @@ pub async fn search_entities(
         }
     }
 
-    // Parse additional filters: "type:text,type:text"
     if let Some(filter_str) = &params.filters {
         for pair in filter_str.split(',') {
             let pair = pair.trim();
@@ -189,7 +196,14 @@ pub async fn search_entities(
 }
 
 /// Get entity type breakdown with counts.
-/// GET /api/entities/types
+#[utoipa::path(
+    get,
+    path = "/api/entities/types",
+    responses(
+        (status = 200, description = "Entity type counts", body = Vec<EntityTypeStats>)
+    ),
+    tag = "Entities"
+)]
 pub async fn entity_types(State(state): State<AppState>) -> impl IntoResponse {
     match state.doc_repo.get_entity_type_counts().await {
         Ok(counts) => {
@@ -197,14 +211,22 @@ pub async fn entity_types(State(state): State<AppState>) -> impl IntoResponse {
                 .into_iter()
                 .map(|(entity_type, count)| EntityTypeStats { entity_type, count })
                 .collect();
-            Json(stats).into_response()
+            ApiResponse::ok(stats).into_response()
         }
         Err(e) => internal_error(e).into_response(),
     }
 }
 
 /// Get most frequent entities by type.
-/// GET /api/entities/top
+#[utoipa::path(
+    get,
+    path = "/api/entities/top",
+    params(TopEntitiesQuery),
+    responses(
+        (status = 200, description = "Top entities", body = Vec<TopEntity>)
+    ),
+    tag = "Entities"
+)]
 pub async fn top_entities(
     State(state): State<AppState>,
     Query(params): Query<TopEntitiesQuery>,
@@ -221,19 +243,27 @@ pub async fn top_entities(
                     document_count,
                 })
                 .collect();
-            Json(items).into_response()
+            ApiResponse::ok(items).into_response()
         }
         Err(e) => internal_error(e).into_response(),
     }
 }
 
 /// Get all entities for a specific document.
-/// GET /api/documents/:doc_id/entities
+#[utoipa::path(
+    get,
+    path = "/api/documents/{doc_id}/entities",
+    params(("doc_id" = String, Path, description = "Document ID")),
+    responses(
+        (status = 200, description = "Document entities", body = Vec<MatchedEntity>),
+        (status = 404, description = "Document not found")
+    ),
+    tag = "Entities"
+)]
 pub async fn document_entities(
     State(state): State<AppState>,
     Path(doc_id): Path<String>,
 ) -> impl IntoResponse {
-    // Check document exists
     match state.doc_repo.get(&doc_id).await {
         Ok(None) => return not_found("Document not found").into_response(),
         Err(e) => return internal_error(e).into_response(),
@@ -251,14 +281,22 @@ pub async fn document_entities(
                     longitude: e.longitude,
                 })
                 .collect();
-            Json(items).into_response()
+            ApiResponse::ok(items).into_response()
         }
         Err(e) => internal_error(e).into_response(),
     }
 }
 
 /// Get geocoded locations with coordinates (for map views).
-/// GET /api/entities/locations
+#[utoipa::path(
+    get,
+    path = "/api/entities/locations",
+    params(LocationsQuery),
+    responses(
+        (status = 200, description = "Geocoded locations", body = PaginatedResponse<GeocodedLocation>)
+    ),
+    tag = "Entities"
+)]
 pub async fn entity_locations(
     State(state): State<AppState>,
     Query(params): Query<LocationsQuery>,
@@ -288,7 +326,6 @@ pub async fn entity_locations(
     Json(PaginatedResponse::new(items, page, per_page, total)).into_response()
 }
 
-/// Handle raw coordinate spatial queries.
 async fn handle_near_query(
     state: &AppState,
     near_str: &str,
@@ -341,13 +378,11 @@ async fn handle_near_query(
 }
 
 #[cfg(feature = "gis")]
-/// Handle named location spatial queries (resolved via geolookup).
 async fn handle_near_location_query(
     state: &AppState,
     near_loc: &str,
     params: &EntitySearchQuery,
 ) -> axum::response::Response {
-    // Parse "LocationName,radiusKm"
     let parts: Vec<&str> = near_loc.rsplitn(2, ',').collect();
     if parts.len() != 2 {
         return bad_request(
@@ -403,7 +438,6 @@ async fn handle_near_location_query(
     Json(PaginatedResponse::new(items, page, per_page, total)).into_response()
 }
 
-/// Build search result objects with document info and matched entities.
 async fn build_search_results(
     state: &AppState,
     doc_ids: &[String],

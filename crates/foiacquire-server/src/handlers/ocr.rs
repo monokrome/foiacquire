@@ -6,11 +6,12 @@ use axum::{
     response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use super::super::{AppState, DeepSeekJobStatus};
 
 /// Request body for re-OCR API.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ReOcrRequest {
     #[serde(default = "default_backend")]
     pub backend: String,
@@ -21,7 +22,7 @@ fn default_backend() -> String {
 }
 
 /// Response for re-OCR API.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ReOcrResponse {
     pub document_id: String,
     pub backend: String,
@@ -32,6 +33,18 @@ pub struct ReOcrResponse {
 }
 
 /// Trigger re-OCR for a document using an alternative backend.
+#[utoipa::path(
+    post,
+    path = "/api/documents/{document_id}/reocr",
+    params(("document_id" = String, Path, description = "Document ID")),
+    request_body = ReOcrRequest,
+    responses(
+        (status = 200, description = "OCR job started", body = ReOcrResponse),
+        (status = 404, description = "Document not found"),
+        (status = 409, description = "Another OCR job is running")
+    ),
+    tag = "OCR"
+)]
 pub async fn api_reocr_document(
     State(state): State<AppState>,
     Path(document_id): Path<String>,
@@ -233,8 +246,8 @@ pub async fn api_reocr_document(
                             result.model.as_deref(),
                             Some(&result.text),
                             result.confidence,
-                            None, // processing_time_ms
-                            None, // image_hash - DeepSeek uses API, not local images
+                            None,
+                            None,
                         )
                         .await
                     {
@@ -294,6 +307,14 @@ pub async fn api_reocr_document(
 }
 
 /// Get the current status of a DeepSeek OCR job.
+#[utoipa::path(
+    get,
+    path = "/api/documents/reocr/status",
+    responses(
+        (status = 200, description = "OCR job status", body = ReOcrResponse)
+    ),
+    tag = "OCR"
+)]
 pub async fn api_reocr_status(State(state): State<AppState>) -> impl IntoResponse {
     let job_status = state.deepseek_job.read().await;
 
