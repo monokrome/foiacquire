@@ -181,7 +181,11 @@ jobs:
 
       - name: Install system dependencies (Windows)
         if: runner.os == 'Windows'
-        run: choco install poppler tesseract -y
+        run: |
+          choco install poppler tesseract -y
+          echo "C:\Program Files\Tesseract-OCR" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "C:\ProgramData\chocolatey\lib\poppler\tools\Library\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: pwsh
 
       - name: Cache cargo registry
         uses: actions/cache@v4
