@@ -9,7 +9,6 @@ use axum::{
 use super::super::AppState;
 use super::helpers::{DateRangeParams, TimelineBucket, TimelineResponse};
 
-/// Convert raw timeline data to a JSON response.
 fn timeline_response<E: std::fmt::Display>(
     result: Result<Vec<(String, i64, u64)>, E>,
 ) -> Json<TimelineResponse> {
@@ -39,6 +38,15 @@ fn timeline_response<E: std::fmt::Display>(
 }
 
 /// Timeline aggregate across all sources.
+#[utoipa::path(
+    get,
+    path = "/api/timeline",
+    params(DateRangeParams),
+    responses(
+        (status = 200, description = "Aggregated timeline data", body = TimelineResponse)
+    ),
+    tag = "Timeline"
+)]
 pub async fn timeline_aggregate(
     State(state): State<AppState>,
     Query(params): Query<DateRangeParams>,
@@ -51,6 +59,18 @@ pub async fn timeline_aggregate(
 }
 
 /// Timeline for a specific source.
+#[utoipa::path(
+    get,
+    path = "/api/timeline/{source_id}",
+    params(
+        ("source_id" = String, Path, description = "Source ID"),
+        DateRangeParams,
+    ),
+    responses(
+        (status = 200, description = "Source-specific timeline data", body = TimelineResponse)
+    ),
+    tag = "Timeline"
+)]
 pub async fn timeline_source(
     State(state): State<AppState>,
     Path(source_id): Path<String>,

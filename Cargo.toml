@@ -160,6 +160,9 @@ bytes = { version = ">=1.11.1" }
 arti-client = { version = "0.37", default-features = false, features = ["tokio", "rustls", "pt-client"] }
 tor-rtcompat = { version = "0.37", default-features = false, features = ["tokio", "rustls"] }
 
+# OpenAPI spec generation
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+
 # System info
 hostname = "0.4.2"
 

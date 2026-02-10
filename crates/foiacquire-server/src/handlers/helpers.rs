@@ -1,38 +1,31 @@
 //! Helper types and utility functions for handlers.
 
-use axum::{http::StatusCode, response::IntoResponse, Json};
+use axum::{http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use super::super::AppState;
+use super::api_types::ApiResponse;
 use foiacquire::models::{Document, DocumentVersion};
 
 /// Create an internal server error response.
 pub fn internal_error(e: impl std::fmt::Display) -> impl IntoResponse {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(serde_json::json!({ "error": e.to_string() })),
-    )
+    ApiResponse::error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
 }
 
 /// Create a not found error response.
-pub fn not_found(message: &str) -> impl IntoResponse {
-    (
-        StatusCode::NOT_FOUND,
-        Json(serde_json::json!({ "error": message })),
-    )
+pub fn not_found(message: &str) -> impl IntoResponse + use<'_> {
+    ApiResponse::error(StatusCode::NOT_FOUND, message.to_string())
 }
 
 /// Create a bad request error response.
 #[allow(dead_code)]
-pub fn bad_request(message: &str) -> impl IntoResponse {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(serde_json::json!({ "error": message })),
-    )
+pub fn bad_request(message: &str) -> impl IntoResponse + use<'_> {
+    ApiResponse::error(StatusCode::BAD_REQUEST, message.to_string())
 }
 
 /// Version summary for API responses.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct VersionSummary {
     pub id: i64,
     pub content_hash: String,
@@ -58,7 +51,7 @@ impl From<&DocumentVersion> for VersionSummary {
 }
 
 /// Document summary for API responses.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct DocumentSummary {
     pub id: String,
     pub source_id: String,
@@ -94,8 +87,8 @@ impl From<Document> for DocumentSummary {
 }
 
 /// Paginated response wrapper.
-#[derive(Debug, Serialize)]
-pub struct PaginatedResponse<T> {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PaginatedResponse<T: Serialize> {
     pub items: Vec<T>,
     pub page: usize,
     pub per_page: usize,
@@ -103,7 +96,7 @@ pub struct PaginatedResponse<T> {
     pub total_pages: u64,
 }
 
-impl<T> PaginatedResponse<T> {
+impl<T: Serialize> PaginatedResponse<T> {
     pub fn new(items: Vec<T>, page: usize, per_page: usize, total: u64) -> Self {
         let total_pages = total.div_ceil(per_page as u64);
         Self {
@@ -117,12 +110,6 @@ impl<T> PaginatedResponse<T> {
 }
 
 /// Parse a comma-separated query parameter into a Vec of trimmed, non-empty strings.
-///
-/// # Example
-/// ```ignore
-/// let types = parse_csv_param(params.types.as_ref());
-/// // "pdf, docx,  " -> ["pdf", "docx"]
-/// ```
 pub fn parse_csv_param(param: Option<&String>) -> Vec<String> {
     parse_csv_param_limit(param, None)
 }
@@ -153,14 +140,14 @@ pub fn paginate(page: Option<usize>, per_page: Option<usize>) -> (usize, usize, 
 }
 
 /// Query params for date range filtering.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct DateRangeParams {
     pub start: Option<String>,
     pub end: Option<String>,
 }
 
 /// Timeline response structure.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct TimelineResponse {
     pub buckets: Vec<TimelineBucket>,
     pub total: u64,
@@ -169,7 +156,7 @@ pub struct TimelineResponse {
 }
 
 /// Single bucket in timeline data.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct TimelineBucket {
     pub date: String,
     pub timestamp: i64,
@@ -177,7 +164,7 @@ pub struct TimelineBucket {
 }
 
 /// Version info for API response.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct VersionInfo {
     pub content_hash: String,
     pub file_size: u64,

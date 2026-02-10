@@ -2,17 +2,21 @@
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
     response::IntoResponse,
     Json,
 };
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 use super::super::AppState;
+use super::api_types::{
+    AnnotationListStats, AnnotationsListResponse, ApiResponse, UpdateAnnotationResponse,
+};
+use super::helpers::{internal_error, not_found};
 use foiacquire::repository::diesel_document::BrowseParams;
 
 /// Query params for annotations listing.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct AnnotationsQuery {
     /// Filter by source ID
     pub source: Option<String>,
@@ -25,7 +29,7 @@ pub struct AnnotationsQuery {
 }
 
 /// Annotation response.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AnnotationResponse {
     pub document_id: String,
     pub title: String,
@@ -35,13 +39,22 @@ pub struct AnnotationResponse {
 }
 
 /// Update annotation request.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateAnnotationRequest {
     pub synopsis: Option<String>,
     pub tags: Option<Vec<String>>,
 }
 
 /// List documents with their annotations.
+#[utoipa::path(
+    get,
+    path = "/api/annotations",
+    params(AnnotationsQuery),
+    responses(
+        (status = 200, description = "Annotations listing", body = AnnotationsListResponse)
+    ),
+    tag = "Annotations"
+)]
 pub async fn list_annotations(
     State(state): State<AppState>,
     Query(params): Query<AnnotationsQuery>,
@@ -49,7 +62,6 @@ pub async fn list_annotations(
     let per_page = params.per_page.unwrap_or(50).clamp(1, 200);
     let page = params.page.unwrap_or(1).clamp(1, 100_000);
 
-    // Get documents based on filter
     let documents = if params.needs_annotation.unwrap_or(false) {
         state
             .doc_repo
@@ -81,7 +93,6 @@ pub async fn list_annotations(
         })
         .collect();
 
-    // Get counts
     let total_annotated = state
         .doc_repo
         .count_annotated(params.source.as_deref())
@@ -93,25 +104,35 @@ pub async fn list_annotations(
         .await
         .unwrap_or(0);
 
-    Json(serde_json::json!({
-        "items": items,
-        "page": page,
-        "per_page": per_page,
-        "stats": {
-            "annotated": total_annotated,
-            "needing_annotation": total_needing
-        }
-    }))
+    ApiResponse::ok(AnnotationsListResponse {
+        items,
+        page,
+        per_page,
+        stats: AnnotationListStats {
+            annotated: total_annotated,
+            needing_annotation: total_needing,
+        },
+    })
     .into_response()
 }
 
 /// Get annotation for a specific document.
+#[utoipa::path(
+    get,
+    path = "/api/annotations/{doc_id}",
+    params(("doc_id" = String, Path, description = "Document ID")),
+    responses(
+        (status = 200, description = "Annotation details", body = AnnotationResponse),
+        (status = 404, description = "Document not found")
+    ),
+    tag = "Annotations"
+)]
 pub async fn get_annotation(
     State(state): State<AppState>,
     Path(doc_id): Path<String>,
 ) -> impl IntoResponse {
     match state.doc_repo.get(&doc_id).await {
-        Ok(Some(doc)) => Json(AnnotationResponse {
+        Ok(Some(doc)) => ApiResponse::ok(AnnotationResponse {
             document_id: doc.id,
             title: doc.title,
             synopsis: doc.synopsis,
@@ -119,72 +140,56 @@ pub async fn get_annotation(
             has_annotation: true,
         })
         .into_response(),
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "Document not found" })),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Ok(None) => not_found("Document not found").into_response(),
+        Err(e) => internal_error(e).into_response(),
     }
 }
 
 /// Update annotation for a document.
+#[utoipa::path(
+    put,
+    path = "/api/annotations/{doc_id}",
+    params(("doc_id" = String, Path, description = "Document ID")),
+    request_body = UpdateAnnotationRequest,
+    responses(
+        (status = 200, description = "Updated annotation", body = UpdateAnnotationResponse),
+        (status = 404, description = "Document not found")
+    ),
+    tag = "Annotations"
+)]
 pub async fn update_annotation(
     State(state): State<AppState>,
     Path(doc_id): Path<String>,
     Json(body): Json<UpdateAnnotationRequest>,
 ) -> impl IntoResponse {
-    // First get the document
     let doc = match state.doc_repo.get(&doc_id).await {
         Ok(Some(d)) => d,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "Document not found" })),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
-                .into_response();
-        }
+        Ok(None) => return not_found("Document not found").into_response(),
+        Err(e) => return internal_error(e).into_response(),
     };
 
-    // Build the annotation
     let synopsis = body.synopsis.or(doc.synopsis);
     let tags = body.tags.unwrap_or(doc.tags);
 
-    // Update the annotation
     if let Err(e) = state
         .doc_repo
         .update_synopsis_and_tags(&doc_id, synopsis.as_deref(), &tags)
         .await
     {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response();
+        return internal_error(e).into_response();
     }
 
-    Json(serde_json::json!({
-        "document_id": doc_id,
-        "synopsis": synopsis,
-        "tags": tags,
-        "updated": true
-    }))
+    ApiResponse::ok(UpdateAnnotationResponse {
+        document_id: doc_id,
+        synopsis,
+        tags,
+        updated: true,
+    })
     .into_response()
 }
 
 /// Annotation stats response.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AnnotationStats {
     pub total_documents: u64,
     pub annotated: u64,
@@ -192,7 +197,7 @@ pub struct AnnotationStats {
     pub by_source: Vec<SourceAnnotationStats>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct SourceAnnotationStats {
     pub source_id: String,
     pub annotated: u64,
@@ -200,6 +205,14 @@ pub struct SourceAnnotationStats {
 }
 
 /// Get annotation statistics.
+#[utoipa::path(
+    get,
+    path = "/api/annotations/stats",
+    responses(
+        (status = 200, description = "Annotation statistics", body = AnnotationStats)
+    ),
+    tag = "Annotations"
+)]
 pub async fn annotation_stats(State(state): State<AppState>) -> impl IntoResponse {
     let total = state.doc_repo.count().await.unwrap_or(0);
     let annotated = state.doc_repo.count_annotated(None).await.unwrap_or(0);
@@ -209,7 +222,6 @@ pub async fn annotation_stats(State(state): State<AppState>) -> impl IntoRespons
         .await
         .unwrap_or(0);
 
-    // Get per-source stats
     let source_counts = state
         .doc_repo
         .get_all_source_counts()
@@ -235,7 +247,7 @@ pub async fn annotation_stats(State(state): State<AppState>) -> impl IntoRespons
         });
     }
 
-    Json(AnnotationStats {
+    ApiResponse::ok(AnnotationStats {
         total_documents: total,
         annotated,
         needing_annotation: needing,
