@@ -22,7 +22,7 @@ use super::versions_api;
     info(
         title = "FOIAcquire API",
         description = "FOIA document acquisition and research system",
-        version = "0.11.3"
+        version = "0.12.0"
     ),
     paths(
         // Health
