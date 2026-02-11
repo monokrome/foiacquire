@@ -962,54 +962,68 @@ impl DieselDocumentRepository {
     ) -> Result<Vec<Document>, DieselError> {
         let ids: Vec<DocIdRow> = with_conn_split!(self.pool,
             sqlite: conn => {
-                let query = if let Some(sid) = source_id {
-                    format!(
-                        r#"SELECT id FROM documents
-                           WHERE source_id = '{}'
-                           AND EXISTS (
-                               SELECT 1 FROM json_each(json_extract(metadata, '$.tags'))
-                               WHERE value = '{}'
-                           )
-                           ORDER BY updated_at DESC"#,
-                        sid.replace('\'', "''"),
-                        tag.replace('\'', "''")
+                if let Some(sid) = source_id {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(
+                            r#"SELECT id FROM documents
+                               WHERE source_id = $1
+                               AND EXISTS (
+                                   SELECT 1 FROM json_each(json_extract(metadata, '$.tags'))
+                                   WHERE value = $2
+                               )
+                               ORDER BY updated_at DESC"#,
+                        )
+                        .bind::<diesel::sql_types::Text, _>(sid)
+                        .bind::<diesel::sql_types::Text, _>(tag),
+                        &mut conn,
                     )
-                } else {
-                    format!(
-                        r#"SELECT id FROM documents
-                           WHERE EXISTS (
-                               SELECT 1 FROM json_each(json_extract(metadata, '$.tags'))
-                               WHERE value = '{}'
-                           )
-                           ORDER BY updated_at DESC"#,
-                        tag.replace('\'', "''")
-                    )
-                };
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
                     .await
                     .unwrap_or_default()
+                } else {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(
+                            r#"SELECT id FROM documents
+                               WHERE EXISTS (
+                                   SELECT 1 FROM json_each(json_extract(metadata, '$.tags'))
+                                   WHERE value = $1
+                               )
+                               ORDER BY updated_at DESC"#,
+                        )
+                        .bind::<diesel::sql_types::Text, _>(tag),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                }
             },
             postgres: conn => {
-                let query = if let Some(sid) = source_id {
-                    format!(
-                        r#"SELECT id FROM documents
-                           WHERE source_id = '{}'
-                           AND metadata->'tags' ? '{}'
-                           ORDER BY updated_at DESC"#,
-                        sid.replace('\'', "''"),
-                        tag.replace('\'', "''")
+                if let Some(sid) = source_id {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(
+                            r#"SELECT id FROM documents
+                               WHERE source_id = $1
+                               AND metadata->'tags' ? $2
+                               ORDER BY updated_at DESC"#,
+                        )
+                        .bind::<diesel::sql_types::Text, _>(sid)
+                        .bind::<diesel::sql_types::Text, _>(tag),
+                        &mut conn,
                     )
-                } else {
-                    format!(
-                        r#"SELECT id FROM documents
-                           WHERE metadata->'tags' ? '{}'
-                           ORDER BY updated_at DESC"#,
-                        tag.replace('\'', "''")
-                    )
-                };
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
                     .await
                     .unwrap_or_default()
+                } else {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(
+                            r#"SELECT id FROM documents
+                               WHERE metadata->'tags' ? $1
+                               ORDER BY updated_at DESC"#,
+                        )
+                        .bind::<diesel::sql_types::Text, _>(tag),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                }
             }
         );
 
@@ -1029,14 +1043,17 @@ impl DieselDocumentRepository {
             return Ok(vec![]);
         }
 
+        // mime_patterns come from category_to_mime_patterns (internal, safe values)
         let mime_conditions: Vec<String> = mime_patterns
             .iter()
-            .map(|p| format!("dv.mime_type LIKE '{}'", p.replace('\'', "''")))
+            .map(|p| format!("dv.mime_type LIKE '{}'", p))
             .collect();
 
-        let source_filter = source_id
-            .map(|s| format!("AND d.source_id = '{}'", s.replace('\'', "''")))
-            .unwrap_or_default();
+        let source_filter = if source_id.is_some() {
+            "AND d.source_id = $1"
+        } else {
+            ""
+        };
 
         let query = format!(
             r#"SELECT DISTINCT d.id
@@ -1052,9 +1069,19 @@ impl DieselDocumentRepository {
         );
 
         let ids: Vec<DocIdRow> = with_conn!(self.pool, conn, {
-            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+            if let Some(sid) = source_id {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(&query)
+                        .bind::<diesel::sql_types::Text, _>(sid),
+                    &mut conn,
+                )
                 .await
                 .unwrap_or_default()
+            } else {
+                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                    .await
+                    .unwrap_or_default()
+            }
         });
 
         let doc_ids: Vec<String> = ids.into_iter().map(|r| r.id).collect();
@@ -1200,34 +1227,64 @@ impl DieselDocumentRepository {
         source_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Document>, DieselError> {
-        let source_filter = source_id
-            .map(|s| format!("AND source_id = '{}'", s.replace('\'', "''")))
-            .unwrap_or_default();
-
         let ids: Vec<DocIdRow> = with_conn_split!(self.pool,
             sqlite: conn => {
-                let query = format!(
-                    r#"SELECT id FROM documents
-                       WHERE json_extract(metadata, '$.estimated_date') IS NULL
-                       {}
-                       LIMIT {}"#,
-                    source_filter, limit
-                );
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                if let Some(sid) = source_id {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT id FROM documents
+                               WHERE json_extract(metadata, '$.estimated_date') IS NULL
+                               AND source_id = $1
+                               LIMIT {}"#,
+                            limit
+                        ))
+                        .bind::<diesel::sql_types::Text, _>(sid),
+                        &mut conn,
+                    )
                     .await
                     .unwrap_or_default()
+                } else {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT id FROM documents
+                               WHERE json_extract(metadata, '$.estimated_date') IS NULL
+                               LIMIT {}"#,
+                            limit
+                        )),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                }
             },
             postgres: conn => {
-                let query = format!(
-                    r#"SELECT id FROM documents
-                       WHERE metadata->>'estimated_date' IS NULL
-                       {}
-                       LIMIT {}"#,
-                    source_filter, limit
-                );
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                if let Some(sid) = source_id {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT id FROM documents
+                               WHERE metadata->>'estimated_date' IS NULL
+                               AND source_id = $1
+                               LIMIT {}"#,
+                            limit
+                        ))
+                        .bind::<diesel::sql_types::Text, _>(sid),
+                        &mut conn,
+                    )
                     .await
                     .unwrap_or_default()
+                } else {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT id FROM documents
+                               WHERE metadata->>'estimated_date' IS NULL
+                               LIMIT {}"#,
+                            limit
+                        )),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                }
             }
         );
 

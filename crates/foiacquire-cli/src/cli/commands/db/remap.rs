@@ -6,7 +6,11 @@ use std::time::Duration;
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 
+use diesel::ExpressionMethods;
+use diesel_async::RunQueryDsl;
+
 use foiacquire::config::Settings;
+use foiacquire::schema::documents;
 use foiacquire::utils::mime_type_category;
 
 /// Remap document categories based on MIME types.
@@ -19,8 +23,6 @@ pub async fn cmd_db_remap_categories(
     dry_run: bool,
     batch_size: usize,
 ) -> anyhow::Result<()> {
-    use diesel_async::RunQueryDsl;
-
     println!(
         "{} Remapping document categories based on MIME types{}",
         style("→").cyan(),
@@ -121,21 +123,12 @@ pub async fn cmd_db_remap_categories(
                     continue;
                 }
 
-                // Build IN clause with escaped IDs
-                let escaped_ids: Vec<String> = doc_ids
-                    .iter()
-                    .map(|id| format!("'{}'", id.replace('\'', "''")))
-                    .collect();
-                let in_clause = escaped_ids.join(", ");
-
                 foiacquire::with_conn!(pool, conn, {
-                    diesel::sql_query(format!(
-                        "UPDATE documents SET category_id = '{}' WHERE id IN ({})",
-                        category.replace('\'', "''"),
-                        in_clause
-                    ))
-                    .execute(&mut conn)
-                    .await
+                    diesel::update(documents::table)
+                        .filter(documents::id.eq_any(&doc_ids))
+                        .set(documents::category_id.eq(Some(&category)))
+                        .execute(&mut conn)
+                        .await
                 })?;
 
                 total_updated += doc_ids.len() as u64;

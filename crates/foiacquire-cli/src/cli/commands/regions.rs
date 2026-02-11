@@ -1,6 +1,8 @@
 //! Region boundary data loading command.
 
 use console::style;
+#[cfg(feature = "postgres")]
+use diesel_async::SimpleAsyncConnection;
 
 use foiacquire::config::Settings;
 
@@ -37,7 +39,7 @@ pub async fn cmd_load_regions(settings: &Settings, file: Option<&str>) -> anyhow
     foiacquire::with_conn_split!(doc_repo.pool,
         sqlite: _conn => Ok::<_, diesel::result::Error>(()),
         postgres: conn => {
-            use diesel_async::SimpleAsyncConnection;
+
             conn.batch_execute("CREATE EXTENSION IF NOT EXISTS postgis").await?;
             Ok(())
         }
@@ -47,7 +49,7 @@ pub async fn cmd_load_regions(settings: &Settings, file: Option<&str>) -> anyhow
     foiacquire::with_conn_split!(doc_repo.pool,
         sqlite: _conn => Ok::<_, diesel::result::Error>(()),
         postgres: conn => {
-            use diesel_async::SimpleAsyncConnection;
+
             conn.batch_execute(
                 r#"CREATE TABLE IF NOT EXISTS regions (
                     id SERIAL PRIMARY KEY,
@@ -153,39 +155,33 @@ async fn load_geojson_features(
             .map(|s| s.to_string());
 
         let geom_str = serde_json::to_string(geometry)?;
-        let safe_name = name.replace('\'', "''");
-        let safe_iso = iso_code
-            .as_deref()
-            .map(|s| format!("'{}'", s.replace('\'', "''")))
-            .unwrap_or_else(|| "NULL".to_string());
 
         // Convert geometry type if needed (Polygon -> MultiPolygon)
         let geom_type = geometry.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
         let geom_expr = if geom_type == "Polygon" {
-            format!(
-                "ST_Multi(ST_GeomFromGeoJSON('{}'))::geography",
-                geom_str.replace('\'', "''")
-            )
+            "ST_Multi(ST_GeomFromGeoJSON($4))::geography"
         } else {
-            format!(
-                "ST_GeomFromGeoJSON('{}')::geography",
-                geom_str.replace('\'', "''")
-            )
+            "ST_GeomFromGeoJSON($4)::geography"
         };
 
         let result = foiacquire::with_conn_split!(doc_repo.pool,
             sqlite: _conn => Ok::<_, diesel::result::Error>(()),
             postgres: conn => {
-                use diesel_async::SimpleAsyncConnection;
                 let insert_sql = format!(
                     "INSERT INTO regions (name, region_type, iso_code, geom) \
-                     VALUES ('{}', '{}', {}, {}) \
+                     VALUES ($1, $2, $3, {}) \
                      ON CONFLICT (name, region_type) DO UPDATE \
                      SET iso_code = EXCLUDED.iso_code, geom = EXCLUDED.geom",
-                    safe_name, region_type, safe_iso, geom_expr
+                    geom_expr
                 );
-                conn.batch_execute(&insert_sql).await?;
+                diesel::sql_query(&insert_sql)
+                    .bind::<diesel::sql_types::Text, _>(&name)
+                    .bind::<diesel::sql_types::Text, _>(region_type)
+                    .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(iso_code.as_deref())
+                    .bind::<diesel::sql_types::Text, _>(&geom_str)
+                    .execute(&mut conn)
+                    .await?;
                 Ok(())
             }
         );

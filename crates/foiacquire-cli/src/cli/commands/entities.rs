@@ -5,6 +5,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use foiacquire::config::Settings;
 use foiacquire::repository::diesel_document::entities::EntityFilter;
+use foiacquire::repository::diesel_document::DocIdRow;
 use foiacquire::repository::diesel_models::NewDocumentEntity;
 #[cfg(feature = "gis")]
 use foiacquire::services::geolookup;
@@ -22,9 +23,11 @@ pub async fn cmd_backfill_entities(
     let ctx = settings.create_db_context()?;
     let doc_repo = ctx.documents();
 
-    let source_filter = source_id
-        .map(|s| format!("AND d.source_id = '{}'", s.replace('\'', "''")))
-        .unwrap_or_default();
+    let source_filter = if source_id.is_some() {
+        "AND d.source_id = $1"
+    } else {
+        ""
+    };
 
     let limit_clause = if limit > 0 {
         format!("LIMIT {}", limit)
@@ -45,9 +48,16 @@ pub async fn cmd_backfill_entities(
         source_filter, limit_clause
     );
 
-    use foiacquire::repository::diesel_document::DocIdRow;
     let doc_ids: Vec<DocIdRow> = foiacquire::with_conn!(doc_repo.pool, conn, {
-        diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await
+        if let Some(sid) = source_id {
+            diesel_async::RunQueryDsl::load(
+                diesel::sql_query(&query).bind::<diesel::sql_types::Text, _>(sid),
+                &mut conn,
+            )
+            .await
+        } else {
+            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await
+        }
     })?;
 
     if doc_ids.is_empty() {

@@ -6,7 +6,13 @@ use std::time::Duration;
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 
+use diesel::{ExpressionMethods, QueryDsl};
+use diesel_async::RunQueryDsl;
+
 use foiacquire::config::Settings;
+use foiacquire::schema::{
+    document_analysis_results, document_pages, document_versions, documents, virtual_files,
+};
 
 /// Strategy for choosing which document to keep during deduplication.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,8 +50,6 @@ pub async fn cmd_db_dedup(
     same_source: bool,
     batch_size: usize,
 ) -> anyhow::Result<()> {
-    use diesel_async::RunQueryDsl;
-
     let strategy = KeepStrategy::from_str(keep)?;
 
     println!(
@@ -128,17 +132,12 @@ pub async fn cmd_db_dedup(
     let mut total_deleted = 0u64;
     let mut total_refs_updated = 0u64;
 
-    // Helper to escape SQL string
-    fn escape_sql(s: &str) -> String {
-        s.replace('\'', "''")
-    }
-
-    // Helper to build IN clause from IDs
-    fn build_in_clause(ids: &[String]) -> String {
-        ids.iter()
-            .map(|id| format!("'{}'", escape_sql(id)))
-            .collect::<Vec<_>>()
-            .join(", ")
+    // Inline schema for document_annotations (not in main schema.rs)
+    diesel::table! {
+        document_annotations (id) {
+            id -> Integer,
+            document_id -> Text,
+        }
     }
 
     // Process in batches - collect all deletes for a batch, then execute
@@ -231,83 +230,90 @@ pub async fn cmd_db_dedup(
             }
 
             for (keeper_id, dup_ids) in &updates_by_keeper {
-                let in_clause = build_in_clause(dup_ids);
-
                 // Update analysis_results
-                let query = format!(
-                    "UPDATE document_analysis_results SET document_id = '{}' WHERE document_id IN ({})",
-                    escape_sql(keeper_id),
-                    in_clause
-                );
                 let updated: usize = foiacquire::with_conn!(pool, conn, {
-                    diesel::sql_query(&query).execute(&mut conn).await
+                    diesel::update(
+                        document_analysis_results::table
+                            .filter(document_analysis_results::document_id.eq_any(dup_ids)),
+                    )
+                    .set(document_analysis_results::document_id.eq(keeper_id))
+                    .execute(&mut conn)
+                    .await
                 })?;
                 total_refs_updated += updated as u64;
 
                 // Update annotations
-                let query = format!(
-                    "UPDATE document_annotations SET document_id = '{}' WHERE document_id IN ({})",
-                    escape_sql(keeper_id),
-                    in_clause
-                );
                 let updated: usize = foiacquire::with_conn!(pool, conn, {
-                    diesel::sql_query(&query).execute(&mut conn).await
+                    diesel::update(
+                        document_annotations::table
+                            .filter(document_annotations::document_id.eq_any(dup_ids)),
+                    )
+                    .set(document_annotations::document_id.eq(keeper_id))
+                    .execute(&mut conn)
+                    .await
                 })?;
                 total_refs_updated += updated as u64;
             }
 
             // Batch delete in order respecting foreign keys
-            let in_clause = build_in_clause(&batch_deletes);
 
             // 1. document_pages
-            let query = format!(
-                "DELETE FROM document_pages WHERE document_id IN ({})",
-                in_clause
-            );
             foiacquire::with_conn!(pool, conn, {
-                diesel::sql_query(&query).execute(&mut conn).await
+                diesel::delete(
+                    document_pages::table
+                        .filter(document_pages::document_id.eq_any(&batch_deletes)),
+                )
+                .execute(&mut conn)
+                .await
             })?;
 
             // 2. virtual_files
-            let query = format!(
-                "DELETE FROM virtual_files WHERE document_id IN ({})",
-                in_clause
-            );
             foiacquire::with_conn!(pool, conn, {
-                diesel::sql_query(&query).execute(&mut conn).await
+                diesel::delete(
+                    virtual_files::table
+                        .filter(virtual_files::document_id.eq_any(&batch_deletes)),
+                )
+                .execute(&mut conn)
+                .await
             })?;
 
             // 3. document_versions
-            let query = format!(
-                "DELETE FROM document_versions WHERE document_id IN ({})",
-                in_clause
-            );
             foiacquire::with_conn!(pool, conn, {
-                diesel::sql_query(&query).execute(&mut conn).await
+                diesel::delete(
+                    document_versions::table
+                        .filter(document_versions::document_id.eq_any(&batch_deletes)),
+                )
+                .execute(&mut conn)
+                .await
             })?;
 
             // 4. document_analysis_results (any remaining)
-            let query = format!(
-                "DELETE FROM document_analysis_results WHERE document_id IN ({})",
-                in_clause
-            );
             foiacquire::with_conn!(pool, conn, {
-                diesel::sql_query(&query).execute(&mut conn).await
+                diesel::delete(
+                    document_analysis_results::table
+                        .filter(document_analysis_results::document_id.eq_any(&batch_deletes)),
+                )
+                .execute(&mut conn)
+                .await
             })?;
 
             // 5. document_annotations (any remaining)
-            let query = format!(
-                "DELETE FROM document_annotations WHERE document_id IN ({})",
-                in_clause
-            );
             foiacquire::with_conn!(pool, conn, {
-                diesel::sql_query(&query).execute(&mut conn).await
+                diesel::delete(
+                    document_annotations::table
+                        .filter(document_annotations::document_id.eq_any(&batch_deletes)),
+                )
+                .execute(&mut conn)
+                .await
             })?;
 
             // 6. documents
-            let query = format!("DELETE FROM documents WHERE id IN ({})", in_clause);
             foiacquire::with_conn!(pool, conn, {
-                diesel::sql_query(&query).execute(&mut conn).await
+                diesel::delete(
+                    documents::table.filter(documents::id.eq_any(&batch_deletes)),
+                )
+                .execute(&mut conn)
+                .await
             })?;
         }
 

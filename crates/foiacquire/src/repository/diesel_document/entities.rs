@@ -3,6 +3,7 @@
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 
+#[allow(unused_imports)]
 use super::{CountRow, DieselDocumentRepository, DocIdRow};
 use crate::repository::diesel_models::{DocumentEntityRecord, NewDocumentEntity};
 use crate::repository::pool::DieselError;
@@ -132,17 +133,8 @@ impl DieselDocumentRepository {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<String>, DieselError> {
-        if filters.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let query = build_entity_search_sql(filters, source_id, Some(limit), Some(offset));
-
-        with_conn!(self.pool, conn, {
-            let rows: Vec<DocIdRow> =
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
-            Ok(rows.into_iter().map(|r| r.id).collect())
-        })
+        let all_ids = self.entity_filter_intersection(filters, source_id).await?;
+        Ok(all_ids.into_iter().skip(offset).take(limit).collect())
     }
 
     /// Count documents matching ALL entity filters.
@@ -151,18 +143,81 @@ impl DieselDocumentRepository {
         filters: &[EntityFilter],
         source_id: Option<&str>,
     ) -> Result<u64, DieselError> {
+        let all_ids = self.entity_filter_intersection(filters, source_id).await?;
+        Ok(all_ids.len() as u64)
+    }
+
+    /// Get all document IDs matching ALL entity filters (AND semantics).
+    async fn entity_filter_intersection(
+        &self,
+        filters: &[EntityFilter],
+        source_id: Option<&str>,
+    ) -> Result<Vec<String>, DieselError> {
         if filters.is_empty() {
-            return Ok(0);
+            return Ok(vec![]);
         }
 
-        let inner_query = build_entity_search_sql(filters, source_id, None, None);
-        let count_query = format!("SELECT COUNT(*) as count FROM ({}) sub", inner_query);
+        if filters.len() == 1 {
+            return self
+                .search_single_entity_filter(&filters[0], source_id)
+                .await;
+        }
+
+        let mut result_sets: Vec<std::collections::HashSet<String>> = Vec::new();
+        for filter in filters {
+            let ids = self
+                .search_single_entity_filter(filter, source_id)
+                .await?;
+            result_sets.push(ids.into_iter().collect());
+        }
+
+        let mut intersection = result_sets.remove(0);
+        for set in &result_sets {
+            intersection.retain(|id| set.contains(id));
+        }
+
+        let mut sorted: Vec<String> = intersection.into_iter().collect();
+        sorted.sort();
+        Ok(sorted)
+    }
+
+    /// Execute a single entity filter using Diesel query builder.
+    async fn search_single_entity_filter(
+        &self,
+        filter: &EntityFilter,
+        source_id: Option<&str>,
+    ) -> Result<Vec<String>, DieselError> {
+        let lower_text = filter.text.to_lowercase();
 
         with_conn!(self.pool, conn, {
-            let rows: Vec<CountRow> =
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&count_query), &mut conn).await?;
-            #[allow(clippy::get_first)]
-            Ok(rows.get(0).map(|r| r.count as u64).unwrap_or(0))
+            let mut query = document_entities::table
+                .select(document_entities::document_id)
+                .distinct()
+                .into_boxed();
+
+            if filter.exact {
+                query = query.filter(document_entities::normalized_text.eq(&lower_text));
+            } else {
+                let pattern = format!("%{}%", lower_text);
+                query = query.filter(document_entities::normalized_text.like(pattern));
+            }
+
+            if let Some(ref entity_type) = filter.entity_type {
+                query = query.filter(document_entities::entity_type.eq(entity_type));
+            }
+
+            if let Some(sid) = source_id {
+                use crate::schema::documents;
+                let source_doc_ids = documents::table
+                    .filter(documents::source_id.eq(sid))
+                    .select(documents::id);
+                query =
+                    query.filter(document_entities::document_id.eq_any(source_doc_ids));
+            }
+
+            query.order(document_entities::document_id.asc())
+                .load::<String>(&mut conn)
+                .await
         })
     }
 
@@ -259,18 +314,21 @@ impl DieselDocumentRepository {
                 ))
             },
             postgres: conn => {
-                let safe_name = region_name.replace('\'', "''");
                 let query = format!(
                     r#"SELECT DISTINCT de.document_id as id
                     FROM document_entities de
                     JOIN regions r ON ST_Covers(r.geom, ST_MakePoint(de.longitude, de.latitude)::geography)
-                    WHERE de.latitude IS NOT NULL AND lower(r.name) = lower('{}')
+                    WHERE de.latitude IS NOT NULL AND lower(r.name) = lower($1)
                     ORDER BY de.document_id
                     LIMIT {} OFFSET {}"#,
-                    safe_name, limit, offset
+                    limit, offset
                 );
-                let rows: Vec<DocIdRow> =
-                    diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
+                let rows: Vec<DocIdRow> = diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(&query)
+                        .bind::<diesel::sql_types::Text, _>(region_name),
+                    &mut conn,
+                )
+                .await?;
                 Ok(rows.into_iter().map(|r| r.id).collect())
             }
         )
@@ -295,18 +353,21 @@ impl DieselDocumentRepository {
                 ))
             },
             postgres: conn => {
-                let safe_name = region_name.replace('\'', "''");
                 let query = format!(
                     r#"SELECT DISTINCT de.document_id as id
                     FROM document_entities de
                     JOIN regions r ON ST_DWithin(r.geom, ST_MakePoint(de.longitude, de.latitude)::geography, {})
-                    WHERE de.latitude IS NOT NULL AND lower(r.name) = lower('{}')
+                    WHERE de.latitude IS NOT NULL AND lower(r.name) = lower($1)
                     ORDER BY de.document_id
                     LIMIT {} OFFSET {}"#,
-                    radius_meters, safe_name, limit, offset
+                    radius_meters, limit, offset
                 );
-                let rows: Vec<DocIdRow> =
-                    diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
+                let rows: Vec<DocIdRow> = diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(&query)
+                        .bind::<diesel::sql_types::Text, _>(region_name),
+                    &mut conn,
+                )
+                .await?;
                 Ok(rows.into_iter().map(|r| r.id).collect())
             }
         )
@@ -332,17 +393,20 @@ impl DieselDocumentRepository {
         entity_type: &str,
         limit: usize,
     ) -> Result<Vec<(String, u64)>, DieselError> {
-        let safe_type = entity_type.replace('\'', "''");
         let query = format!(
             "SELECT entity_text, COUNT(DISTINCT document_id) as count \
-             FROM document_entities WHERE entity_type = '{}' \
+             FROM document_entities WHERE entity_type = $1 \
              GROUP BY entity_text ORDER BY count DESC LIMIT {}",
-            safe_type, limit
+            limit
         );
 
         with_conn!(self.pool, conn, {
-            let rows: Vec<EntityTextCount> =
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
+            let rows: Vec<EntityTextCount> = diesel_async::RunQueryDsl::load(
+                diesel::sql_query(&query)
+                    .bind::<diesel::sql_types::Text, _>(entity_type),
+                &mut conn,
+            )
+            .await?;
             Ok(rows
                 .into_iter()
                 .map(|r| (r.entity_text, r.count as u64))
@@ -381,64 +445,6 @@ impl DieselDocumentRepository {
     }
 }
 
-/// Build the SQL query string for entity search with multiple filters.
-/// All filters must match (AND semantics via INTERSECT).
-fn build_entity_search_sql(
-    filters: &[EntityFilter],
-    source_id: Option<&str>,
-    limit: Option<usize>,
-    offset: Option<usize>,
-) -> String {
-    let source_join = if source_id.is_some() {
-        "JOIN documents d ON de.document_id = d.id"
-    } else {
-        ""
-    };
-
-    let source_filter = source_id
-        .map(|s| format!("AND d.source_id = '{}'", s.replace('\'', "''")))
-        .unwrap_or_default();
-
-    let subqueries: Vec<String> = filters
-        .iter()
-        .map(|f| {
-            let type_filter = f
-                .entity_type
-                .as_ref()
-                .map(|t| format!("AND de.entity_type = '{}'", t.replace('\'', "''")))
-                .unwrap_or_default();
-
-            let safe_text = f.text.to_lowercase().replace('\'', "''");
-            let text_filter = if f.exact {
-                format!("de.normalized_text = '{}'", safe_text)
-            } else {
-                format!("de.normalized_text LIKE '%{}%'", safe_text)
-            };
-
-            format!(
-                "SELECT de.document_id as id FROM document_entities de {} WHERE {} {} {}",
-                source_join, text_filter, type_filter, source_filter
-            )
-        })
-        .collect();
-
-    let combined = if subqueries.len() == 1 {
-        format!("SELECT DISTINCT id FROM ({})", subqueries[0])
-    } else {
-        subqueries.join(" INTERSECT ")
-    };
-
-    let mut query = format!("SELECT DISTINCT id FROM ({}) sub ORDER BY id", combined);
-
-    if let Some(lim) = limit {
-        query.push_str(&format!(" LIMIT {}", lim));
-    }
-    if let Some(off) = offset {
-        query.push_str(&format!(" OFFSET {}", off));
-    }
-
-    query
-}
 
 #[cfg(test)]
 mod tests {

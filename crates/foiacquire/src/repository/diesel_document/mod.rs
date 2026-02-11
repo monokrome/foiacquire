@@ -360,29 +360,46 @@ impl DieselDocumentRepository {
         &self,
         source_id: Option<&str>,
     ) -> Result<u64, DieselError> {
-        let source_filter = source_id
-            .map(|s| format!("AND d.source_id = '{}'", s.replace('\'', "''")))
-            .unwrap_or_default();
-
-        let query = format!(
-            r#"SELECT COUNT(DISTINCT d.id) as count
-               FROM documents d
-               JOIN document_versions dv ON d.id = dv.document_id
-               WHERE d.status IN ('pending', 'downloaded')
-               AND (dv.mime_type = 'application/zip'
-                    OR dv.mime_type = 'application/x-zip'
-                    OR dv.mime_type = 'application/x-zip-compressed'
-                    OR dv.mime_type = 'application/x-tar'
-                    OR dv.mime_type = 'application/gzip'
-                    OR dv.mime_type = 'application/x-rar-compressed'
-                    OR dv.mime_type = 'application/x-7z-compressed')
-               {}"#,
-            source_filter
-        );
-
         with_conn!(self.pool, conn, {
-            let result: Vec<CountRow> =
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
+            let result: Vec<CountRow> = if let Some(sid) = source_id {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(
+                        r#"SELECT COUNT(DISTINCT d.id) as count
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type = 'application/zip'
+                                OR dv.mime_type = 'application/x-zip'
+                                OR dv.mime_type = 'application/x-zip-compressed'
+                                OR dv.mime_type = 'application/x-tar'
+                                OR dv.mime_type = 'application/gzip'
+                                OR dv.mime_type = 'application/x-rar-compressed'
+                                OR dv.mime_type = 'application/x-7z-compressed')
+                           AND d.source_id = $1"#,
+                    )
+                    .bind::<diesel::sql_types::Text, _>(sid),
+                    &mut conn,
+                )
+                .await?
+            } else {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(
+                        r#"SELECT COUNT(DISTINCT d.id) as count
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type = 'application/zip'
+                                OR dv.mime_type = 'application/x-zip'
+                                OR dv.mime_type = 'application/x-zip-compressed'
+                                OR dv.mime_type = 'application/x-tar'
+                                OR dv.mime_type = 'application/gzip'
+                                OR dv.mime_type = 'application/x-rar-compressed'
+                                OR dv.mime_type = 'application/x-7z-compressed')"#,
+                    ),
+                    &mut conn,
+                )
+                .await?
+            };
             #[allow(clippy::get_first)]
             Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
         })
@@ -393,23 +410,34 @@ impl DieselDocumentRepository {
         &self,
         source_id: Option<&str>,
     ) -> Result<u64, DieselError> {
-        let source_filter = source_id
-            .map(|s| format!("AND d.source_id = '{}'", s.replace('\'', "''")))
-            .unwrap_or_default();
-
-        let query = format!(
-            r#"SELECT COUNT(DISTINCT d.id) as count
-               FROM documents d
-               JOIN document_versions dv ON d.id = dv.document_id
-               WHERE d.status IN ('pending', 'downloaded')
-               AND (dv.mime_type LIKE 'message/%' OR dv.mime_type LIKE '%rfc822%')
-               {}"#,
-            source_filter
-        );
-
         with_conn!(self.pool, conn, {
-            let result: Vec<CountRow> =
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
+            let result: Vec<CountRow> = if let Some(sid) = source_id {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(
+                        r#"SELECT COUNT(DISTINCT d.id) as count
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type LIKE 'message/%' OR dv.mime_type LIKE '%rfc822%')
+                           AND d.source_id = $1"#,
+                    )
+                    .bind::<diesel::sql_types::Text, _>(sid),
+                    &mut conn,
+                )
+                .await?
+            } else {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(
+                        r#"SELECT COUNT(DISTINCT d.id) as count
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type LIKE 'message/%' OR dv.mime_type LIKE '%rfc822%')"#,
+                    ),
+                    &mut conn,
+                )
+                .await?
+            };
             #[allow(clippy::get_first)]
             Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
         })
@@ -421,30 +449,52 @@ impl DieselDocumentRepository {
         source_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Document>, DieselError> {
-        let source_filter = source_id
-            .map(|s| format!("AND d.source_id = '{}'", s.replace('\'', "''")))
-            .unwrap_or_default();
-
-        let query = format!(
-            r#"SELECT DISTINCT d.id
-               FROM documents d
-               JOIN document_versions dv ON d.id = dv.document_id
-               WHERE d.status IN ('pending', 'downloaded')
-               AND (dv.mime_type = 'application/zip'
-                    OR dv.mime_type = 'application/x-zip'
-                    OR dv.mime_type = 'application/x-zip-compressed'
-                    OR dv.mime_type = 'application/x-tar'
-                    OR dv.mime_type = 'application/gzip'
-                    OR dv.mime_type = 'application/x-rar-compressed'
-                    OR dv.mime_type = 'application/x-7z-compressed')
-               {}
-               ORDER BY d.updated_at ASC
-               LIMIT {}"#,
-            source_filter, limit
-        );
-
         let ids: Vec<DocIdRow> = with_conn!(self.pool, conn, {
-            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await
+            if let Some(sid) = source_id {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(format!(
+                        r#"SELECT DISTINCT d.id
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type = 'application/zip'
+                                OR dv.mime_type = 'application/x-zip'
+                                OR dv.mime_type = 'application/x-zip-compressed'
+                                OR dv.mime_type = 'application/x-tar'
+                                OR dv.mime_type = 'application/gzip'
+                                OR dv.mime_type = 'application/x-rar-compressed'
+                                OR dv.mime_type = 'application/x-7z-compressed')
+                           AND d.source_id = $1
+                           ORDER BY d.updated_at ASC
+                           LIMIT {}"#,
+                        limit
+                    ))
+                    .bind::<diesel::sql_types::Text, _>(sid),
+                    &mut conn,
+                )
+                .await
+            } else {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(format!(
+                        r#"SELECT DISTINCT d.id
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type = 'application/zip'
+                                OR dv.mime_type = 'application/x-zip'
+                                OR dv.mime_type = 'application/x-zip-compressed'
+                                OR dv.mime_type = 'application/x-tar'
+                                OR dv.mime_type = 'application/gzip'
+                                OR dv.mime_type = 'application/x-rar-compressed'
+                                OR dv.mime_type = 'application/x-7z-compressed')
+                           ORDER BY d.updated_at ASC
+                           LIMIT {}"#,
+                        limit
+                    )),
+                    &mut conn,
+                )
+                .await
+            }
         })?;
 
         let mut docs = Vec::with_capacity(ids.len());
@@ -462,24 +512,40 @@ impl DieselDocumentRepository {
         source_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Document>, DieselError> {
-        let source_filter = source_id
-            .map(|s| format!("AND d.source_id = '{}'", s.replace('\'', "''")))
-            .unwrap_or_default();
-
-        let query = format!(
-            r#"SELECT DISTINCT d.id
-               FROM documents d
-               JOIN document_versions dv ON d.id = dv.document_id
-               WHERE d.status IN ('pending', 'downloaded')
-               AND (dv.mime_type LIKE 'message/%' OR dv.mime_type LIKE '%rfc822%')
-               {}
-               ORDER BY d.updated_at ASC
-               LIMIT {}"#,
-            source_filter, limit
-        );
-
         let ids: Vec<DocIdRow> = with_conn!(self.pool, conn, {
-            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await
+            if let Some(sid) = source_id {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(format!(
+                        r#"SELECT DISTINCT d.id
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type LIKE 'message/%' OR dv.mime_type LIKE '%rfc822%')
+                           AND d.source_id = $1
+                           ORDER BY d.updated_at ASC
+                           LIMIT {}"#,
+                        limit
+                    ))
+                    .bind::<diesel::sql_types::Text, _>(sid),
+                    &mut conn,
+                )
+                .await
+            } else {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(format!(
+                        r#"SELECT DISTINCT d.id
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type LIKE 'message/%' OR dv.mime_type LIKE '%rfc822%')
+                           ORDER BY d.updated_at ASC
+                           LIMIT {}"#,
+                        limit
+                    )),
+                    &mut conn,
+                )
+                .await
+            }
         })?;
 
         let mut docs = Vec::with_capacity(ids.len());
