@@ -221,7 +221,8 @@
 
         try {
             const res = await fetch('/api/types');
-            const data = await res.json();
+            const envelope = await res.json();
+            const data = envelope.data || envelope;
 
             const catCounts = {};
             data.forEach(item => {
@@ -257,7 +258,8 @@
 
         try {
             const res = await fetch('/api/sources');
-            const data = await res.json();
+            const envelope = await res.json();
+            const data = envelope.data || envelope;
 
             let html = '<option value="">All Sources</option>';
             data.forEach(s => {
@@ -275,7 +277,8 @@
 
         try {
             const res = await fetch('/api/tags');
-            const data = await res.json();
+            const envelope = await res.json();
+            const data = envelope.data || envelope;
 
             let html = '';
             data.forEach(t => {
