@@ -74,7 +74,6 @@ pub async fn download_youtube_video(
 
             let version = DocumentVersion::new_with_metadata(
                 &content,
-                yt_result.video_path.clone(),
                 "video/mp4".to_string(),
                 Some(url.to_string()),
                 Some(format!("{}.mp4", yt_result.metadata.title)),
@@ -94,7 +93,7 @@ pub async fn download_youtube_video(
             }
 
             // Save or update document
-            let new_document = save_or_update_document(
+            let new_document = match save_or_update_document(
                 doc_repo,
                 url,
                 &crawl_url.source_id,
@@ -103,14 +102,32 @@ pub async fn download_youtube_video(
                 metadata,
                 "youtube",
             )
-            .await;
+            .await
+            {
+                Ok(new_doc) => new_doc,
+                Err(e) => {
+                    handle_download_failure(
+                        crawl_url,
+                        crawl_repo,
+                        failed,
+                        event_tx,
+                        worker_id,
+                        &format!("Failed to save document: {}", e),
+                        false,
+                    )
+                    .await;
+                    return true;
+                }
+            };
 
             // Mark URL as fetched
             let mut fetched_url = crawl_url.clone();
             fetched_url.status = UrlStatus::Fetched;
             fetched_url.fetched_at = Some(chrono::Utc::now());
             fetched_url.content_hash = Some(content_hash);
-            let _ = crawl_repo.update_url(&fetched_url).await;
+            if let Err(e) = crawl_repo.update_url(&fetched_url).await {
+                warn!("Failed to update crawl URL status for {}: {}", url, e);
+            }
 
             downloaded.fetch_add(1, Ordering::Relaxed);
             let _ = event_tx
