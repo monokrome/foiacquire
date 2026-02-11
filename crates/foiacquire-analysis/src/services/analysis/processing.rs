@@ -13,6 +13,7 @@ pub fn extract_document_text_per_page(
     doc: &Document,
     doc_repo: &DieselDocumentRepository,
     handle: &tokio::runtime::Handle,
+    documents_dir: &std::path::Path,
 ) -> anyhow::Result<usize> {
     let extractor = TextExtractor::new();
 
@@ -20,10 +21,12 @@ pub fn extract_document_text_per_page(
         .current_version()
         .ok_or_else(|| anyhow::anyhow!("Document has no versions"))?;
 
+    let file_path = version.resolve_path(documents_dir, &doc.source_url, &doc.title);
+
     // Only process PDFs with per-page extraction
     if version.mime_type != "application/pdf" {
         // For non-PDFs, use the old extraction method
-        let result = extractor.extract(&version.file_path, &version.mime_type)?;
+        let result = extractor.extract(&file_path, &version.mime_type)?;
 
         // Create a single "page" for non-PDF documents
         let mut page = DocumentPage::new(doc.id.clone(), version.id, 1);
@@ -33,10 +36,10 @@ pub fn extract_document_text_per_page(
         handle.block_on(doc_repo.save_page(&page))?;
 
         // Cache page count (1 for non-PDFs)
-        let _ = handle.block_on(doc_repo.set_version_page_count(version.id, 1));
+        handle.block_on(doc_repo.set_version_page_count(version.id, 1))?;
 
         // Non-PDFs are complete immediately - finalize the document
-        let _ = handle.block_on(doc_repo.finalize_document(&doc.id));
+        handle.block_on(doc_repo.finalize_document(&doc.id))?;
 
         return Ok(1);
     }
@@ -46,10 +49,10 @@ pub fn extract_document_text_per_page(
         tracing::debug!(
             "Getting page count for document {}: {}",
             doc.id,
-            version.file_path.display()
+            file_path.display()
         );
         let count = extractor
-            .get_pdf_page_count(&version.file_path)
+            .get_pdf_page_count(&file_path)
             .unwrap_or(1);
         tracing::debug!("Document {} has {} pages", doc.id, count);
         count
@@ -57,7 +60,7 @@ pub fn extract_document_text_per_page(
 
     // Cache page count if not already cached
     if version.page_count.is_none() {
-        let _ = handle.block_on(doc_repo.set_version_page_count(version.id, page_count));
+        handle.block_on(doc_repo.set_version_page_count(version.id, page_count))?;
     }
 
     // Delete any existing pages for this document version (in case of re-processing)
@@ -74,7 +77,7 @@ pub fn extract_document_text_per_page(
         );
         // Extract text using pdftotext
         let pdf_text = extractor
-            .extract_pdf_page_text(&version.file_path, page_num)
+            .extract_pdf_page_text(&file_path, page_num)
             .unwrap_or_default();
 
         let mut page = DocumentPage::new(doc.id.clone(), version.id, page_num);
@@ -91,7 +94,7 @@ pub fn extract_document_text_per_page(
 
         // Store pdftotext result in page_ocr_results for comparison
         if !pdf_text.is_empty() {
-            let _ = handle.block_on(doc_repo.store_page_ocr_result(
+            handle.block_on(doc_repo.store_page_ocr_result(
                 page_id,
                 "pdftotext",
                 None, // no model for pdftotext
@@ -99,7 +102,7 @@ pub fn extract_document_text_per_page(
                 None, // no confidence score for pdftotext
                 None, // no processing time tracked
                 None, // no image hash for pdftotext (text extraction)
-            ));
+            ))?;
         }
 
         pages_created += 1;
@@ -120,8 +123,9 @@ pub fn ocr_document_page(
     page: &DocumentPage,
     doc_repo: &DieselDocumentRepository,
     handle: &tokio::runtime::Handle,
+    documents_dir: &std::path::Path,
 ) -> anyhow::Result<PageOcrResult> {
-    ocr_document_page_with_config(page, doc_repo, handle, &OcrConfig::default())
+    ocr_document_page_with_config(page, doc_repo, handle, &OcrConfig::default(), documents_dir)
 }
 
 /// Run OCR on a page using configured backend entries.
@@ -138,6 +142,7 @@ pub fn ocr_document_page_with_config(
     doc_repo: &DieselDocumentRepository,
     handle: &tokio::runtime::Handle,
     ocr_config: &OcrConfig,
+    documents_dir: &std::path::Path,
 ) -> anyhow::Result<PageOcrResult> {
     let extractor = TextExtractor::new();
 
@@ -152,9 +157,11 @@ pub fn ocr_document_page_with_config(
         .find(|v| v.id == page.version_id)
         .ok_or_else(|| anyhow::anyhow!("Version not found"))?;
 
+    let file_path = version.resolve_path(documents_dir, &doc.source_url, &doc.title);
+
     // Compute image hash once for deduplication across all backends
     let image_hash = extractor
-        .get_pdf_page_hash(&version.file_path, page.page_number)
+        .get_pdf_page_hash(&file_path, page.page_number)
         .ok();
 
     let mut updated_page = page.clone();
@@ -192,7 +199,7 @@ pub fn ocr_document_page_with_config(
             let ocr_chars = ocr_text.chars().filter(|c| !c.is_whitespace()).count();
 
             // Store reference for this page
-            let _ = handle.block_on(doc_repo.store_page_ocr_result(
+            handle.block_on(doc_repo.store_page_ocr_result(
                 page.id,
                 &backend_name,
                 existing_result.model.as_deref(),
@@ -200,7 +207,7 @@ pub fn ocr_document_page_with_config(
                 existing_result.confidence,
                 existing_result.processing_time_ms,
                 image_hash.as_deref(),
-            ));
+            ))?;
 
             tracing::debug!(
                 "Reused existing {} result for page {} (hash match)",
@@ -218,14 +225,14 @@ pub fn ocr_document_page_with_config(
             let fallback =
                 FallbackOcrBackend::from_names(&backend_names, OcrBackendConfig::default());
 
-            match fallback.ocr_pdf_page(&version.file_path, page.page_number) {
+            match fallback.ocr_pdf_page(&file_path, page.page_number) {
                 Ok(result) => {
                     let ocr_text = result.text;
                     let backend_name = result.backend.as_str();
                     let ocr_chars = ocr_text.chars().filter(|c| !c.is_whitespace()).count();
 
                     // Store result
-                    let _ = handle.block_on(doc_repo.store_page_ocr_result(
+                    handle.block_on(doc_repo.store_page_ocr_result(
                         page.id,
                         backend_name,
                         result.model.as_deref(),
@@ -233,7 +240,7 @@ pub fn ocr_document_page_with_config(
                         result.confidence,
                         Some(result.processing_time_ms as i32),
                         image_hash.as_deref(),
-                    ));
+                    ))?;
 
                     tracing::debug!(
                         "OCR completed for page {} using {} backend ({} chars)",
@@ -287,7 +294,7 @@ pub fn ocr_document_page_with_config(
     if handle
         .block_on(doc_repo.are_all_pages_complete(&page.document_id, page.version_id as i32))?
     {
-        let _ = handle.block_on(doc_repo.finalize_document(&page.document_id));
+        handle.block_on(doc_repo.finalize_document(&page.document_id))?;
         document_finalized = true;
         tracing::debug!(
             "Document {} finalized after page {} completed",
