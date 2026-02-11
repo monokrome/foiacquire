@@ -1556,3 +1556,48 @@ impl DieselDocumentRepository {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repository::diesel_document::tests::setup_test_db;
+
+    #[test]
+    fn test_validate_identifier_accepts_valid() {
+        assert!(validate_identifier("date_detection").is_ok());
+        assert!(validate_identifier("llm_v2").is_ok());
+        assert!(validate_identifier("entity_extraction").is_ok());
+    }
+
+    #[test]
+    fn test_validate_identifier_rejects_sql_injection() {
+        assert!(validate_identifier("'; DROP TABLE").is_err());
+        assert!(validate_identifier("' OR '1'='1").is_err());
+        assert!(validate_identifier("").is_err());
+        assert!(validate_identifier("valid-name").is_err());
+        assert!(validate_identifier("name; SELECT").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_by_tag_with_sql_metacharacters() {
+        let (pool, _dir) = setup_test_db().await;
+        let repo = DieselDocumentRepository::new(pool);
+
+        let result = repo
+            .get_by_tag("'; DROP TABLE documents; --", None)
+            .await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_count_documents_needing_annotation_rejects_injection() {
+        let (pool, _dir) = setup_test_db().await;
+        let repo = DieselDocumentRepository::new(pool);
+
+        let result = repo
+            .count_documents_needing_annotation("'; DROP TABLE documents; --", 1, None)
+            .await;
+        assert!(result.is_err());
+    }
+}

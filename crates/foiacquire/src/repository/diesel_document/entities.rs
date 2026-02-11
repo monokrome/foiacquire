@@ -710,4 +710,20 @@ mod tests {
         let err = result.unwrap_err().to_string();
         assert!(err.contains("not supported"));
     }
+
+    #[tokio::test]
+    async fn test_entity_search_with_sql_metacharacters() {
+        let (pool, _dir) = setup_test_db().await;
+        let repo = DieselDocumentRepository::new(pool);
+        create_entity_table(&repo).await.unwrap();
+
+        let filters = vec![EntityFilter {
+            entity_type: Some("'; DROP TABLE documents; --".to_string()),
+            text: "' OR '1'='1".to_string(),
+            exact: false,
+        }];
+        let result = repo.search_by_entities(&filters, None, 100, 0).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
 }

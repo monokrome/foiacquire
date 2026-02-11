@@ -331,3 +331,24 @@ impl DieselDocumentRepository {
             .collect())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repository::diesel_document::tests::setup_test_db;
+
+    #[tokio::test]
+    async fn test_find_sources_by_hash_with_sql_metacharacters() {
+        let (pool, _dir) = setup_test_db().await;
+        let repo = DieselDocumentRepository::new(pool);
+
+        let result = repo
+            .find_sources_by_hash(
+                "'; DROP TABLE documents; --",
+                Some("' OR '1'='1"),
+            )
+            .await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+}
