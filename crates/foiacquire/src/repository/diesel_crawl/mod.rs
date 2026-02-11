@@ -49,11 +49,15 @@ trait CrawlUrlFields {
 }
 
 /// Convert any crawl URL record to a CrawlUrl model.
-fn crawl_url_from_record<T: CrawlUrlFields>(record: &T) -> CrawlUrl {
+fn crawl_url_from_record<T: CrawlUrlFields>(
+    record: &T,
+) -> Result<CrawlUrl, diesel::result::Error> {
     let discovery_context: HashMap<String, serde_json::Value> =
-        serde_json::from_str(record.discovery_context()).unwrap_or_default();
+        serde_json::from_str(record.discovery_context()).map_err(|e| {
+            diesel::result::Error::DeserializationError(Box::new(e))
+        })?;
 
-    CrawlUrl {
+    Ok(CrawlUrl {
         url: record.url().to_string(),
         source_id: record.source_id().to_string(),
         status: UrlStatus::from_str(record.status()).unwrap_or(UrlStatus::Discovered),
@@ -71,7 +75,7 @@ fn crawl_url_from_record<T: CrawlUrlFields>(record: &T) -> CrawlUrl {
         last_modified: record.last_modified().map(ToString::to_string),
         content_hash: record.content_hash().map(ToString::to_string),
         document_id: record.document_id().map(ToString::to_string),
-    }
+    })
 }
 
 impl CrawlUrlFields for CrawlUrlRecord {
@@ -126,30 +130,41 @@ impl CrawlUrlFields for CrawlUrlRecord {
 }
 
 /// Convert a database record to a domain model.
-impl From<CrawlUrlRecord> for CrawlUrl {
-    fn from(record: CrawlUrlRecord) -> Self {
+impl TryFrom<CrawlUrlRecord> for CrawlUrl {
+    type Error = diesel::result::Error;
+
+    fn try_from(record: CrawlUrlRecord) -> Result<Self, Self::Error> {
         crawl_url_from_record(&record)
     }
 }
 
-impl From<CrawlRequestRecord> for CrawlRequest {
-    fn from(record: CrawlRequestRecord) -> Self {
-        CrawlRequest {
+impl TryFrom<CrawlRequestRecord> for CrawlRequest {
+    type Error = diesel::result::Error;
+
+    fn try_from(record: CrawlRequestRecord) -> Result<Self, Self::Error> {
+        let request_headers = serde_json::from_str(&record.request_headers).map_err(|e| {
+            diesel::result::Error::DeserializationError(Box::new(e))
+        })?;
+        let response_headers = serde_json::from_str(&record.response_headers).map_err(|e| {
+            diesel::result::Error::DeserializationError(Box::new(e))
+        })?;
+
+        Ok(CrawlRequest {
             id: Some(record.id as i64),
             source_id: record.source_id,
             url: record.url,
             method: record.method,
-            request_headers: serde_json::from_str(&record.request_headers).unwrap_or_default(),
+            request_headers,
             request_at: parse_datetime(&record.request_at),
             response_status: record.response_status.map(|s| s as u16),
-            response_headers: serde_json::from_str(&record.response_headers).unwrap_or_default(),
+            response_headers,
             response_at: parse_datetime_opt(record.response_at),
             response_size: record.response_size.map(|s| s as u64),
             duration_ms: record.duration_ms.map(|d| d as u64),
             error: record.error,
             was_conditional: record.was_conditional != 0,
             was_not_modified: record.was_not_modified != 0,
-        }
+        })
     }
 }
 
@@ -327,8 +342,10 @@ impl CrawlUrlFields for CrawlUrlRecordRaw {
     }
 }
 
-impl From<CrawlUrlRecordRaw> for CrawlUrl {
-    fn from(record: CrawlUrlRecordRaw) -> Self {
+impl TryFrom<CrawlUrlRecordRaw> for CrawlUrl {
+    type Error = diesel::result::Error;
+
+    fn try_from(record: CrawlUrlRecordRaw) -> Result<Self, Self::Error> {
         crawl_url_from_record(&record)
     }
 }

@@ -205,7 +205,7 @@ impl DieselCrawlRepository {
             query
                 .load::<CrawlUrlRecord>(&mut conn)
                 .await
-                .map(|records| records.into_iter().map(CrawlUrl::from).collect())
+                .and_then(|records| records.into_iter().map(CrawlUrl::try_from).collect())
         })
     }
 

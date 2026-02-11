@@ -11,9 +11,15 @@ use crate::schema::service_status;
 use crate::{with_conn, with_conn_split};
 
 /// Convert a database record to a domain model.
-impl From<ServiceStatusRecord> for ServiceStatus {
-    fn from(record: ServiceStatusRecord) -> Self {
-        ServiceStatus {
+impl TryFrom<ServiceStatusRecord> for ServiceStatus {
+    type Error = diesel::result::Error;
+
+    fn try_from(record: ServiceStatusRecord) -> Result<Self, Self::Error> {
+        let stats = serde_json::from_str(&record.stats).map_err(|e| {
+            diesel::result::Error::DeserializationError(Box::new(e))
+        })?;
+
+        Ok(ServiceStatus {
             id: record.id,
             service_type: ServiceType::from_str(&record.service_type)
                 .unwrap_or(ServiceType::Scraper),
@@ -22,14 +28,14 @@ impl From<ServiceStatusRecord> for ServiceStatus {
             last_heartbeat: parse_datetime(&record.last_heartbeat),
             last_activity: parse_datetime_opt(record.last_activity),
             current_task: record.current_task,
-            stats: serde_json::from_str(&record.stats).unwrap_or_default(),
+            stats,
             started_at: parse_datetime(&record.started_at),
             host: record.host,
             version: record.version,
             last_error: record.last_error,
             last_error_at: parse_datetime_opt(record.last_error_at),
             error_count: record.error_count,
-        }
+        })
     }
 }
 
@@ -53,7 +59,7 @@ impl DieselServiceStatusRepository {
                 .order(service_status::id.asc())
                 .load::<ServiceStatusRecord>(&mut conn)
                 .await
-                .map(|records| records.into_iter().map(ServiceStatus::from).collect())
+                .and_then(|records| records.into_iter().map(ServiceStatus::try_from).collect())
         })
     }
 
@@ -65,7 +71,7 @@ impl DieselServiceStatusRepository {
                 .order(service_status::id.asc())
                 .load::<ServiceStatusRecord>(&mut conn)
                 .await
-                .map(|records| records.into_iter().map(ServiceStatus::from).collect())
+                .and_then(|records| records.into_iter().map(ServiceStatus::try_from).collect())
         })
     }
 
@@ -77,7 +83,7 @@ impl DieselServiceStatusRepository {
                 .first::<ServiceStatusRecord>(&mut conn)
                 .await
                 .optional()
-                .map(|opt| opt.map(ServiceStatus::from))
+                .and_then(|opt| opt.map(ServiceStatus::try_from).transpose())
         })
     }
 
