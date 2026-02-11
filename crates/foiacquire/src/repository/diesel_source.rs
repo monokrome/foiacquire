@@ -295,4 +295,63 @@ mod tests {
         // Verify deleted
         assert!(!repo.exists("test-source").await.unwrap());
     }
+
+    async fn insert_raw_source(pool: &DbPool, sql: &str) {
+        match pool {
+            DbPool::Sqlite(ref sqlite_pool) => {
+                let mut conn = sqlite_pool.get().await.unwrap();
+                conn.batch_execute(sql).await.unwrap();
+            }
+            #[cfg(feature = "postgres")]
+            DbPool::Postgres(_) => unreachable!("test uses sqlite"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_invalid_metadata_json_returns_error() {
+        let (pool, _dir) = setup_test_db().await;
+
+        insert_raw_source(
+            &pool,
+            "INSERT INTO sources (id, source_type, name, base_url, metadata, created_at) \
+             VALUES ('bad', 'custom', 'Bad Source', 'https://example.com', 'not json', '2024-01-01T00:00:00Z')",
+        )
+        .await;
+
+        let repo = DieselSourceRepository::new(pool);
+        let result = repo.get("bad").await;
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Deserialization"),
+            "Expected DeserializationError, got: {}",
+            err,
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_all_fails_on_invalid_json_row() {
+        let (pool, _dir) = setup_test_db().await;
+        let repo = DieselSourceRepository::new(pool.clone());
+
+        // Insert a valid row
+        let source = Source::new(
+            "valid-source".to_string(),
+            SourceType::Custom,
+            "Valid Source".to_string(),
+            "https://example.com".to_string(),
+        );
+        repo.save(&source).await.unwrap();
+
+        // Insert a row with invalid JSON metadata
+        insert_raw_source(
+            &pool,
+            "INSERT INTO sources (id, source_type, name, base_url, metadata, created_at) \
+             VALUES ('bad', 'custom', 'Bad Source', 'https://example.com', 'not json', '2024-01-01T00:00:00Z')",
+        )
+        .await;
+
+        let result = repo.get_all().await;
+        assert!(result.is_err());
+    }
 }

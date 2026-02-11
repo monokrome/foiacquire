@@ -523,4 +523,60 @@ mod tests {
             .unwrap();
         assert!(changed);
     }
+
+    async fn insert_raw_crawl(pool: &DbPool, sql: &str) {
+        match pool {
+            DbPool::Sqlite(ref sqlite_pool) => {
+                let mut conn = sqlite_pool.get().await.unwrap();
+                conn.batch_execute(sql).await.unwrap();
+            }
+            #[cfg(feature = "postgres")]
+            DbPool::Postgres(_) => unreachable!("test uses sqlite"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_invalid_discovery_context_json_returns_error() {
+        let (pool, _dir) = setup_test_db().await;
+
+        insert_raw_crawl(
+            &pool,
+            "INSERT INTO crawl_urls (url, source_id, status, discovery_method, discovery_context, depth, discovered_at, retry_count) \
+             VALUES ('https://example.com/bad', 'test-source', 'discovered', 'seed', 'INVALID', 0, '2024-01-01T00:00:00Z', 0)",
+        )
+        .await;
+
+        let repo = DieselCrawlRepository::new(pool);
+        let result = repo.get_url("test-source", "https://example.com/bad").await;
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Deserialization"),
+            "Expected DeserializationError, got: {}",
+            err,
+        );
+    }
+
+    #[tokio::test]
+    async fn test_valid_discovery_context_json_works() {
+        let (pool, _dir) = setup_test_db().await;
+
+        insert_raw_crawl(
+            &pool,
+            r#"INSERT INTO crawl_urls (url, source_id, status, discovery_method, discovery_context, depth, discovered_at, retry_count)
+               VALUES ('https://example.com/good', 'test-source', 'discovered', 'seed', '{"referrer": "test"}', 0, '2024-01-01T00:00:00Z', 0)"#,
+        )
+        .await;
+
+        let repo = DieselCrawlRepository::new(pool);
+        let result = repo
+            .get_url("test-source", "https://example.com/good")
+            .await;
+        assert!(result.is_ok());
+        let crawl_url = result.unwrap().unwrap();
+        assert_eq!(
+            crawl_url.discovery_context.get("referrer").and_then(|v| v.as_str()),
+            Some("test"),
+        );
+    }
 }

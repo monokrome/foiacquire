@@ -373,4 +373,36 @@ mod tests {
         assert_eq!(stats.session_new, 50);
         assert_eq!(stats.rate_per_min, Some(12.5));
     }
+
+    #[tokio::test]
+    async fn test_invalid_stats_json_returns_error() {
+        let (ctx, _dir) = setup_test_db().await;
+
+        // Insert a row with invalid JSON in the stats column via raw SQL
+        use crate::repository::pool::DbPool;
+        use diesel_async::SimpleAsyncConnection;
+        match ctx.pool() {
+            DbPool::Sqlite(ref sqlite_pool) => {
+                let mut conn = sqlite_pool.get().await.unwrap();
+                conn.batch_execute(
+                    "INSERT INTO service_status (id, service_type, status, last_heartbeat, stats, started_at, error_count) \
+                     VALUES ('bad:test', 'scraper', 'running', '2024-01-01T00:00:00Z', 'NOT JSON', '2024-01-01T00:00:00Z', 0)",
+                )
+                .await
+                .unwrap();
+            }
+            #[cfg(feature = "postgres")]
+            DbPool::Postgres(_) => unreachable!("test uses sqlite"),
+        }
+
+        let repo = ctx.service_status();
+        let result = repo.get("bad:test").await;
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Deserialization"),
+            "Expected DeserializationError, got: {}",
+            err,
+        );
+    }
 }

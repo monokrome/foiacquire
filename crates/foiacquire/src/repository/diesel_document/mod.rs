@@ -858,4 +858,28 @@ mod tests {
         assert_eq!(latest.content_hash, "abc123");
         assert_eq!(latest.file_size, 1024);
     }
+
+    #[tokio::test]
+    async fn test_count_unprocessed_archives_with_sql_metacharacters() {
+        let (pool, _dir) = setup_test_db().await;
+        let repo = DieselDocumentRepository::new(pool);
+
+        let result = repo
+            .count_unprocessed_archives(Some("'; DROP TABLE documents; --"))
+            .await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_count_unprocessed_emails_with_sql_metacharacters() {
+        let (pool, _dir) = setup_test_db().await;
+        let repo = DieselDocumentRepository::new(pool);
+
+        let result = repo
+            .count_unprocessed_emails(Some("'; DROP TABLE documents; --"))
+            .await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
+    }
 }

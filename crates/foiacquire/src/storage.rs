@@ -362,4 +362,35 @@ mod tests {
         assert_eq!(rel1, rel2);
         assert!(dedup2.is_none());
     }
+
+    #[test]
+    #[should_panic(expected = "content hash too short")]
+    fn test_content_storage_path_panics_on_short_hash() {
+        content_storage_path(Path::new("/docs"), "abc", "pdf");
+    }
+
+    #[test]
+    #[should_panic(expected = "content hash too short")]
+    fn test_content_storage_path_panics_on_empty_hash() {
+        content_storage_path(Path::new("/docs"), "", "pdf");
+    }
+
+    #[test]
+    #[should_panic(expected = "content hash too short")]
+    fn test_content_storage_path_panics_on_7_chars() {
+        content_storage_path(Path::new("/docs"), "abcdef1", "pdf");
+    }
+
+    #[test]
+    #[should_panic(expected = "content hash too short")]
+    fn test_content_storage_path_with_name_panics_on_short_hash() {
+        content_storage_path_with_name(Path::new("/docs"), "abc", "report", "pdf");
+    }
+
+    #[test]
+    #[should_panic(expected = "content hash too short")]
+    fn test_compute_storage_path_with_dedup_panics_on_short_hash() {
+        let dir = tempdir().unwrap();
+        compute_storage_path_with_dedup(dir.path(), "abc", "report", "pdf", b"content");
+    }
 }
