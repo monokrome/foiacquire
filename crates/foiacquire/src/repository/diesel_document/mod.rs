@@ -564,14 +564,6 @@ impl DieselDocumentRepository {
 
 // Helper structs for SQL queries
 #[derive(diesel::QueryableByName)]
-pub(crate) struct StatusCount {
-    #[diesel(sql_type = diesel::sql_types::Text)]
-    pub status: String,
-    #[diesel(sql_type = diesel::sql_types::BigInt)]
-    pub count: i64,
-}
-
-#[derive(diesel::QueryableByName)]
 pub(crate) struct MimeCount {
     #[diesel(sql_type = diesel::sql_types::Text)]
     pub mime_type: String,
