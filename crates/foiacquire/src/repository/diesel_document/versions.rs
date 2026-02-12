@@ -343,10 +343,7 @@ mod tests {
         let repo = DieselDocumentRepository::new(pool);
 
         let result = repo
-            .find_sources_by_hash(
-                "'; DROP TABLE documents; --",
-                Some("' OR '1'='1"),
-            )
+            .find_sources_by_hash("'; DROP TABLE documents; --", Some("' OR '1'='1"))
             .await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());

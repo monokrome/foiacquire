@@ -49,13 +49,10 @@ trait CrawlUrlFields {
 }
 
 /// Convert any crawl URL record to a CrawlUrl model.
-fn crawl_url_from_record<T: CrawlUrlFields>(
-    record: &T,
-) -> Result<CrawlUrl, diesel::result::Error> {
+fn crawl_url_from_record<T: CrawlUrlFields>(record: &T) -> Result<CrawlUrl, diesel::result::Error> {
     let discovery_context: HashMap<String, serde_json::Value> =
-        serde_json::from_str(record.discovery_context()).map_err(|e| {
-            diesel::result::Error::DeserializationError(Box::new(e))
-        })?;
+        serde_json::from_str(record.discovery_context())
+            .map_err(|e| diesel::result::Error::DeserializationError(Box::new(e)))?;
 
     Ok(CrawlUrl {
         url: record.url().to_string(),
@@ -142,12 +139,10 @@ impl TryFrom<CrawlRequestRecord> for CrawlRequest {
     type Error = diesel::result::Error;
 
     fn try_from(record: CrawlRequestRecord) -> Result<Self, Self::Error> {
-        let request_headers = serde_json::from_str(&record.request_headers).map_err(|e| {
-            diesel::result::Error::DeserializationError(Box::new(e))
-        })?;
-        let response_headers = serde_json::from_str(&record.response_headers).map_err(|e| {
-            diesel::result::Error::DeserializationError(Box::new(e))
-        })?;
+        let request_headers = serde_json::from_str(&record.request_headers)
+            .map_err(|e| diesel::result::Error::DeserializationError(Box::new(e)))?;
+        let response_headers = serde_json::from_str(&record.response_headers)
+            .map_err(|e| diesel::result::Error::DeserializationError(Box::new(e)))?;
 
         Ok(CrawlRequest {
             id: Some(record.id as i64),
@@ -575,7 +570,10 @@ mod tests {
         assert!(result.is_ok());
         let crawl_url = result.unwrap().unwrap();
         assert_eq!(
-            crawl_url.discovery_context.get("referrer").and_then(|v| v.as_str()),
+            crawl_url
+                .discovery_context
+                .get("referrer")
+                .and_then(|v| v.as_str()),
             Some("test"),
         );
     }

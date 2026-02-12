@@ -113,11 +113,7 @@ impl DocumentVersion {
     }
 
     /// Create a new document version (file_path is None for deterministic paths).
-    pub fn new(
-        content: &[u8],
-        mime_type: String,
-        source_url: Option<String>,
-    ) -> Self {
+    pub fn new(content: &[u8], mime_type: String, source_url: Option<String>) -> Self {
         Self::new_with_metadata(content, mime_type, source_url, None, None)
     }
 
@@ -181,12 +177,7 @@ impl DocumentVersion {
     /// components and joins with `documents_dir`. For records with relative
     /// paths, joins with `documents_dir`. For records with no stored path,
     /// computes the deterministic path.
-    pub fn resolve_path(
-        &self,
-        documents_dir: &Path,
-        url: &str,
-        title: &str,
-    ) -> PathBuf {
+    pub fn resolve_path(&self, documents_dir: &Path, url: &str, title: &str) -> PathBuf {
         match &self.file_path {
             Some(stored) if stored.is_absolute() => {
                 // Legacy absolute path: extract last 2 components (e.g. "ab/report-abcdef12.pdf")
@@ -432,11 +423,7 @@ mod tests {
 
     #[test]
     fn test_add_version_different_content() {
-        let version1 = DocumentVersion::new(
-            b"content v1",
-            "application/pdf".to_string(),
-            None,
-        );
+        let version1 = DocumentVersion::new(b"content v1", "application/pdf".to_string(), None);
 
         let mut doc = Document::new(
             "doc1".to_string(),
@@ -447,11 +434,7 @@ mod tests {
             serde_json::json!({}),
         );
 
-        let version2 = DocumentVersion::new(
-            b"content v2",
-            "application/pdf".to_string(),
-            None,
-        );
+        let version2 = DocumentVersion::new(b"content v2", "application/pdf".to_string(), None);
 
         assert!(doc.add_version(version2));
         assert_eq!(doc.versions.len(), 2);
@@ -460,11 +443,7 @@ mod tests {
     #[test]
     fn test_add_version_same_content() {
         let content = b"same content";
-        let version1 = DocumentVersion::new(
-            content,
-            "application/pdf".to_string(),
-            None,
-        );
+        let version1 = DocumentVersion::new(content, "application/pdf".to_string(), None);
 
         let mut doc = Document::new(
             "doc1".to_string(),
@@ -475,40 +454,36 @@ mod tests {
             serde_json::json!({}),
         );
 
-        let version2 = DocumentVersion::new(
-            content,
-            "application/pdf".to_string(),
-            None,
-        );
+        let version2 = DocumentVersion::new(content, "application/pdf".to_string(), None);
 
         assert!(!doc.add_version(version2));
         assert_eq!(doc.versions.len(), 1);
     }
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     fn test_resolve_path_legacy_absolute() {
-        let mut version = DocumentVersion::new(
-            b"test content",
-            "application/pdf".to_string(),
-            None,
-        );
-        version.file_path = Some(PathBuf::from("/opt/foiacquire/documents/ab/report-abcdef12.pdf"));
+        let mut version =
+            DocumentVersion::new(b"test content", "application/pdf".to_string(), None);
+        version.file_path = Some(PathBuf::from(
+            "/opt/foiacquire/documents/ab/report-abcdef12.pdf",
+        ));
 
         let resolved = version.resolve_path(
             Path::new("/mnt/documents"),
             "https://example.com/report.pdf",
             "report",
         );
-        assert_eq!(resolved, PathBuf::from("/mnt/documents/ab/report-abcdef12.pdf"));
+        assert_eq!(
+            resolved,
+            PathBuf::from("/mnt/documents/ab/report-abcdef12.pdf")
+        );
     }
 
     #[test]
     fn test_resolve_path_relative() {
-        let mut version = DocumentVersion::new(
-            b"test content",
-            "application/pdf".to_string(),
-            None,
-        );
+        let mut version =
+            DocumentVersion::new(b"test content", "application/pdf".to_string(), None);
         version.file_path = Some(PathBuf::from("ab/report-abcdef12.pdf"));
 
         let resolved = version.resolve_path(
@@ -516,7 +491,10 @@ mod tests {
             "https://example.com/report.pdf",
             "report",
         );
-        assert_eq!(resolved, PathBuf::from("/mnt/documents/ab/report-abcdef12.pdf"));
+        assert_eq!(
+            resolved,
+            PathBuf::from("/mnt/documents/ab/report-abcdef12.pdf")
+        );
     }
 
     #[test]

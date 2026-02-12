@@ -165,9 +165,7 @@ impl DieselDocumentRepository {
 
         let mut result_sets: Vec<std::collections::HashSet<String>> = Vec::new();
         for filter in filters {
-            let ids = self
-                .search_single_entity_filter(filter, source_id)
-                .await?;
+            let ids = self.search_single_entity_filter(filter, source_id).await?;
             result_sets.push(ids.into_iter().collect());
         }
 
@@ -211,11 +209,11 @@ impl DieselDocumentRepository {
                 let source_doc_ids = documents::table
                     .filter(documents::source_id.eq(sid))
                     .select(documents::id);
-                query =
-                    query.filter(document_entities::document_id.eq_any(source_doc_ids));
+                query = query.filter(document_entities::document_id.eq_any(source_doc_ids));
             }
 
-            query.order(document_entities::document_id.asc())
+            query
+                .order(document_entities::document_id.asc())
                 .load::<String>(&mut conn)
                 .await
         })
@@ -402,8 +400,7 @@ impl DieselDocumentRepository {
 
         with_conn!(self.pool, conn, {
             let rows: Vec<EntityTextCount> = diesel_async::RunQueryDsl::load(
-                diesel::sql_query(&query)
-                    .bind::<diesel::sql_types::Text, _>(entity_type),
+                diesel::sql_query(&query).bind::<diesel::sql_types::Text, _>(entity_type),
                 &mut conn,
             )
             .await?;
@@ -444,7 +441,6 @@ impl DieselDocumentRepository {
         })
     }
 }
-
 
 #[cfg(test)]
 mod tests {

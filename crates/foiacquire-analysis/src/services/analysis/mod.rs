@@ -199,11 +199,7 @@ impl AnalysisService {
 
             // Get the current version's file path and MIME type
             if let Some(version) = doc.versions.last() {
-                let path = version.resolve_path(
-                    &self.documents_dir,
-                    &doc.source_url,
-                    &doc.title,
-                );
+                let path = version.resolve_path(&self.documents_dir, &doc.source_url, &doc.title);
                 if path.exists() {
                     if let Some((detected_mime, old_mime)) =
                         self.detect_mime_mismatch(&path, &version.mime_type)
@@ -508,7 +504,13 @@ impl AnalysisService {
                     // Get tokio runtime handle to run async code in blocking context
                     let handle = tokio::runtime::Handle::current();
 
-                    match ocr_document_page_with_config(&page, &doc_repo, &handle, &ocr_config, &documents_dir) {
+                    match ocr_document_page_with_config(
+                        &page,
+                        &doc_repo,
+                        &handle,
+                        &ocr_config,
+                        &documents_dir,
+                    ) {
                         Ok(ocr_result) => {
                             if ocr_result.improved {
                                 ocr_improved.fetch_add(1, Ordering::Relaxed);

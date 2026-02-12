@@ -18,9 +18,8 @@ impl TryFrom<SourceRecord> for Source {
     type Error = diesel::result::Error;
 
     fn try_from(record: SourceRecord) -> Result<Self, Self::Error> {
-        let metadata = serde_json::from_str(&record.metadata).map_err(|e| {
-            diesel::result::Error::DeserializationError(Box::new(e))
-        })?;
+        let metadata = serde_json::from_str(&record.metadata)
+            .map_err(|e| diesel::result::Error::DeserializationError(Box::new(e)))?;
 
         Ok(Source {
             id: record.id,

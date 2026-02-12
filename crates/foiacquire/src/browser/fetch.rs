@@ -144,9 +144,12 @@ impl BrowserFetcher {
 
         self.ensure_browser().await?;
 
-        let browser = self.browser.as_ref()
+        let browser = self
+            .browser
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("browser not initialized after ensure_browser"))?
-            .lock().await;
+            .lock()
+            .await;
         let page = browser.new_page("about:blank").await?;
 
         // Use inner function to ensure page is always closed

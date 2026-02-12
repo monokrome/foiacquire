@@ -192,7 +192,11 @@ impl HttpClient {
     /// Returns an error if a proxy is configured (e.g. SOCKS_PROXY) but cannot
     /// be initialized. This is fail-closed by design — we never silently
     /// downgrade to direct connections.
-    pub fn new(source_id: &str, timeout: Duration, request_delay: Duration) -> Result<Self, String> {
+    pub fn new(
+        source_id: &str,
+        timeout: Duration,
+        request_delay: Duration,
+    ) -> Result<Self, String> {
         Self::with_user_agent(source_id, timeout, request_delay, None)
     }
 
