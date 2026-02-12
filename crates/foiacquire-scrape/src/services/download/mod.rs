@@ -386,7 +386,9 @@ impl DownloadService {
 
         // Wait for all workers
         for handle in handles {
-            let _ = handle.await;
+            if let Err(e) = handle.await {
+                tracing::error!("Download worker panicked: {}", e);
+            }
         }
 
         // Get remaining count

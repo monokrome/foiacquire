@@ -36,7 +36,9 @@ pub(super) async fn maybe_update_heartbeat(
             browser_failures: None,
         });
         service_status.current_task = Some(format!("Processing {}", source_id));
-        let _ = service_status_repo.upsert(service_status).await;
+        if let Err(e) = service_status_repo.upsert(service_status).await {
+            tracing::warn!("Failed to update service heartbeat: {}", e);
+        }
         *last_heartbeat = std::time::Instant::now();
     }
 }

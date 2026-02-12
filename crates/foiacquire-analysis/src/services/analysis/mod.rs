@@ -425,13 +425,17 @@ impl AnalysisService {
 
                 if handles.len() >= workers {
                     for h in handles.drain(..) {
-                        let _ = h.await;
+                        if let Err(e) = h.await {
+                            tracing::error!("Analysis worker panicked: {}", e);
+                        }
                     }
                 }
             }
 
             for h in handles {
-                let _ = h.await;
+                if let Err(e) = h.await {
+                    tracing::error!("Analysis worker panicked: {}", e);
+                }
             }
         }
 
@@ -548,13 +552,17 @@ impl AnalysisService {
 
                 if handles.len() >= workers {
                     for h in handles.drain(..) {
-                        let _ = h.await;
+                        if let Err(e) = h.await {
+                            tracing::error!("Analysis worker panicked: {}", e);
+                        }
                     }
                 }
             }
 
             for h in handles {
-                let _ = h.await;
+                if let Err(e) = h.await {
+                    tracing::error!("Analysis worker panicked: {}", e);
+                }
             }
         }
 

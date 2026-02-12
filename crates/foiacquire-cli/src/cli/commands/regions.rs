@@ -2,7 +2,7 @@
 
 use console::style;
 #[cfg(feature = "postgres")]
-use diesel_async::SimpleAsyncConnection;
+use diesel_async::{RunQueryDsl, SimpleAsyncConnection};
 
 use foiacquire::config::Settings;
 

@@ -1276,3 +1276,95 @@ impl HttpClient {
         (None, None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::privacy::{PrivacyConfig, PrivacyMode};
+    use std::time::Duration;
+
+    fn test_timeout() -> Duration {
+        Duration::from_secs(5)
+    }
+
+    fn tor_direct_config() -> PrivacyConfig {
+        let mut config = PrivacyConfig::default();
+        config.direct = false;
+        config.obfuscation = false;
+        config
+    }
+
+    fn tor_obfuscated_config() -> PrivacyConfig {
+        let mut config = PrivacyConfig::default();
+        config.direct = false;
+        config.obfuscation = true;
+        config
+    }
+
+    fn external_proxy_no_url_config() -> PrivacyConfig {
+        let mut config = PrivacyConfig::default();
+        config.socks_proxy = Some("".to_string());
+        config
+    }
+
+    fn direct_config() -> PrivacyConfig {
+        let mut config = PrivacyConfig::default();
+        config.direct = true;
+        config
+    }
+
+    #[test]
+    fn test_build_client_tor_direct_fails_without_tor() {
+        let config = tor_direct_config();
+        assert_eq!(config.mode(), PrivacyMode::TorDirect);
+
+        let result = HttpClient::build_client("test-agent", test_timeout(), Some(&config));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Tor mode requested"),
+            "Expected error about Tor mode, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_build_client_tor_obfuscated_fails_without_tor() {
+        let config = tor_obfuscated_config();
+        assert!(matches!(config.mode(), PrivacyMode::TorObfuscated(_)));
+
+        let result = HttpClient::build_client("test-agent", test_timeout(), Some(&config));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Tor mode requested"),
+            "Expected error about Tor mode, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_build_client_external_proxy_fails_without_url() {
+        let config = external_proxy_no_url_config();
+
+        let result = HttpClient::build_client("test-agent", test_timeout(), Some(&config));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Invalid SOCKS proxy URL"),
+            "Expected error about invalid SOCKS URL, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_build_client_direct_succeeds() {
+        let config = direct_config();
+        assert_eq!(config.mode(), PrivacyMode::Direct);
+
+        let result = HttpClient::build_client("test-agent", test_timeout(), Some(&config));
+        assert!(result.is_ok());
+        let (_, mode) = result.unwrap();
+        assert_eq!(mode, PrivacyMode::Direct);
+    }
+}
