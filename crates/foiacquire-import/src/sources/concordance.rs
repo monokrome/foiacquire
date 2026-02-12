@@ -27,7 +27,7 @@ use crate::{
 };
 use foiacquire::models::{Document, DocumentVersion};
 use foiacquire::repository::extract_filename_parts;
-use foiacquire::storage::content_storage_path_with_name;
+use foiacquire::storage::compute_storage_path_with_dedup;
 
 /// Concordance DAT field delimiter (þ, thorn character).
 /// In UTF-8 this is encoded as 0xC3 0xBE.
@@ -568,20 +568,21 @@ impl ImportSource for ConcordanceImportSource {
 
                     let content_hash = DocumentVersion::compute_hash(&content);
                     let (basename, extension) = extract_filename_parts(&url, &title, &mime_type);
-                    let dest_path = content_storage_path_with_name(
+                    let (relative_path, dedup_index) = compute_storage_path_with_dedup(
                         &config.documents_dir,
                         &content_hash,
                         &basename,
                         &extension,
+                        &content,
                     );
+                    let dest_path = config.documents_dir.join(&relative_path);
                     if let Some(parent) = dest_path.parent() {
                         std::fs::create_dir_all(parent)?;
                     }
                     std::fs::write(&dest_path, &content)?;
 
-                    let version = DocumentVersion::new_with_metadata(
+                    let mut version = DocumentVersion::new_with_metadata(
                         &content,
-                        dest_path,
                         mime_type,
                         Some(url.clone()),
                         file_path
@@ -590,6 +591,7 @@ impl ImportSource for ConcordanceImportSource {
                             .map(|s| s.to_string()),
                         None,
                     );
+                    version.dedup_index = dedup_index;
 
                     let existing = doc_repo.get_by_url(&url).await?;
                     if let Some(mut doc) = existing.into_iter().next() {
@@ -630,12 +632,14 @@ impl ImportSource for ConcordanceImportSource {
                         .unwrap_or_else(|| guess_mime_type(&file_path));
 
                     let (basename, extension) = extract_filename_parts(&url, &title, &mime_type);
-                    let dest_path = content_storage_path_with_name(
+                    let (relative_path, dedup_index) = compute_storage_path_with_dedup(
                         &config.documents_dir,
                         &content_hash,
                         &basename,
                         &extension,
+                        &content,
                     );
+                    let dest_path = config.documents_dir.join(&relative_path);
 
                     // Create parent directory
                     if let Some(parent) = dest_path.parent() {
@@ -673,9 +677,8 @@ impl ImportSource for ConcordanceImportSource {
                     }
 
                     // Create document version
-                    let version = DocumentVersion::new_with_metadata(
+                    let mut version = DocumentVersion::new_with_metadata(
                         &content,
-                        dest_path,
                         mime_type,
                         Some(url.clone()),
                         file_path
@@ -684,6 +687,7 @@ impl ImportSource for ConcordanceImportSource {
                             .map(|s| s.to_string()),
                         None,
                     );
+                    version.dedup_index = dedup_index;
 
                     // Save document
                     let existing = doc_repo.get_by_url(&url).await?;

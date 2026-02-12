@@ -7,7 +7,7 @@ use foiacquire::repository::migrations;
 use foiacquire::repository::util::redact_url_password;
 
 /// Expected schema version (should match storage_meta.format_version).
-const EXPECTED_SCHEMA_VERSION: &str = "13";
+const EXPECTED_SCHEMA_VERSION: &str = "14";
 
 /// Run database migrations.
 pub async fn cmd_migrate(settings: &Settings, check: bool, force: bool) -> anyhow::Result<()> {

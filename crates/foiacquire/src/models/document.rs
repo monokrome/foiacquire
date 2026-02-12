@@ -8,7 +8,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Dual content hashes for collision-resistant deduplication.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +55,10 @@ impl DocumentStatus {
 ///
 /// Content is identified by dual hashes (SHA-256 + BLAKE3) for
 /// collision-resistant deduplication across crawls.
+///
+/// File paths are deterministic and computed at runtime from the content hash,
+/// original filename, and dedup_index. Legacy records may have a stored
+/// `file_path`; new records store `None`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentVersion {
     /// Database row ID.
@@ -63,8 +67,8 @@ pub struct DocumentVersion {
     pub content_hash: String,
     /// BLAKE3 hash of the document content (for deduplication verification).
     pub content_hash_blake3: Option<String>,
-    /// Path to the stored file.
-    pub file_path: PathBuf,
+    /// Legacy stored file path. New records store None (path is deterministic).
+    pub file_path: Option<PathBuf>,
     /// Size in bytes.
     pub file_size: u64,
     /// MIME type of the content.
@@ -83,6 +87,8 @@ pub struct DocumentVersion {
     pub archive_snapshot_id: Option<i32>,
     /// Earliest known archive date for this content (provenance verification).
     pub earliest_archived_at: Option<DateTime<Utc>>,
+    /// Collision index for deterministic path computation. None means depth=2.
+    pub dedup_index: Option<u32>,
 }
 
 impl DocumentVersion {
@@ -106,20 +112,14 @@ impl DocumentVersion {
         }
     }
 
-    /// Create a new document version.
-    pub fn new(
-        content: &[u8],
-        file_path: PathBuf,
-        mime_type: String,
-        source_url: Option<String>,
-    ) -> Self {
-        Self::new_with_metadata(content, file_path, mime_type, source_url, None, None)
+    /// Create a new document version (file_path is None for deterministic paths).
+    pub fn new(content: &[u8], mime_type: String, source_url: Option<String>) -> Self {
+        Self::new_with_metadata(content, mime_type, source_url, None, None)
     }
 
     /// Create a new document version with original filename and server date.
     pub fn new_with_metadata(
         content: &[u8],
-        file_path: PathBuf,
         mime_type: String,
         source_url: Option<String>,
         original_filename: Option<String>,
@@ -130,7 +130,7 @@ impl DocumentVersion {
             id: 0, // Set by database
             content_hash: hashes.sha256,
             content_hash_blake3: Some(hashes.blake3),
-            file_path,
+            file_path: None,
             file_size: content.len() as u64,
             mime_type,
             acquired_at: Utc::now(),
@@ -140,17 +140,14 @@ impl DocumentVersion {
             page_count: None,
             archive_snapshot_id: None,
             earliest_archived_at: None,
+            dedup_index: None,
         }
     }
 
     /// Create a new document version with pre-computed hashes.
-    ///
-    /// Use this when you've already computed hashes for deduplication to avoid
-    /// redundant hash computation.
     pub fn with_precomputed_hashes(
         hashes: ContentHashes,
         file_size: u64,
-        file_path: PathBuf,
         mime_type: String,
         source_url: Option<String>,
         original_filename: Option<String>,
@@ -160,7 +157,7 @@ impl DocumentVersion {
             id: 0, // Set by database
             content_hash: hashes.sha256,
             content_hash_blake3: Some(hashes.blake3),
-            file_path,
+            file_path: None,
             file_size,
             mime_type,
             acquired_at: Utc::now(),
@@ -170,7 +167,74 @@ impl DocumentVersion {
             page_count: None,
             archive_snapshot_id: None,
             earliest_archived_at: None,
+            dedup_index: None,
         }
+    }
+
+    /// Resolve the absolute file path for this version.
+    ///
+    /// For legacy records with stored absolute paths, extracts the last 2
+    /// components and joins with `documents_dir`. For records with relative
+    /// paths, joins with `documents_dir`. For records with no stored path,
+    /// computes the deterministic path.
+    pub fn resolve_path(&self, documents_dir: &Path, url: &str, title: &str) -> PathBuf {
+        match &self.file_path {
+            Some(stored) if stored.is_absolute() => {
+                // Legacy absolute path: extract last 2 components (e.g. "ab/report-abcdef12.pdf")
+                let components: Vec<_> = stored.components().rev().take(2).collect();
+                if components.len() == 2 {
+                    let dir_name = components[1].as_os_str();
+                    let file_name = components[0].as_os_str();
+                    documents_dir.join(dir_name).join(file_name)
+                } else {
+                    // Fallback: just use the filename
+                    let file_name = stored.file_name().unwrap_or_default();
+                    documents_dir.join(file_name)
+                }
+            }
+            Some(stored) => {
+                // Relative path: join with documents_dir
+                documents_dir.join(stored)
+            }
+            None => {
+                // No stored path: compute deterministic path
+                let relative = self.compute_storage_path(url, title);
+                documents_dir.join(relative)
+            }
+        }
+    }
+
+    /// Compute the deterministic relative storage path.
+    ///
+    /// Format: `{hash[0..depth]}/{sanitized_basename}-{hash[0..8]}.{ext}`
+    /// where depth = 2 + dedup_index.unwrap_or(0)
+    pub fn compute_storage_path(&self, url: &str, title: &str) -> PathBuf {
+        use crate::repository::{extract_filename_parts, sanitize_filename};
+        use crate::storage::mime_to_extension;
+
+        let (basename, extension) = if let Some(ref orig) = self.original_filename {
+            // Use original_filename for basename + extension
+            if let Some(dot_pos) = orig.rfind('.') {
+                let base = &orig[..dot_pos];
+                let ext = &orig[dot_pos + 1..];
+                if !base.is_empty() && ext.len() <= 5 && ext.chars().all(|c| c.is_alphanumeric()) {
+                    (base.to_string(), ext.to_lowercase())
+                } else {
+                    extract_filename_parts(url, title, &self.mime_type)
+                }
+            } else {
+                (orig.clone(), mime_to_extension(&self.mime_type).to_string())
+            }
+        } else {
+            extract_filename_parts(url, title, &self.mime_type)
+        };
+
+        let sanitized = sanitize_filename(&basename);
+        let depth = 2 + self.dedup_index.unwrap_or(0) as usize;
+        let prefix = &self.content_hash[..depth.min(self.content_hash.len())];
+        let filename = format!("{}-{}.{}", sanitized, &self.content_hash[..8], extension);
+
+        PathBuf::from(prefix).join(filename)
     }
 }
 
@@ -359,12 +423,7 @@ mod tests {
 
     #[test]
     fn test_add_version_different_content() {
-        let version1 = DocumentVersion::new(
-            b"content v1",
-            PathBuf::from("/tmp/v1"),
-            "application/pdf".to_string(),
-            None,
-        );
+        let version1 = DocumentVersion::new(b"content v1", "application/pdf".to_string(), None);
 
         let mut doc = Document::new(
             "doc1".to_string(),
@@ -375,12 +434,7 @@ mod tests {
             serde_json::json!({}),
         );
 
-        let version2 = DocumentVersion::new(
-            b"content v2",
-            PathBuf::from("/tmp/v2"),
-            "application/pdf".to_string(),
-            None,
-        );
+        let version2 = DocumentVersion::new(b"content v2", "application/pdf".to_string(), None);
 
         assert!(doc.add_version(version2));
         assert_eq!(doc.versions.len(), 2);
@@ -389,12 +443,7 @@ mod tests {
     #[test]
     fn test_add_version_same_content() {
         let content = b"same content";
-        let version1 = DocumentVersion::new(
-            content,
-            PathBuf::from("/tmp/v1"),
-            "application/pdf".to_string(),
-            None,
-        );
+        let version1 = DocumentVersion::new(content, "application/pdf".to_string(), None);
 
         let mut doc = Document::new(
             "doc1".to_string(),
@@ -405,14 +454,65 @@ mod tests {
             serde_json::json!({}),
         );
 
-        let version2 = DocumentVersion::new(
-            content,
-            PathBuf::from("/tmp/v2"),
-            "application/pdf".to_string(),
-            None,
-        );
+        let version2 = DocumentVersion::new(content, "application/pdf".to_string(), None);
 
         assert!(!doc.add_version(version2));
         assert_eq!(doc.versions.len(), 1);
+    }
+
+    #[test]
+    #[cfg(not(target_os = "windows"))]
+    fn test_resolve_path_legacy_absolute() {
+        let mut version =
+            DocumentVersion::new(b"test content", "application/pdf".to_string(), None);
+        version.file_path = Some(PathBuf::from(
+            "/opt/foiacquire/documents/ab/report-abcdef12.pdf",
+        ));
+
+        let resolved = version.resolve_path(
+            Path::new("/mnt/documents"),
+            "https://example.com/report.pdf",
+            "report",
+        );
+        assert_eq!(
+            resolved,
+            PathBuf::from("/mnt/documents/ab/report-abcdef12.pdf")
+        );
+    }
+
+    #[test]
+    fn test_resolve_path_relative() {
+        let mut version =
+            DocumentVersion::new(b"test content", "application/pdf".to_string(), None);
+        version.file_path = Some(PathBuf::from("ab/report-abcdef12.pdf"));
+
+        let resolved = version.resolve_path(
+            Path::new("/mnt/documents"),
+            "https://example.com/report.pdf",
+            "report",
+        );
+        assert_eq!(
+            resolved,
+            PathBuf::from("/mnt/documents/ab/report-abcdef12.pdf")
+        );
+    }
+
+    #[test]
+    fn test_resolve_path_none_computes_deterministic() {
+        let version = DocumentVersion::new(
+            b"test content",
+            "application/pdf".to_string(),
+            Some("https://example.com/report.pdf".to_string()),
+        );
+        assert!(version.file_path.is_none());
+
+        let resolved = version.resolve_path(
+            Path::new("/mnt/documents"),
+            "https://example.com/report.pdf",
+            "Report Title",
+        );
+        // Should be deterministic based on hash
+        assert!(resolved.starts_with("/mnt/documents"));
+        assert!(resolved.to_string_lossy().ends_with(".pdf"));
     }
 }

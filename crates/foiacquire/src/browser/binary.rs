@@ -37,7 +37,12 @@ impl BrowserFetcher {
     ) -> Result<BinaryFetchResponse> {
         self.ensure_browser().await?;
 
-        let browser = self.browser.as_ref().unwrap().lock().await;
+        let browser = self
+            .browser
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("browser not initialized after ensure_browser"))?
+            .lock()
+            .await;
 
         // First, navigate to a context page if provided (to establish session)
         let page = if let Some(ctx_url) = context_url {

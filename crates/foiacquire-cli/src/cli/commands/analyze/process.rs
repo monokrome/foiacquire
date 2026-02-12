@@ -93,7 +93,11 @@ pub async fn cmd_analyze(
     let config_history = ctx.config_history();
     let mut current_config_hash = config.hash();
 
-    let service = AnalysisService::with_ocr_config(doc_repo, config.analysis.ocr.clone());
+    let service = AnalysisService::with_ocr_config(
+        doc_repo,
+        config.analysis.ocr.clone(),
+        settings.documents_dir.clone(),
+    );
 
     // If specific doc_id provided, process just that document (no daemon mode)
     if let Some(id) = doc_id {

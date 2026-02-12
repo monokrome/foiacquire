@@ -45,12 +45,12 @@ impl DieselRateLimitBackend {
     fn record_to_state(record: RateLimitStateRecord) -> DomainRateState {
         DomainRateState {
             domain: record.domain,
-            current_delay_ms: record.current_delay_ms as u64,
+            current_delay_ms: record.current_delay_ms.max(0) as u64,
             last_request_at: None,    // Not stored in DB, managed at runtime
             consecutive_successes: 0, // Reset on load
             in_backoff: record.in_backoff != 0,
-            total_requests: record.total_requests as u64,
-            rate_limit_hits: record.rate_limit_hits as u64,
+            total_requests: record.total_requests.max(0) as u64,
+            rate_limit_hits: record.rate_limit_hits.max(0) as u64,
         }
     }
 
@@ -58,10 +58,10 @@ impl DieselRateLimitBackend {
     async fn save_state(&self, state: &DomainRateState) -> RateLimitResult<()> {
         let now = Utc::now().to_rfc3339();
         let domain = &state.domain;
-        let current_delay_ms = state.current_delay_ms as i32;
+        let current_delay_ms = i32::try_from(state.current_delay_ms).unwrap_or(i32::MAX);
         let in_backoff = i32::from(state.in_backoff);
-        let total_requests = state.total_requests as i32;
-        let rate_limit_hits = state.rate_limit_hits as i32;
+        let total_requests = i32::try_from(state.total_requests).unwrap_or(i32::MAX);
+        let rate_limit_hits = i32::try_from(state.rate_limit_hits).unwrap_or(i32::MAX);
 
         with_conn_split!(self.pool,
             sqlite: conn => {

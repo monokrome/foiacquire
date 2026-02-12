@@ -58,6 +58,42 @@ impl DieselDocumentRepository {
     // Core CRUD Operations
     // ========================================================================
 
+    /// Convert document records to documents with batch-loaded versions.
+    ///
+    /// Single query for all versions instead of one query per document.
+    async fn records_to_documents(
+        &self,
+        records: Vec<DocumentRecord>,
+    ) -> Result<Vec<Document>, DieselError> {
+        if records.is_empty() {
+            return Ok(Vec::new());
+        }
+        let doc_ids: Vec<String> = records.iter().map(|r| r.id.clone()).collect();
+        let mut versions_map = self.load_versions_batch(&doc_ids).await?;
+        records
+            .into_iter()
+            .map(|record| {
+                let versions = versions_map.remove(&record.id).unwrap_or_default();
+                Self::record_to_document(record, versions)
+            })
+            .collect()
+    }
+
+    /// Get multiple documents by IDs in a single batch query.
+    pub async fn get_batch(&self, ids: &[String]) -> Result<Vec<Document>, DieselError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let records: Vec<DocumentRecord> = with_conn!(self.pool, conn, {
+            documents::table
+                .filter(documents::id.eq_any(ids))
+                .load(&mut conn)
+                .await
+        })?;
+
+        self.records_to_documents(records).await
+    }
+
     /// Get a document by ID.
     pub async fn get(&self, id: &str) -> Result<Option<Document>, DieselError> {
         let record: Option<DocumentRecord> = with_conn!(self.pool, conn, {
@@ -67,7 +103,7 @@ impl DieselDocumentRepository {
         match record {
             Some(record) => {
                 let versions = self.load_versions(&record.id).await?;
-                Ok(Some(Self::record_to_document(record, versions)))
+                Ok(Some(Self::record_to_document(record, versions)?))
             }
             None => Ok(None),
         }
@@ -83,12 +119,7 @@ impl DieselDocumentRepository {
                 .await
         })?;
 
-        let mut docs = Vec::with_capacity(records.len());
-        for record in records {
-            let versions = self.load_versions(&record.id).await?;
-            docs.push(Self::record_to_document(record, versions));
-        }
-        Ok(docs)
+        self.records_to_documents(records).await
     }
 
     /// Get documents by URL.
@@ -100,12 +131,7 @@ impl DieselDocumentRepository {
                 .await
         })?;
 
-        let mut docs = Vec::with_capacity(records.len());
-        for record in records {
-            let versions = self.load_versions(&record.id).await?;
-            docs.push(Self::record_to_document(record, versions));
-        }
-        Ok(docs)
+        self.records_to_documents(records).await
     }
 
     /// Check if a document exists.
@@ -129,7 +155,8 @@ impl DieselDocumentRepository {
     pub async fn save(&self, doc: &Document) -> Result<(), DieselError> {
         use crate::utils::mime_type_category;
 
-        let metadata = serde_json::to_string(&doc.metadata).unwrap_or_else(|_| "{}".to_string());
+        let metadata = serde_json::to_string(&doc.metadata)
+            .map_err(|e| diesel::result::Error::SerializationError(Box::new(e)))?;
         let created_at = doc.created_at.to_rfc3339();
         let updated_at = doc.updated_at.to_rfc3339();
         let status = doc.status.as_str().to_string();
@@ -250,7 +277,7 @@ impl DieselDocumentRepository {
         let mut docs = Vec::with_capacity(records.len());
         for record in records {
             let versions = self.load_versions(&record.id).await?;
-            docs.push(Self::record_to_document(record, versions));
+            docs.push(Self::record_to_document(record, versions)?);
         }
         Ok(docs)
     }
@@ -297,7 +324,9 @@ impl DieselDocumentRepository {
                     virtual_files::file_size.eq(vf.file_size as i32),
                     virtual_files::extracted_text.eq(&vf.extracted_text),
                     virtual_files::synopsis.eq(&vf.synopsis),
-                    virtual_files::tags.eq(serde_json::to_string(&vf.tags).ok().as_deref()),
+                    virtual_files::tags.eq(serde_json::to_string(&vf.tags)
+                        .map_err(|e| diesel::result::Error::SerializationError(Box::new(e)))?
+                        .as_str()),
                     virtual_files::status.eq(vf.status.as_str()),
                     virtual_files::created_at.eq(&now),
                     virtual_files::updated_at.eq(&now),
@@ -320,7 +349,7 @@ impl DieselDocumentRepository {
                 .filter(virtual_files::version_id.eq(version))
                 .load::<VirtualFileRecord>(&mut conn)
                 .await
-                .map(|records| {
+                .and_then(|records| {
                     records
                         .into_iter()
                         .map(Self::virtual_file_record_to_model)
@@ -334,29 +363,46 @@ impl DieselDocumentRepository {
         &self,
         source_id: Option<&str>,
     ) -> Result<u64, DieselError> {
-        let source_filter = source_id
-            .map(|s| format!("AND d.source_id = '{}'", s.replace('\'', "''")))
-            .unwrap_or_default();
-
-        let query = format!(
-            r#"SELECT COUNT(DISTINCT d.id) as count
-               FROM documents d
-               JOIN document_versions dv ON d.id = dv.document_id
-               WHERE d.status IN ('pending', 'downloaded')
-               AND (dv.mime_type = 'application/zip'
-                    OR dv.mime_type = 'application/x-zip'
-                    OR dv.mime_type = 'application/x-zip-compressed'
-                    OR dv.mime_type = 'application/x-tar'
-                    OR dv.mime_type = 'application/gzip'
-                    OR dv.mime_type = 'application/x-rar-compressed'
-                    OR dv.mime_type = 'application/x-7z-compressed')
-               {}"#,
-            source_filter
-        );
-
         with_conn!(self.pool, conn, {
-            let result: Vec<CountRow> =
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
+            let result: Vec<CountRow> = if let Some(sid) = source_id {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(
+                        r#"SELECT COUNT(DISTINCT d.id) as count
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type = 'application/zip'
+                                OR dv.mime_type = 'application/x-zip'
+                                OR dv.mime_type = 'application/x-zip-compressed'
+                                OR dv.mime_type = 'application/x-tar'
+                                OR dv.mime_type = 'application/gzip'
+                                OR dv.mime_type = 'application/x-rar-compressed'
+                                OR dv.mime_type = 'application/x-7z-compressed')
+                           AND d.source_id = $1"#,
+                    )
+                    .bind::<diesel::sql_types::Text, _>(sid),
+                    &mut conn,
+                )
+                .await?
+            } else {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(
+                        r#"SELECT COUNT(DISTINCT d.id) as count
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type = 'application/zip'
+                                OR dv.mime_type = 'application/x-zip'
+                                OR dv.mime_type = 'application/x-zip-compressed'
+                                OR dv.mime_type = 'application/x-tar'
+                                OR dv.mime_type = 'application/gzip'
+                                OR dv.mime_type = 'application/x-rar-compressed'
+                                OR dv.mime_type = 'application/x-7z-compressed')"#,
+                    ),
+                    &mut conn,
+                )
+                .await?
+            };
             #[allow(clippy::get_first)]
             Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
         })
@@ -367,23 +413,34 @@ impl DieselDocumentRepository {
         &self,
         source_id: Option<&str>,
     ) -> Result<u64, DieselError> {
-        let source_filter = source_id
-            .map(|s| format!("AND d.source_id = '{}'", s.replace('\'', "''")))
-            .unwrap_or_default();
-
-        let query = format!(
-            r#"SELECT COUNT(DISTINCT d.id) as count
-               FROM documents d
-               JOIN document_versions dv ON d.id = dv.document_id
-               WHERE d.status IN ('pending', 'downloaded')
-               AND (dv.mime_type LIKE 'message/%' OR dv.mime_type LIKE '%rfc822%')
-               {}"#,
-            source_filter
-        );
-
         with_conn!(self.pool, conn, {
-            let result: Vec<CountRow> =
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
+            let result: Vec<CountRow> = if let Some(sid) = source_id {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(
+                        r#"SELECT COUNT(DISTINCT d.id) as count
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type LIKE 'message/%' OR dv.mime_type LIKE '%rfc822%')
+                           AND d.source_id = $1"#,
+                    )
+                    .bind::<diesel::sql_types::Text, _>(sid),
+                    &mut conn,
+                )
+                .await?
+            } else {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(
+                        r#"SELECT COUNT(DISTINCT d.id) as count
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type LIKE 'message/%' OR dv.mime_type LIKE '%rfc822%')"#,
+                    ),
+                    &mut conn,
+                )
+                .await?
+            };
             #[allow(clippy::get_first)]
             Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
         })
@@ -395,30 +452,52 @@ impl DieselDocumentRepository {
         source_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Document>, DieselError> {
-        let source_filter = source_id
-            .map(|s| format!("AND d.source_id = '{}'", s.replace('\'', "''")))
-            .unwrap_or_default();
-
-        let query = format!(
-            r#"SELECT DISTINCT d.id
-               FROM documents d
-               JOIN document_versions dv ON d.id = dv.document_id
-               WHERE d.status IN ('pending', 'downloaded')
-               AND (dv.mime_type = 'application/zip'
-                    OR dv.mime_type = 'application/x-zip'
-                    OR dv.mime_type = 'application/x-zip-compressed'
-                    OR dv.mime_type = 'application/x-tar'
-                    OR dv.mime_type = 'application/gzip'
-                    OR dv.mime_type = 'application/x-rar-compressed'
-                    OR dv.mime_type = 'application/x-7z-compressed')
-               {}
-               ORDER BY d.updated_at ASC
-               LIMIT {}"#,
-            source_filter, limit
-        );
-
         let ids: Vec<DocIdRow> = with_conn!(self.pool, conn, {
-            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await
+            if let Some(sid) = source_id {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(format!(
+                        r#"SELECT DISTINCT d.id
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type = 'application/zip'
+                                OR dv.mime_type = 'application/x-zip'
+                                OR dv.mime_type = 'application/x-zip-compressed'
+                                OR dv.mime_type = 'application/x-tar'
+                                OR dv.mime_type = 'application/gzip'
+                                OR dv.mime_type = 'application/x-rar-compressed'
+                                OR dv.mime_type = 'application/x-7z-compressed')
+                           AND d.source_id = $1
+                           ORDER BY d.updated_at ASC
+                           LIMIT {}"#,
+                        limit
+                    ))
+                    .bind::<diesel::sql_types::Text, _>(sid),
+                    &mut conn,
+                )
+                .await
+            } else {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(format!(
+                        r#"SELECT DISTINCT d.id
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type = 'application/zip'
+                                OR dv.mime_type = 'application/x-zip'
+                                OR dv.mime_type = 'application/x-zip-compressed'
+                                OR dv.mime_type = 'application/x-tar'
+                                OR dv.mime_type = 'application/gzip'
+                                OR dv.mime_type = 'application/x-rar-compressed'
+                                OR dv.mime_type = 'application/x-7z-compressed')
+                           ORDER BY d.updated_at ASC
+                           LIMIT {}"#,
+                        limit
+                    )),
+                    &mut conn,
+                )
+                .await
+            }
         })?;
 
         let mut docs = Vec::with_capacity(ids.len());
@@ -436,24 +515,40 @@ impl DieselDocumentRepository {
         source_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Document>, DieselError> {
-        let source_filter = source_id
-            .map(|s| format!("AND d.source_id = '{}'", s.replace('\'', "''")))
-            .unwrap_or_default();
-
-        let query = format!(
-            r#"SELECT DISTINCT d.id
-               FROM documents d
-               JOIN document_versions dv ON d.id = dv.document_id
-               WHERE d.status IN ('pending', 'downloaded')
-               AND (dv.mime_type LIKE 'message/%' OR dv.mime_type LIKE '%rfc822%')
-               {}
-               ORDER BY d.updated_at ASC
-               LIMIT {}"#,
-            source_filter, limit
-        );
-
         let ids: Vec<DocIdRow> = with_conn!(self.pool, conn, {
-            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await
+            if let Some(sid) = source_id {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(format!(
+                        r#"SELECT DISTINCT d.id
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type LIKE 'message/%' OR dv.mime_type LIKE '%rfc822%')
+                           AND d.source_id = $1
+                           ORDER BY d.updated_at ASC
+                           LIMIT {}"#,
+                        limit
+                    ))
+                    .bind::<diesel::sql_types::Text, _>(sid),
+                    &mut conn,
+                )
+                .await
+            } else {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(format!(
+                        r#"SELECT DISTINCT d.id
+                           FROM documents d
+                           JOIN document_versions dv ON d.id = dv.document_id
+                           WHERE d.status IN ('pending', 'downloaded')
+                           AND (dv.mime_type LIKE 'message/%' OR dv.mime_type LIKE '%rfc822%')
+                           ORDER BY d.updated_at ASC
+                           LIMIT {}"#,
+                        limit
+                    )),
+                    &mut conn,
+                )
+                .await
+            }
         })?;
 
         let mut docs = Vec::with_capacity(ids.len());
@@ -472,26 +567,45 @@ impl DieselDocumentRepository {
     pub(crate) fn record_to_document(
         record: DocumentRecord,
         versions: Vec<DocumentVersion>,
-    ) -> Document {
-        Document {
+    ) -> Result<Document, DieselError> {
+        let tags = match record.tags {
+            Some(ref s) => serde_json::from_str(s).map_err(|e| {
+                diesel::result::Error::DeserializationError(
+                    format!("Invalid tags JSON for document '{}': {}", record.id, e).into(),
+                )
+            })?,
+            None => Vec::new(),
+        };
+        let status = DocumentStatus::from_str(&record.status).ok_or_else(|| {
+            diesel::result::Error::DeserializationError(
+                format!(
+                    "Invalid document status '{}' for document '{}'",
+                    record.status, record.id
+                )
+                .into(),
+            )
+        })?;
+        let metadata = serde_json::from_str(&record.metadata).map_err(|e| {
+            diesel::result::Error::DeserializationError(
+                format!("Invalid metadata JSON for document '{}': {}", record.id, e).into(),
+            )
+        })?;
+
+        Ok(Document {
             id: record.id,
             source_id: record.source_id,
             title: record.title,
             source_url: record.source_url,
             extracted_text: record.extracted_text,
             synopsis: record.synopsis,
-            tags: record
-                .tags
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_default(),
-            status: DocumentStatus::from_str(&record.status).unwrap_or(DocumentStatus::Pending),
-            metadata: serde_json::from_str(&record.metadata)
-                .unwrap_or(serde_json::Value::Object(Default::default())),
+            tags,
+            status,
+            metadata,
             created_at: parse_datetime(&record.created_at),
             updated_at: parse_datetime(&record.updated_at),
             discovery_method: record.discovery_method,
             versions,
-        }
+        })
     }
 
     pub(crate) fn version_record_to_model(record: DocumentVersionRecord) -> DocumentVersion {
@@ -499,7 +613,7 @@ impl DieselDocumentRepository {
             id: record.id as i64,
             content_hash: record.content_hash,
             content_hash_blake3: record.content_hash_blake3,
-            file_path: PathBuf::from(record.file_path),
+            file_path: record.file_path.map(PathBuf::from),
             file_size: record.file_size as u64,
             mime_type: record.mime_type,
             acquired_at: parse_datetime(&record.acquired_at),
@@ -509,11 +623,30 @@ impl DieselDocumentRepository {
             page_count: record.page_count.map(|c| c as u32),
             archive_snapshot_id: record.archive_snapshot_id,
             earliest_archived_at: parse_datetime_opt(record.earliest_archived_at),
+            dedup_index: record.dedup_index.map(|i| i as u32),
         }
     }
 
-    fn virtual_file_record_to_model(record: VirtualFileRecord) -> VirtualFile {
-        VirtualFile {
+    fn virtual_file_record_to_model(record: VirtualFileRecord) -> Result<VirtualFile, DieselError> {
+        let tags = match record.tags {
+            Some(ref s) => serde_json::from_str(s).map_err(|e| {
+                diesel::result::Error::DeserializationError(
+                    format!("Invalid tags JSON for virtual file '{}': {}", record.id, e).into(),
+                )
+            })?,
+            None => Vec::new(),
+        };
+        let status = VirtualFileStatus::from_str(&record.status).ok_or_else(|| {
+            diesel::result::Error::DeserializationError(
+                format!(
+                    "Invalid virtual file status '{}' for file '{}'",
+                    record.status, record.id
+                )
+                .into(),
+            )
+        })?;
+
+        Ok(VirtualFile {
             id: record.id,
             document_id: record.document_id,
             version_id: record.version_id as i64,
@@ -523,27 +656,15 @@ impl DieselDocumentRepository {
             mime_type: record.mime_type,
             extracted_text: record.extracted_text,
             synopsis: record.synopsis,
-            tags: record
-                .tags
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_default(),
-            status: VirtualFileStatus::from_str(&record.status)
-                .unwrap_or(VirtualFileStatus::Pending),
+            tags,
+            status,
             created_at: parse_datetime(&record.created_at),
             updated_at: parse_datetime(&record.updated_at),
-        }
+        })
     }
 }
 
 // Helper structs for SQL queries
-#[derive(diesel::QueryableByName)]
-pub(crate) struct StatusCount {
-    #[diesel(sql_type = diesel::sql_types::Text)]
-    pub status: String,
-    #[diesel(sql_type = diesel::sql_types::BigInt)]
-    pub count: i64,
-}
-
 #[derive(diesel::QueryableByName)]
 pub(crate) struct MimeCount {
     #[diesel(sql_type = diesel::sql_types::Text)]
@@ -641,7 +762,7 @@ mod tests {
                 document_id TEXT NOT NULL,
                 content_hash TEXT NOT NULL,
                 content_hash_blake3 TEXT,
-                file_path TEXT NOT NULL,
+                file_path TEXT,
                 file_size INTEGER NOT NULL,
                 mime_type TEXT NOT NULL,
                 acquired_at TEXT NOT NULL,
@@ -650,7 +771,8 @@ mod tests {
                 server_date TEXT,
                 page_count INTEGER,
                 archive_snapshot_id INTEGER,
-                earliest_archived_at TEXT
+                earliest_archived_at TEXT,
+                dedup_index INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS document_pages (
@@ -754,7 +876,7 @@ mod tests {
             id: 1,
             content_hash: "abc123".to_string(),
             content_hash_blake3: Some("def456".to_string()),
-            file_path: PathBuf::from("/tmp/test.pdf"),
+            file_path: None,
             file_size: 1024,
             mime_type: "application/pdf".to_string(),
             acquired_at: Utc::now(),
@@ -764,11 +886,36 @@ mod tests {
             page_count: None,
             archive_snapshot_id: None,
             earliest_archived_at: None,
+            dedup_index: None,
         };
         repo.add_version("doc-2", &version).await.unwrap();
 
         let latest = repo.get_latest_version("doc-2").await.unwrap().unwrap();
         assert_eq!(latest.content_hash, "abc123");
         assert_eq!(latest.file_size, 1024);
+    }
+
+    #[tokio::test]
+    async fn test_count_unprocessed_archives_with_sql_metacharacters() {
+        let (pool, _dir) = setup_test_db().await;
+        let repo = DieselDocumentRepository::new(pool);
+
+        let result = repo
+            .count_unprocessed_archives(Some("'; DROP TABLE documents; --"))
+            .await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_count_unprocessed_emails_with_sql_metacharacters() {
+        let (pool, _dir) = setup_test_db().await;
+        let repo = DieselDocumentRepository::new(pool);
+
+        let result = repo
+            .count_unprocessed_emails(Some("'; DROP TABLE documents; --"))
+            .await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
     }
 }

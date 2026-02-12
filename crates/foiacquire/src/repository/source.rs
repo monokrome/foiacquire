@@ -14,17 +14,22 @@ use crate::with_conn;
 #[cfg(feature = "postgres")]
 use crate::with_conn_split;
 
-impl From<SourceRecord> for Source {
-    fn from(record: SourceRecord) -> Self {
-        Source {
+impl TryFrom<SourceRecord> for Source {
+    type Error = diesel::result::Error;
+
+    fn try_from(record: SourceRecord) -> Result<Self, Self::Error> {
+        let metadata = serde_json::from_str(&record.metadata)
+            .map_err(|e| diesel::result::Error::DeserializationError(Box::new(e)))?;
+
+        Ok(Source {
             id: record.id,
             source_type: SourceType::from_str(&record.source_type).unwrap_or(SourceType::Custom),
             name: record.name,
             base_url: record.base_url,
-            metadata: serde_json::from_str(&record.metadata).unwrap_or_default(),
+            metadata,
             created_at: parse_datetime(&record.created_at),
             last_scraped: parse_datetime_opt(record.last_scraped),
-        }
+        })
     }
 }
 
@@ -49,7 +54,7 @@ impl SourceRepository {
                 .first::<SourceRecord>(&mut conn)
                 .await
                 .optional()
-                .map(|opt| opt.map(Source::from))
+                .and_then(|opt| opt.map(Source::try_from).transpose())
         })
     }
 
@@ -59,7 +64,7 @@ impl SourceRepository {
             sources::table
                 .load::<SourceRecord>(&mut conn)
                 .await
-                .map(|records| records.into_iter().map(Source::from).collect())
+                .and_then(|records| records.into_iter().map(Source::try_from).collect())
         })
     }
 

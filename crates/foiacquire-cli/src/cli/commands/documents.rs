@@ -94,14 +94,16 @@ async fn process_archive(
     doc_repo: &DieselDocumentRepository,
     run_ocr: bool,
     text_extractor: &foiacquire_analysis::ocr::TextExtractor,
+    documents_dir: &Path,
 ) -> Option<(usize, usize)> {
     use foiacquire::models::{VirtualFile, VirtualFileStatus};
     use foiacquire_analysis::ocr::ArchiveExtractor;
 
     let version = doc.current_version()?;
     let version_id = doc_repo.get_current_version_id(&doc.id).await.ok()??;
+    let file_path = version.resolve_path(documents_dir, &doc.source_url, &doc.title);
 
-    let entries = match ArchiveExtractor::list_zip_contents(&version.file_path) {
+    let entries = match ArchiveExtractor::list_zip_contents(&file_path) {
         Ok(e) => e,
         Err(e) => {
             tracing::warn!("Failed to read archive {}: {}", doc.title, e);
@@ -115,7 +117,7 @@ async fn process_archive(
     for entry in entries {
         let (text, status) = if entry.is_extractable() {
             let result = extract_and_ocr_from_archive(
-                &version.file_path,
+                &file_path,
                 &entry.path,
                 &entry.mime_type,
                 run_ocr,
@@ -154,14 +156,16 @@ async fn process_email(
     doc_repo: &DieselDocumentRepository,
     run_ocr: bool,
     text_extractor: &foiacquire_analysis::ocr::TextExtractor,
+    documents_dir: &Path,
 ) -> Option<(usize, usize)> {
     use foiacquire::models::{VirtualFile, VirtualFileStatus};
     use foiacquire_analysis::ocr::EmailExtractor;
 
     let version = doc.current_version()?;
     let version_id = doc_repo.get_current_version_id(&doc.id).await.ok()??;
+    let file_path = version.resolve_path(documents_dir, &doc.source_url, &doc.title);
 
-    let parsed = match EmailExtractor::parse_email(&version.file_path) {
+    let parsed = match EmailExtractor::parse_email(&file_path) {
         Ok(p) => p,
         Err(e) => {
             tracing::warn!("Failed to parse email {}: {}", doc.title, e);
@@ -175,7 +179,7 @@ async fn process_email(
     for attachment in &parsed.attachments {
         let (text, status) = if attachment.is_extractable() {
             let result = extract_and_ocr_from_email(
-                &version.file_path,
+                &file_path,
                 &attachment.filename,
                 &attachment.mime_type,
                 run_ocr,
@@ -279,8 +283,14 @@ pub async fn cmd_archive(
             .await?
         {
             pb.set_message(truncate(&doc.title, 40));
-            if let Some((discovered, extracted)) =
-                process_archive(&doc, &doc_repo, run_ocr, &text_extractor).await
+            if let Some((discovered, extracted)) = process_archive(
+                &doc,
+                &doc_repo,
+                run_ocr,
+                &text_extractor,
+                &settings.documents_dir,
+            )
+            .await
             {
                 stats.files_discovered += discovered;
                 stats.files_extracted += extracted;
@@ -298,8 +308,14 @@ pub async fn cmd_archive(
             .await?
         {
             pb.set_message(truncate(&doc.title, 40));
-            if let Some((discovered, extracted)) =
-                process_email(&doc, &doc_repo, run_ocr, &text_extractor).await
+            if let Some((discovered, extracted)) = process_email(
+                &doc,
+                &doc_repo,
+                run_ocr,
+                &text_extractor,
+                &settings.documents_dir,
+            )
+            .await
             {
                 stats.files_discovered += discovered;
                 stats.files_extracted += extracted;
@@ -375,7 +391,7 @@ pub async fn cmd_ls(
                         "status": doc.status.as_str(),
                         "mime_type": version.map(|v| v.mime_type.as_str()),
                         "file_size": version.map(|v| v.file_size),
-                        "file_path": version.map(|v| v.file_path.to_string_lossy().to_string()),
+                        "file_path": version.and_then(|v| v.file_path.as_ref().map(|p| p.to_string_lossy().to_string())),
                         "created_at": doc.created_at.to_rfc3339(),
                         "updated_at": doc.updated_at.to_rfc3339(),
                     })
@@ -490,7 +506,9 @@ pub async fn cmd_info(settings: &Settings, doc_id: &str) -> anyhow::Result<()> {
     if let Some(version) = doc.current_version() {
         println!("\n{}", style("Current Version").bold());
         println!("{}", "-".repeat(60));
-        println!("{:<18} {}", "File:", version.file_path.display());
+        let resolved_path =
+            version.resolve_path(&settings.documents_dir, &doc.source_url, &doc.title);
+        println!("{:<18} {}", "File:", resolved_path.display());
         println!("{:<18} {}", "MIME Type:", version.mime_type);
         println!("{:<18} {}", "Size:", format_bytes(version.file_size));
         println!("{:<18} {}", "Content Hash:", &version.content_hash[..16]);
@@ -588,7 +606,8 @@ pub async fn cmd_read(settings: &Settings, doc_id: &str, text_only: bool) -> any
             .current_version()
             .ok_or_else(|| anyhow::anyhow!("Document has no file version"))?;
 
-        let content = std::fs::read(&version.file_path)?;
+        let resolved = version.resolve_path(&settings.documents_dir, &doc.source_url, &doc.title);
+        let content = std::fs::read(&resolved)?;
 
         use std::io::Write;
         std::io::stdout().write_all(&content)?;

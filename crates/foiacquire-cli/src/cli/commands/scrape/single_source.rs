@@ -246,7 +246,9 @@ pub(super) async fn cmd_scrape_single_tui(
             tracing::warn!("Failed to save document: {}", e);
             errors_this_session += 1;
             service_status.record_error(&e.to_string());
-            let _ = service_status_repo.upsert(&service_status).await;
+            if let Err(e) = service_status_repo.upsert(&service_status).await {
+                tracing::warn!("Failed to update service status on error: {}", e);
+            }
             continue;
         }
 
@@ -290,7 +292,9 @@ pub(super) async fn cmd_scrape_single_tui(
         browser_failures: None,
     });
     service_status.set_stopped();
-    let _ = service_status_repo.upsert(&service_status).await;
+    if let Err(e) = service_status_repo.upsert(&service_status).await {
+        tracing::warn!("Failed to update final service status: {}", e);
+    }
 
     // Final status
     if let Some(line) = status_line {

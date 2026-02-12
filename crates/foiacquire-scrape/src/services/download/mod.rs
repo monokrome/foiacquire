@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::mpsc;
+use tracing::warn;
 
 use crate::services::youtube;
 use crate::{extract_title_from_url, HttpClient};
@@ -18,7 +19,7 @@ use foiacquire::models::{DocumentVersion, UrlStatus};
 use foiacquire::repository::{
     extract_filename_parts, DieselCrawlRepository, DieselDocumentRepository,
 };
-use foiacquire::storage::content_storage_path_with_name;
+use foiacquire::storage::compute_storage_path_with_dedup;
 
 use types::{
     handle_download_failure, handle_unchanged, save_or_update_document, send_failure_event,
@@ -248,7 +249,7 @@ impl DownloadService {
                     let file_size = content.len() as i64;
 
                     // Check for existing file with same content
-                    let (content_path, was_deduplicated) = match doc_repo
+                    let (dedup_index, was_deduplicated) = match doc_repo
                         .find_existing_file(&hashes.sha256, &hashes.blake3, file_size)
                         .await
                     {
@@ -259,25 +260,36 @@ impl DownloadService {
                                 .send(DownloadEvent::Deduplicated {
                                     worker_id,
                                     url: url.clone(),
-                                    existing_path: existing_path.clone(),
+                                    existing_path,
                                 })
                                 .await;
-                            (std::path::PathBuf::from(existing_path), true)
+                            (None, true)
                         }
                         Ok(None) | Err(_) => {
                             // No duplicate or dedup check failed - write new file
                             let (basename, extension) =
                                 extract_filename_parts(&url, &title, &mime_type);
-                            let new_path = content_storage_path_with_name(
+                            let (relative_path, dedup_idx) = compute_storage_path_with_dedup(
                                 &documents_dir,
                                 &hashes.sha256,
                                 &basename,
                                 &extension,
+                                &content,
                             );
+                            let new_path = documents_dir.join(&relative_path);
 
-                            if let Err(e) =
-                                tokio::fs::create_dir_all(new_path.parent().unwrap()).await
-                            {
+                            let Some(parent) = new_path.parent() else {
+                                send_failure_event(
+                                    &url,
+                                    &failed,
+                                    &event_tx,
+                                    worker_id,
+                                    "storage path has no parent directory",
+                                )
+                                .await;
+                                continue;
+                            };
+                            if let Err(e) = tokio::fs::create_dir_all(parent).await {
                                 send_failure_event(
                                     &url,
                                     &failed,
@@ -300,22 +312,22 @@ impl DownloadService {
                                 .await;
                                 continue;
                             }
-                            (new_path, false)
+                            (dedup_idx, false)
                         }
                     };
 
-                    let version = DocumentVersion::with_precomputed_hashes(
+                    let mut version = DocumentVersion::with_precomputed_hashes(
                         hashes.clone(),
                         file_size as u64,
-                        content_path,
                         mime_type.clone(),
                         Some(url.clone()),
                         disposition_filename,
                         server_date,
                     );
+                    version.dedup_index = dedup_index;
 
                     // Save or update document
-                    let new_document = save_or_update_document(
+                    let new_document = match save_or_update_document(
                         &doc_repo,
                         &url,
                         &crawl_url.source_id,
@@ -324,7 +336,23 @@ impl DownloadService {
                         serde_json::json!({}),
                         "crawl",
                     )
-                    .await;
+                    .await
+                    {
+                        Ok(new_doc) => new_doc,
+                        Err(e) => {
+                            handle_download_failure(
+                                &crawl_url,
+                                &crawl_repo,
+                                &failed,
+                                &event_tx,
+                                worker_id,
+                                &format!("Failed to save document: {}", e),
+                                false,
+                            )
+                            .await;
+                            continue;
+                        }
+                    };
 
                     // Mark URL as fetched
                     let mut fetched_url = crawl_url.clone();
@@ -333,7 +361,9 @@ impl DownloadService {
                     fetched_url.etag = etag;
                     fetched_url.last_modified = last_modified;
                     fetched_url.content_hash = Some(hashes.sha256.clone());
-                    let _ = crawl_repo.update_url(&fetched_url).await;
+                    if let Err(e) = crawl_repo.update_url(&fetched_url).await {
+                        warn!("Failed to update crawl URL status for {}: {}", url, e);
+                    }
 
                     // Only count as downloaded if we actually wrote a new file
                     if !was_deduplicated {
@@ -354,7 +384,9 @@ impl DownloadService {
 
         // Wait for all workers
         for handle in handles {
-            let _ = handle.await;
+            if let Err(e) = handle.await {
+                tracing::error!("Download worker panicked: {}", e);
+            }
         }
 
         // Get remaining count

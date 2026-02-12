@@ -33,9 +33,13 @@ impl From<foiacquire::models::DocumentVersion> for VersionResponse {
     fn from(v: foiacquire::models::DocumentVersion) -> Self {
         Self {
             id: v.id,
-            content_hash: v.content_hash,
+            content_hash: v.content_hash.clone(),
             content_hash_blake3: v.content_hash_blake3,
-            file_path: v.file_path.to_string_lossy().to_string(),
+            file_path: v
+                .file_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default(),
             file_size: v.file_size,
             mime_type: v.mime_type,
             acquired_at: v.acquired_at.to_rfc3339(),

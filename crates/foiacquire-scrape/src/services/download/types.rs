@@ -8,6 +8,8 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
+use tracing::warn;
+
 use crate::config::ViaMode;
 use foiacquire::models::{CrawlUrl, Document, DocumentVersion, UrlStatus};
 use foiacquire::privacy::PrivacyConfig;
@@ -93,7 +95,12 @@ pub async fn handle_download_failure(
     if increment_retry {
         failed_url.retry_count += 1;
     }
-    let _ = crawl_repo.update_url(&failed_url).await;
+    if let Err(e) = crawl_repo.update_url(&failed_url).await {
+        warn!(
+            "Failed to update crawl URL status for {}: {}",
+            crawl_url.url, e
+        );
+    }
     failed.fetch_add(1, Ordering::Relaxed);
     let _ = event_tx
         .send(DownloadEvent::Failed {
@@ -133,7 +140,12 @@ pub async fn handle_unchanged(
     let mut fetched_url = crawl_url.clone();
     fetched_url.status = UrlStatus::Fetched;
     fetched_url.fetched_at = Some(chrono::Utc::now());
-    let _ = crawl_repo.update_url(&fetched_url).await;
+    if let Err(e) = crawl_repo.update_url(&fetched_url).await {
+        warn!(
+            "Failed to update crawl URL status for {}: {}",
+            crawl_url.url, e
+        );
+    }
     skipped.fetch_add(1, Ordering::Relaxed);
     let _ = event_tx
         .send(DownloadEvent::Unchanged {
@@ -154,17 +166,13 @@ pub async fn save_or_update_document(
     version: DocumentVersion,
     metadata: serde_json::Value,
     discovery_method: &str,
-) -> bool {
-    let existing = doc_repo
-        .get_by_url(url)
-        .await
-        .ok()
-        .and_then(|v| v.into_iter().next());
+) -> Result<bool, foiacquire::repository::DieselError> {
+    let existing = doc_repo.get_by_url(url).await?.into_iter().next();
     let new_document = existing.is_none();
 
     if let Some(mut doc) = existing {
         if doc.add_version(version) {
-            let _ = doc_repo.save(&doc).await;
+            doc_repo.save(&doc).await?;
         }
     } else {
         let doc = Document::with_discovery_method(
@@ -176,8 +184,8 @@ pub async fn save_or_update_document(
             metadata,
             discovery_method.to_string(),
         );
-        let _ = doc_repo.save(&doc).await;
+        doc_repo.save(&doc).await?;
     }
 
-    new_document
+    Ok(new_document)
 }

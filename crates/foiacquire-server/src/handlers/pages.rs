@@ -127,7 +127,7 @@ pub async fn api_document_pages(
     }
 
     let is_pdf = version.mime_type.contains("pdf");
-    let pdf_path = version.file_path.clone();
+    let pdf_path = version.resolve_path(&state.documents_dir, &doc.source_url, &doc.title);
 
     let page_data_list: Vec<PageData> = if is_pdf {
         let mut handles = Vec::new();

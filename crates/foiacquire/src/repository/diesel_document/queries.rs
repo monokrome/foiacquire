@@ -6,13 +6,26 @@ use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 
-use super::{CountRow, DieselDocumentRepository, DocIdRow, MimeCount, StatusCount, TagRow};
+use super::{CountRow, DieselDocumentRepository, DocIdRow, MimeCount, TagRow};
 use crate::models::{Document, DocumentStatus};
 use crate::repository::diesel_models::DocumentRecord;
 use crate::repository::document::DocumentNavigation;
 use crate::repository::pool::DieselError;
 use crate::schema::documents;
 use crate::{with_conn, with_conn_split};
+
+/// Validate that a string only contains safe identifier characters (alphanumeric + underscore).
+///
+/// Used for values interpolated into JSON path expressions where bind parameters
+/// aren't supported. Rejects anything that could be SQL injection.
+fn validate_identifier(s: &str) -> Result<(), DieselError> {
+    if s.is_empty() || !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(diesel::result::Error::QueryBuilderError(
+            format!("invalid identifier: '{}'", s).into(),
+        ));
+    }
+    Ok(())
+}
 
 /// Parameters for browsing/filtering documents.
 #[derive(Debug, Default, Clone)]
@@ -145,20 +158,21 @@ impl DieselDocumentRepository {
         &self,
         source_id: Option<&str>,
     ) -> Result<HashMap<String, u64>, DieselError> {
-        let query = if let Some(sid) = source_id {
-            format!(
-                "SELECT status, COUNT(*) as count FROM documents WHERE source_id = '{}' GROUP BY status",
-                sid.replace('\'', "''")
-            )
-        } else {
-            "SELECT status, COUNT(*) as count FROM documents GROUP BY status".to_string()
-        };
+        use diesel::dsl::count_star;
 
         with_conn!(self.pool, conn, {
-            let rows: Vec<StatusCount> =
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn).await?;
+            let mut query = documents::table
+                .group_by(documents::status)
+                .select((documents::status, count_star()))
+                .into_boxed();
+
+            if let Some(sid) = source_id {
+                query = query.filter(documents::source_id.eq(sid));
+            }
+
+            let rows: Vec<(String, i64)> = query.load(&mut conn).await?;
             let mut counts = HashMap::new();
-            for StatusCount { status, count } in rows {
+            for (status, count) in rows {
                 counts.insert(status, count as u64);
             }
             Ok(counts)
@@ -209,36 +223,58 @@ impl DieselDocumentRepository {
         &self,
         source_id: Option<&str>,
     ) -> Result<u64, DieselError> {
-        let source_filter = source_id
-            .map(|s| format!("AND source_id = '{}'", s.replace('\'', "''")))
-            .unwrap_or_default();
-
         with_conn_split!(self.pool,
             sqlite: conn => {
-                let query = format!(
-                    r#"SELECT COUNT(*) as count FROM documents
-                       WHERE json_extract(metadata, '$.estimated_date') IS NULL
-                       {}"#,
-                    source_filter
-                );
-                let result: Vec<CountRow> =
-                    diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
-                        .await
-                        .unwrap_or_default();
+                let result: Vec<CountRow> = if let Some(sid) = source_id {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(
+                            r#"SELECT COUNT(*) as count FROM documents
+                               WHERE json_extract(metadata, '$.estimated_date') IS NULL
+                               AND source_id = $1"#,
+                        )
+                        .bind::<diesel::sql_types::Text, _>(sid),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                } else {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(
+                            r#"SELECT COUNT(*) as count FROM documents
+                               WHERE json_extract(metadata, '$.estimated_date') IS NULL"#,
+                        ),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                };
                 #[allow(clippy::get_first)]
                 Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
             },
             postgres: conn => {
-                let query = format!(
-                    r#"SELECT COUNT(*) as count FROM documents
-                       WHERE metadata->>'estimated_date' IS NULL
-                       {}"#,
-                    source_filter
-                );
-                let result: Vec<CountRow> =
-                    diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
-                        .await
-                        .unwrap_or_default();
+                let result: Vec<CountRow> = if let Some(sid) = source_id {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(
+                            r#"SELECT COUNT(*) as count FROM documents
+                               WHERE metadata->>'estimated_date' IS NULL
+                               AND source_id = $1"#,
+                        )
+                        .bind::<diesel::sql_types::Text, _>(sid),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                } else {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(
+                            r#"SELECT COUNT(*) as count FROM documents
+                               WHERE metadata->>'estimated_date' IS NULL"#,
+                        ),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                };
                 #[allow(clippy::get_first)]
                 Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
             }
@@ -272,47 +308,78 @@ impl DieselDocumentRepository {
                 .await;
         }
 
-        // Generic: check metadata.annotations[type].version < requested version
-        let source_filter = source_id
-            .map(|s| format!("AND source_id = '{}'", s.replace('\'', "''")))
-            .unwrap_or_default();
+        // annotation_type is interpolated into JSON path expressions where bind
+        // params aren't supported — validate it only contains safe identifier chars
+        validate_identifier(annotation_type)?;
 
         with_conn_split!(self.pool,
             sqlite: conn => {
-                let query = format!(
-                    r#"SELECT COUNT(*) as count FROM documents
-                       WHERE (
-                           json_extract(metadata, '$.annotations.{annotation_type}.version') IS NULL
-                           OR json_extract(metadata, '$.annotations.{annotation_type}.version') < {version}
-                       )
-                       {source_filter}"#,
-                    annotation_type = annotation_type.replace('\'', "''"),
-                    version = version,
-                    source_filter = source_filter,
-                );
-                let result: Vec<CountRow> =
-                    diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
-                        .await
-                        .unwrap_or_default();
+                let result: Vec<CountRow> = if let Some(sid) = source_id {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT COUNT(*) as count FROM documents
+                               WHERE (
+                                   json_extract(metadata, '$.annotations.{annotation_type}.version') IS NULL
+                                   OR json_extract(metadata, '$.annotations.{annotation_type}.version') < $1
+                               )
+                               AND source_id = $2"#,
+                        ))
+                        .bind::<diesel::sql_types::Integer, _>(version)
+                        .bind::<diesel::sql_types::Text, _>(sid),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                } else {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT COUNT(*) as count FROM documents
+                               WHERE (
+                                   json_extract(metadata, '$.annotations.{annotation_type}.version') IS NULL
+                                   OR json_extract(metadata, '$.annotations.{annotation_type}.version') < $1
+                               )"#,
+                        ))
+                        .bind::<diesel::sql_types::Integer, _>(version),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                };
                 #[allow(clippy::get_first)]
                 Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
             },
             postgres: conn => {
-                let query = format!(
-                    r#"SELECT COUNT(*) as count FROM documents
-                       WHERE (
-                           (metadata->'annotations'->'{annotation_type}'->>'version')::int IS NULL
-                           OR (metadata->'annotations'->'{annotation_type}'->>'version')::int < {version}
-                       )
-                       {source_filter}"#,
-                    annotation_type = annotation_type.replace('\'', "''"),
-                    version = version,
-                    source_filter = source_filter,
-                );
-                let result: Vec<CountRow> =
-                    diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
-                        .await
-                        .unwrap_or_default();
+                let result: Vec<CountRow> = if let Some(sid) = source_id {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT COUNT(*) as count FROM documents
+                               WHERE (
+                                   (metadata->'annotations'->'{annotation_type}'->>'version')::int IS NULL
+                                   OR (metadata->'annotations'->'{annotation_type}'->>'version')::int < $1
+                               )
+                               AND source_id = $2"#,
+                        ))
+                        .bind::<diesel::sql_types::Integer, _>(version)
+                        .bind::<diesel::sql_types::Text, _>(sid),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                } else {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT COUNT(*) as count FROM documents
+                               WHERE (
+                                   (metadata->'annotations'->'{annotation_type}'->>'version')::int IS NULL
+                                   OR (metadata->'annotations'->'{annotation_type}'->>'version')::int < $1
+                               )"#,
+                        ))
+                        .bind::<diesel::sql_types::Integer, _>(version),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                };
                 #[allow(clippy::get_first)]
                 Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
             }
@@ -339,57 +406,88 @@ impl DieselDocumentRepository {
                 .await;
         }
 
-        // Generic: check metadata.annotations[type].version < requested version
-        let source_filter = source_id
-            .map(|s| format!("AND source_id = '{}'", s.replace('\'', "''")))
-            .unwrap_or_default();
+        validate_identifier(annotation_type)?;
+        let limit_i64 = limit as i64;
 
         let ids: Vec<DocIdRow> = with_conn_split!(self.pool,
             sqlite: conn => {
-                let query = format!(
-                    r#"SELECT id FROM documents
-                       WHERE (
-                           json_extract(metadata, '$.annotations.{annotation_type}.version') IS NULL
-                           OR json_extract(metadata, '$.annotations.{annotation_type}.version') < {version}
-                       )
-                       {source_filter}
-                       LIMIT {limit}"#,
-                    annotation_type = annotation_type.replace('\'', "''"),
-                    version = version,
-                    source_filter = source_filter,
-                    limit = limit,
-                );
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                if let Some(sid) = source_id {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT id FROM documents
+                               WHERE (
+                                   json_extract(metadata, '$.annotations.{annotation_type}.version') IS NULL
+                                   OR json_extract(metadata, '$.annotations.{annotation_type}.version') < $1
+                               )
+                               AND source_id = $2
+                               LIMIT $3"#,
+                        ))
+                        .bind::<diesel::sql_types::Integer, _>(version)
+                        .bind::<diesel::sql_types::Text, _>(sid)
+                        .bind::<diesel::sql_types::BigInt, _>(limit_i64),
+                        &mut conn,
+                    )
                     .await
                     .unwrap_or_default()
+                } else {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT id FROM documents
+                               WHERE (
+                                   json_extract(metadata, '$.annotations.{annotation_type}.version') IS NULL
+                                   OR json_extract(metadata, '$.annotations.{annotation_type}.version') < $1
+                               )
+                               LIMIT $2"#,
+                        ))
+                        .bind::<diesel::sql_types::Integer, _>(version)
+                        .bind::<diesel::sql_types::BigInt, _>(limit_i64),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                }
             },
             postgres: conn => {
-                let query = format!(
-                    r#"SELECT id FROM documents
-                       WHERE (
-                           (metadata->'annotations'->'{annotation_type}'->>'version')::int IS NULL
-                           OR (metadata->'annotations'->'{annotation_type}'->>'version')::int < {version}
-                       )
-                       {source_filter}
-                       LIMIT {limit}"#,
-                    annotation_type = annotation_type.replace('\'', "''"),
-                    version = version,
-                    source_filter = source_filter,
-                    limit = limit,
-                );
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                if let Some(sid) = source_id {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT id FROM documents
+                               WHERE (
+                                   (metadata->'annotations'->'{annotation_type}'->>'version')::int IS NULL
+                                   OR (metadata->'annotations'->'{annotation_type}'->>'version')::int < $1
+                               )
+                               AND source_id = $2
+                               LIMIT $3"#,
+                        ))
+                        .bind::<diesel::sql_types::Integer, _>(version)
+                        .bind::<diesel::sql_types::Text, _>(sid)
+                        .bind::<diesel::sql_types::BigInt, _>(limit_i64),
+                        &mut conn,
+                    )
                     .await
                     .unwrap_or_default()
+                } else {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT id FROM documents
+                               WHERE (
+                                   (metadata->'annotations'->'{annotation_type}'->>'version')::int IS NULL
+                                   OR (metadata->'annotations'->'{annotation_type}'->>'version')::int < $1
+                               )
+                               LIMIT $2"#,
+                        ))
+                        .bind::<diesel::sql_types::Integer, _>(version)
+                        .bind::<diesel::sql_types::BigInt, _>(limit_i64),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                }
             }
         );
 
-        let mut docs = Vec::with_capacity(ids.len());
-        for row in ids {
-            if let Ok(Some(doc)) = self.get(&row.id).await {
-                docs.push(doc);
-            }
-        }
-        Ok(docs)
+        let doc_ids: Vec<String> = ids.into_iter().map(|r| r.id).collect();
+        self.get_batch(&doc_ids).await
     }
 
     // ========================================================================
@@ -479,12 +577,7 @@ impl DieselDocumentRepository {
                 .await
         })?;
 
-        let mut docs = Vec::with_capacity(records.len());
-        for record in records {
-            let versions = self.load_versions(&record.id).await?;
-            docs.push(Self::record_to_document(record, versions));
-        }
-        Ok(docs)
+        self.records_to_documents(records).await
     }
 
     /// Browse documents.
@@ -572,7 +665,7 @@ impl DieselDocumentRepository {
                 let versions = versions_map.remove(&record.id).unwrap_or_default();
                 Self::record_to_document(record, versions)
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(docs)
     }
 
@@ -869,64 +962,73 @@ impl DieselDocumentRepository {
     ) -> Result<Vec<Document>, DieselError> {
         let ids: Vec<DocIdRow> = with_conn_split!(self.pool,
             sqlite: conn => {
-                let query = if let Some(sid) = source_id {
-                    format!(
-                        r#"SELECT id FROM documents
-                           WHERE source_id = '{}'
-                           AND EXISTS (
-                               SELECT 1 FROM json_each(json_extract(metadata, '$.tags'))
-                               WHERE value = '{}'
-                           )
-                           ORDER BY updated_at DESC"#,
-                        sid.replace('\'', "''"),
-                        tag.replace('\'', "''")
+                if let Some(sid) = source_id {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(
+                            r#"SELECT id FROM documents
+                               WHERE source_id = $1
+                               AND EXISTS (
+                                   SELECT 1 FROM json_each(json_extract(metadata, '$.tags'))
+                                   WHERE value = $2
+                               )
+                               ORDER BY updated_at DESC"#,
+                        )
+                        .bind::<diesel::sql_types::Text, _>(sid)
+                        .bind::<diesel::sql_types::Text, _>(tag),
+                        &mut conn,
                     )
-                } else {
-                    format!(
-                        r#"SELECT id FROM documents
-                           WHERE EXISTS (
-                               SELECT 1 FROM json_each(json_extract(metadata, '$.tags'))
-                               WHERE value = '{}'
-                           )
-                           ORDER BY updated_at DESC"#,
-                        tag.replace('\'', "''")
-                    )
-                };
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
                     .await
                     .unwrap_or_default()
+                } else {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(
+                            r#"SELECT id FROM documents
+                               WHERE EXISTS (
+                                   SELECT 1 FROM json_each(json_extract(metadata, '$.tags'))
+                                   WHERE value = $1
+                               )
+                               ORDER BY updated_at DESC"#,
+                        )
+                        .bind::<diesel::sql_types::Text, _>(tag),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                }
             },
             postgres: conn => {
-                let query = if let Some(sid) = source_id {
-                    format!(
-                        r#"SELECT id FROM documents
-                           WHERE source_id = '{}'
-                           AND metadata->'tags' ? '{}'
-                           ORDER BY updated_at DESC"#,
-                        sid.replace('\'', "''"),
-                        tag.replace('\'', "''")
+                if let Some(sid) = source_id {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(
+                            r#"SELECT id FROM documents
+                               WHERE source_id = $1
+                               AND metadata->'tags' ? $2
+                               ORDER BY updated_at DESC"#,
+                        )
+                        .bind::<diesel::sql_types::Text, _>(sid)
+                        .bind::<diesel::sql_types::Text, _>(tag),
+                        &mut conn,
                     )
-                } else {
-                    format!(
-                        r#"SELECT id FROM documents
-                           WHERE metadata->'tags' ? '{}'
-                           ORDER BY updated_at DESC"#,
-                        tag.replace('\'', "''")
-                    )
-                };
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
                     .await
                     .unwrap_or_default()
+                } else {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(
+                            r#"SELECT id FROM documents
+                               WHERE metadata->'tags' ? $1
+                               ORDER BY updated_at DESC"#,
+                        )
+                        .bind::<diesel::sql_types::Text, _>(tag),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                }
             }
         );
 
-        let mut docs = Vec::with_capacity(ids.len());
-        for row in ids {
-            if let Ok(Some(doc)) = self.get(&row.id).await {
-                docs.push(doc);
-            }
-        }
-        Ok(docs)
+        let doc_ids: Vec<String> = ids.into_iter().map(|r| r.id).collect();
+        self.get_batch(&doc_ids).await
     }
 
     /// Get documents by MIME type category.
@@ -941,14 +1043,17 @@ impl DieselDocumentRepository {
             return Ok(vec![]);
         }
 
+        // mime_patterns come from category_to_mime_patterns (internal, safe values)
         let mime_conditions: Vec<String> = mime_patterns
             .iter()
-            .map(|p| format!("dv.mime_type LIKE '{}'", p.replace('\'', "''")))
+            .map(|p| format!("dv.mime_type LIKE '{}'", p))
             .collect();
 
-        let source_filter = source_id
-            .map(|s| format!("AND d.source_id = '{}'", s.replace('\'', "''")))
-            .unwrap_or_default();
+        let source_filter = if source_id.is_some() {
+            "AND d.source_id = $1"
+        } else {
+            ""
+        };
 
         let query = format!(
             r#"SELECT DISTINCT d.id
@@ -964,18 +1069,22 @@ impl DieselDocumentRepository {
         );
 
         let ids: Vec<DocIdRow> = with_conn!(self.pool, conn, {
-            diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+            if let Some(sid) = source_id {
+                diesel_async::RunQueryDsl::load(
+                    diesel::sql_query(&query).bind::<diesel::sql_types::Text, _>(sid),
+                    &mut conn,
+                )
                 .await
                 .unwrap_or_default()
+            } else {
+                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                    .await
+                    .unwrap_or_default()
+            }
         });
 
-        let mut docs = Vec::with_capacity(ids.len());
-        for row in ids {
-            if let Ok(Some(doc)) = self.get(&row.id).await {
-                docs.push(doc);
-            }
-        }
-        Ok(docs)
+        let doc_ids: Vec<String> = ids.into_iter().map(|r| r.id).collect();
+        self.get_batch(&doc_ids).await
     }
 
     // ========================================================================
@@ -1117,44 +1226,69 @@ impl DieselDocumentRepository {
         source_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Document>, DieselError> {
-        let source_filter = source_id
-            .map(|s| format!("AND source_id = '{}'", s.replace('\'', "''")))
-            .unwrap_or_default();
-
         let ids: Vec<DocIdRow> = with_conn_split!(self.pool,
             sqlite: conn => {
-                let query = format!(
-                    r#"SELECT id FROM documents
-                       WHERE json_extract(metadata, '$.estimated_date') IS NULL
-                       {}
-                       LIMIT {}"#,
-                    source_filter, limit
-                );
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                if let Some(sid) = source_id {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT id FROM documents
+                               WHERE json_extract(metadata, '$.estimated_date') IS NULL
+                               AND source_id = $1
+                               LIMIT {}"#,
+                            limit
+                        ))
+                        .bind::<diesel::sql_types::Text, _>(sid),
+                        &mut conn,
+                    )
                     .await
                     .unwrap_or_default()
+                } else {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT id FROM documents
+                               WHERE json_extract(metadata, '$.estimated_date') IS NULL
+                               LIMIT {}"#,
+                            limit
+                        )),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                }
             },
             postgres: conn => {
-                let query = format!(
-                    r#"SELECT id FROM documents
-                       WHERE metadata->>'estimated_date' IS NULL
-                       {}
-                       LIMIT {}"#,
-                    source_filter, limit
-                );
-                diesel_async::RunQueryDsl::load(diesel::sql_query(&query), &mut conn)
+                if let Some(sid) = source_id {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT id FROM documents
+                               WHERE metadata->>'estimated_date' IS NULL
+                               AND source_id = $1
+                               LIMIT {}"#,
+                            limit
+                        ))
+                        .bind::<diesel::sql_types::Text, _>(sid),
+                        &mut conn,
+                    )
                     .await
                     .unwrap_or_default()
+                } else {
+                    diesel_async::RunQueryDsl::load(
+                        diesel::sql_query(format!(
+                            r#"SELECT id FROM documents
+                               WHERE metadata->>'estimated_date' IS NULL
+                               LIMIT {}"#,
+                            limit
+                        )),
+                        &mut conn,
+                    )
+                    .await
+                    .unwrap_or_default()
+                }
             }
         );
 
-        let mut docs = Vec::with_capacity(ids.len());
-        for row in ids {
-            if let Ok(Some(doc)) = self.get(&row.id).await {
-                docs.push(doc);
-            }
-        }
-        Ok(docs)
+        let doc_ids: Vec<String> = ids.into_iter().map(|r| r.id).collect();
+        self.get_batch(&doc_ids).await
     }
 
     /// Update estimated date in document metadata.
@@ -1255,12 +1389,7 @@ impl DieselDocumentRepository {
                 .await
         })?;
 
-        let mut docs = Vec::with_capacity(records.len());
-        for record in records {
-            let versions = self.load_versions(&record.id).await?;
-            docs.push(Self::record_to_document(record, versions));
-        }
-        Ok(docs)
+        self.records_to_documents(records).await
     }
 
     /// Get documents needing OCR.
@@ -1331,12 +1460,7 @@ impl DieselDocumentRepository {
             }
         })?;
 
-        let mut docs = Vec::with_capacity(records.len());
-        for record in records {
-            let versions = self.load_versions(&record.id).await?;
-            docs.push(Self::record_to_document(record, versions));
-        }
-        Ok(docs)
+        self.records_to_documents(records).await
     }
 
     /// Finalize document - mark as indexed.
@@ -1429,5 +1553,48 @@ impl DieselDocumentRepository {
                 .await?;
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repository::diesel_document::tests::setup_test_db;
+
+    #[test]
+    fn test_validate_identifier_accepts_valid() {
+        assert!(validate_identifier("date_detection").is_ok());
+        assert!(validate_identifier("llm_v2").is_ok());
+        assert!(validate_identifier("entity_extraction").is_ok());
+    }
+
+    #[test]
+    fn test_validate_identifier_rejects_sql_injection() {
+        assert!(validate_identifier("'; DROP TABLE").is_err());
+        assert!(validate_identifier("' OR '1'='1").is_err());
+        assert!(validate_identifier("").is_err());
+        assert!(validate_identifier("valid-name").is_err());
+        assert!(validate_identifier("name; SELECT").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_by_tag_with_sql_metacharacters() {
+        let (pool, _dir) = setup_test_db().await;
+        let repo = DieselDocumentRepository::new(pool);
+
+        let result = repo.get_by_tag("'; DROP TABLE documents; --", None).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_count_documents_needing_annotation_rejects_injection() {
+        let (pool, _dir) = setup_test_db().await;
+        let repo = DieselDocumentRepository::new(pool);
+
+        let result = repo
+            .count_documents_needing_annotation("'; DROP TABLE documents; --", 1, None)
+            .await;
+        assert!(result.is_err());
     }
 }

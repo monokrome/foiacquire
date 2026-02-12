@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use crate::cli::helpers::{content_storage_path, mime_to_extension};
 use foiacquire::models::{Document, DocumentVersion};
+use foiacquire::storage::{compute_storage_path_with_dedup, mime_to_extension};
 
 /// Parse server date from Last-Modified header.
 pub fn parse_server_date(last_modified: Option<&str>) -> Option<chrono::DateTime<chrono::Utc>> {
@@ -43,26 +43,34 @@ pub fn save_new_version(
     filename: Option<String>,
     server_date: Option<chrono::DateTime<chrono::Utc>>,
     documents_dir: &Path,
-) -> Document {
-    let content_path = content_storage_path(documents_dir, new_hash, mime_to_extension(mime_type));
+) -> std::io::Result<Document> {
+    let ext = mime_to_extension(mime_type);
+    let basename = filename
+        .as_deref()
+        .and_then(|f| f.rfind('.').map(|p| &f[..p]))
+        .unwrap_or_else(|| url.split('/').next_back().unwrap_or("document"));
 
-    if let Some(parent) = content_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    let (relative_path, dedup_index) =
+        compute_storage_path_with_dedup(documents_dir, new_hash, basename, ext, content);
+    let abs_path = documents_dir.join(&relative_path);
+
+    if let Some(parent) = abs_path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
-    let _ = std::fs::write(&content_path, content);
+    std::fs::write(&abs_path, content)?;
 
-    let new_version = DocumentVersion::new_with_metadata(
+    let mut new_version = DocumentVersion::new_with_metadata(
         content,
-        content_path,
         mime_type.to_string(),
         Some(url.to_string()),
         filename,
         server_date,
     );
+    new_version.dedup_index = dedup_index;
 
     let mut updated_doc = doc.clone();
     updated_doc.add_version(new_version);
-    updated_doc
+    Ok(updated_doc)
 }
 
 /// Result of processing an HTTP response for refresh.
@@ -92,7 +100,7 @@ pub async fn process_get_response_for_refresh(
     let content_changed = new_hash != current_version.content_hash;
 
     if content_changed {
-        let updated = save_new_version(
+        let updated = match save_new_version(
             doc,
             &content,
             &new_hash,
@@ -101,7 +109,10 @@ pub async fn process_get_response_for_refresh(
             filename,
             server_date,
             documents_dir,
-        );
+        ) {
+            Ok(doc) => doc,
+            Err(_) => return RefreshResult::Skipped,
+        };
         RefreshResult::Redownloaded(updated)
     } else {
         let updated = update_document_metadata(doc, filename, server_date);

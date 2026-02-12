@@ -187,7 +187,16 @@ impl HttpClient {
     /// Create a new HTTP client with privacy configuration from environment.
     /// Respects SOCKS_PROXY env var if set, otherwise uses direct connections.
     /// This makes privacy opt-out instead of opt-in for better security.
-    pub fn new(source_id: &str, timeout: Duration, request_delay: Duration) -> Self {
+    ///
+    /// # Errors
+    /// Returns an error if a proxy is configured (e.g. SOCKS_PROXY) but cannot
+    /// be initialized. This is fail-closed by design — we never silently
+    /// downgrade to direct connections.
+    pub fn new(
+        source_id: &str,
+        timeout: Duration,
+        request_delay: Duration,
+    ) -> Result<Self, String> {
         Self::with_user_agent(source_id, timeout, request_delay, None)
     }
 
@@ -196,36 +205,31 @@ impl HttpClient {
     /// - None: Use default FOIAcquire user agent
     /// - Some("impersonate"): Use random real browser user agent
     /// - Some(custom): Use custom user agent string
+    ///
+    /// # Errors
+    /// Returns an error if a proxy is configured (e.g. SOCKS_PROXY) but cannot
+    /// be initialized. This is fail-closed by design — we never silently
+    /// downgrade to direct connections.
     pub fn with_user_agent(
         source_id: &str,
         timeout: Duration,
         request_delay: Duration,
         user_agent_config: Option<&str>,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let user_agent = resolve_user_agent(user_agent_config);
 
         // Read privacy config from environment (SOCKS_PROXY, etc.)
         // If no env vars set, this defaults to Direct mode (backward compatible)
         let default_privacy = PrivacyConfig::default().with_env_overrides();
 
-        // Build client with env privacy config
-        // If SOCKS_PROXY is set but invalid, fall back to direct mode with warning
         let (client, privacy_mode) =
-            Self::build_client(&user_agent, timeout, Some(&default_privacy)).unwrap_or_else(|e| {
-                eprintln!(
-                    "Warning: Failed to configure privacy from environment: {}",
-                    e
-                );
-                eprintln!("         Falling back to direct connections (no privacy)");
-                Self::build_client(&user_agent, timeout, None)
-                    .expect("Direct mode fallback should never fail")
-            });
+            Self::build_client(&user_agent, timeout, Some(&default_privacy))?;
 
         // Default in-memory backend with request_delay as base
         let backend = Arc::new(InMemoryRateLimitBackend::new(
             request_delay.as_millis() as u64
         ));
-        Self {
+        Ok(Self {
             client,
             crawl_repo: None,
             source_id: source_id.to_string(),
@@ -237,7 +241,7 @@ impl HttpClient {
             via_mode: ViaMode::default(),
             #[cfg(feature = "browser")]
             browser_pool: Self::create_browser_pool(),
-        }
+        })
     }
 
     /// Create a new HTTP client with privacy configuration.
@@ -336,12 +340,15 @@ impl HttpClient {
 
     /// Create a new HTTP client with a shared rate limiter.
     /// Respects SOCKS_PROXY env var if set, otherwise uses direct connections.
+    ///
+    /// # Errors
+    /// Returns an error if a proxy is configured but cannot be initialized.
     pub fn with_rate_limiter(
         source_id: &str,
         timeout: Duration,
         request_delay: Duration,
         rate_limiter: RateLimiter,
-    ) -> Self {
+    ) -> Result<Self, String> {
         Self::with_rate_limiter_and_user_agent(
             source_id,
             timeout,
@@ -353,31 +360,25 @@ impl HttpClient {
 
     /// Create a new HTTP client with a shared rate limiter and custom user agent.
     /// Respects SOCKS_PROXY env var if set, otherwise uses direct connections.
+    ///
+    /// # Errors
+    /// Returns an error if a proxy is configured but cannot be initialized.
     pub fn with_rate_limiter_and_user_agent(
         source_id: &str,
         timeout: Duration,
         request_delay: Duration,
         rate_limiter: RateLimiter,
         user_agent_config: Option<&str>,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let user_agent = resolve_user_agent(user_agent_config);
 
         // Read privacy config from environment (SOCKS_PROXY, etc.)
         let default_privacy = PrivacyConfig::default().with_env_overrides();
 
-        // Build client with env privacy config
         let (client, privacy_mode) =
-            Self::build_client(&user_agent, timeout, Some(&default_privacy)).unwrap_or_else(|e| {
-                eprintln!(
-                    "Warning: Failed to configure privacy from environment: {}",
-                    e
-                );
-                eprintln!("         Falling back to direct connections (no privacy)");
-                Self::build_client(&user_agent, timeout, None)
-                    .expect("Direct mode fallback should never fail")
-            });
+            Self::build_client(&user_agent, timeout, Some(&default_privacy))?;
 
-        Self {
+        Ok(Self {
             client,
             crawl_repo: None,
             source_id: source_id.to_string(),
@@ -389,7 +390,7 @@ impl HttpClient {
             via_mode: ViaMode::default(),
             #[cfg(feature = "browser")]
             browser_pool: Self::create_browser_pool(),
-        }
+        })
     }
 
     /// Create a new HTTP client with a shared rate limiter and privacy configuration.
@@ -1277,5 +1278,97 @@ impl HttpClient {
             }
         }
         (None, None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::privacy::{PrivacyConfig, PrivacyMode};
+    use std::time::Duration;
+
+    fn test_timeout() -> Duration {
+        Duration::from_secs(5)
+    }
+
+    fn tor_direct_config() -> PrivacyConfig {
+        let mut config = PrivacyConfig::default();
+        config.direct = false;
+        config.obfuscation = false;
+        config
+    }
+
+    fn tor_obfuscated_config() -> PrivacyConfig {
+        let mut config = PrivacyConfig::default();
+        config.direct = false;
+        config.obfuscation = true;
+        config
+    }
+
+    fn external_proxy_no_url_config() -> PrivacyConfig {
+        let mut config = PrivacyConfig::default();
+        config.socks_proxy = Some("".to_string());
+        config
+    }
+
+    fn direct_config() -> PrivacyConfig {
+        let mut config = PrivacyConfig::default();
+        config.direct = true;
+        config
+    }
+
+    #[test]
+    fn test_build_client_tor_direct_fails_without_tor() {
+        let config = tor_direct_config();
+        assert_eq!(config.mode(), PrivacyMode::TorDirect);
+
+        let result = HttpClient::build_client("test-agent", test_timeout(), Some(&config));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Tor mode requested"),
+            "Expected error about Tor mode, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_build_client_tor_obfuscated_fails_without_tor() {
+        let config = tor_obfuscated_config();
+        assert!(matches!(config.mode(), PrivacyMode::TorObfuscated(_)));
+
+        let result = HttpClient::build_client("test-agent", test_timeout(), Some(&config));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Tor mode requested"),
+            "Expected error about Tor mode, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_build_client_external_proxy_fails_without_url() {
+        let config = external_proxy_no_url_config();
+
+        let result = HttpClient::build_client("test-agent", test_timeout(), Some(&config));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Invalid SOCKS proxy URL"),
+            "Expected error about invalid SOCKS URL, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_build_client_direct_succeeds() {
+        let config = direct_config();
+        assert_eq!(config.mode(), PrivacyMode::Direct);
+
+        let result = HttpClient::build_client("test-agent", test_timeout(), Some(&config));
+        assert!(result.is_ok());
+        let (_, mode) = result.unwrap();
+        assert_eq!(mode, PrivacyMode::Direct);
     }
 }

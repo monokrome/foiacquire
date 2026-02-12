@@ -8,6 +8,7 @@ mod types;
 
 use std::fs::File;
 use std::io::Read;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -26,25 +27,32 @@ pub struct AnalysisService {
     doc_repo: DieselDocumentRepository,
     analysis_manager: AnalysisManager,
     ocr_config: OcrConfig,
+    documents_dir: PathBuf,
 }
 
 impl AnalysisService {
     /// Create a new analysis service with default OCR config.
     #[allow(dead_code)]
-    pub fn new(doc_repo: DieselDocumentRepository) -> Self {
+    pub fn new(doc_repo: DieselDocumentRepository, documents_dir: PathBuf) -> Self {
         Self {
             doc_repo,
             analysis_manager: AnalysisManager::with_defaults(),
             ocr_config: OcrConfig::default(),
+            documents_dir,
         }
     }
 
     /// Create a new analysis service with custom OCR config.
-    pub fn with_ocr_config(doc_repo: DieselDocumentRepository, ocr_config: OcrConfig) -> Self {
+    pub fn with_ocr_config(
+        doc_repo: DieselDocumentRepository,
+        ocr_config: OcrConfig,
+        documents_dir: PathBuf,
+    ) -> Self {
         Self {
             doc_repo,
             analysis_manager: AnalysisManager::with_defaults(),
             ocr_config,
+            documents_dir,
         }
     }
 
@@ -191,10 +199,10 @@ impl AnalysisService {
 
             // Get the current version's file path and MIME type
             if let Some(version) = doc.versions.last() {
-                let path = &version.file_path;
+                let path = version.resolve_path(&self.documents_dir, &doc.source_url, &doc.title);
                 if path.exists() {
                     if let Some((detected_mime, old_mime)) =
-                        self.detect_mime_mismatch(path, &version.mime_type)
+                        self.detect_mime_mismatch(&path, &version.mime_type)
                     {
                         // Update the MIME type in database
                         if self
@@ -344,7 +352,10 @@ impl AnalysisService {
 
             for doc in docs {
                 // Skip documents whose files aren't on disk yet
-                let file_available = doc.current_version().is_some_and(|v| v.file_path.exists());
+                let file_available = doc.current_version().is_some_and(|v| {
+                    v.resolve_path(&self.documents_dir, &doc.source_url, &doc.title)
+                        .exists()
+                });
                 if !file_available {
                     tracing::debug!("Skipping {}: file not on disk yet", doc.title);
                     skipped_missing.fetch_add(1, Ordering::Relaxed);
@@ -357,6 +368,7 @@ impl AnalysisService {
                 }
 
                 let doc_repo = self.doc_repo.clone();
+                let documents_dir = self.documents_dir.clone();
                 let processed = processed.clone();
                 let succeeded = succeeded.clone();
                 let failed = failed.clone();
@@ -376,7 +388,7 @@ impl AnalysisService {
 
                     let handle = tokio::runtime::Handle::current();
 
-                    match extract_document_text_per_page(&doc, &doc_repo, &handle) {
+                    match extract_document_text_per_page(&doc, &doc_repo, &handle, &documents_dir) {
                         Ok(page_count) => {
                             pages_created.fetch_add(page_count, Ordering::Relaxed);
                             succeeded.fetch_add(1, Ordering::Relaxed);
@@ -409,13 +421,17 @@ impl AnalysisService {
 
                 if handles.len() >= workers {
                     for h in handles.drain(..) {
-                        let _ = h.await;
+                        if let Err(e) = h.await {
+                            tracing::error!("Analysis worker panicked: {}", e);
+                        }
                     }
                 }
             }
 
             for h in handles {
-                let _ = h.await;
+                if let Err(e) = h.await {
+                    tracing::error!("Analysis worker panicked: {}", e);
+                }
             }
         }
 
@@ -468,6 +484,7 @@ impl AnalysisService {
             for page in pages {
                 let doc_repo = self.doc_repo.clone();
                 let ocr_config = self.ocr_config.clone();
+                let documents_dir = self.documents_dir.clone();
                 let processed = processed.clone();
                 let ocr_improved = ocr_improved.clone();
                 let ocr_skipped = ocr_skipped.clone();
@@ -487,7 +504,13 @@ impl AnalysisService {
                     // Get tokio runtime handle to run async code in blocking context
                     let handle = tokio::runtime::Handle::current();
 
-                    match ocr_document_page_with_config(&page, &doc_repo, &handle, &ocr_config) {
+                    match ocr_document_page_with_config(
+                        &page,
+                        &doc_repo,
+                        &handle,
+                        &ocr_config,
+                        &documents_dir,
+                    ) {
                         Ok(ocr_result) => {
                             if ocr_result.improved {
                                 ocr_improved.fetch_add(1, Ordering::Relaxed);
@@ -531,13 +554,17 @@ impl AnalysisService {
 
                 if handles.len() >= workers {
                     for h in handles.drain(..) {
-                        let _ = h.await;
+                        if let Err(e) = h.await {
+                            tracing::error!("Analysis worker panicked: {}", e);
+                        }
                     }
                 }
             }
 
             for h in handles {
-                let _ = h.await;
+                if let Err(e) = h.await {
+                    tracing::error!("Analysis worker panicked: {}", e);
+                }
             }
         }
 
@@ -575,10 +602,11 @@ impl AnalysisService {
         let doc_repo = self.doc_repo.clone();
         let doc_clone = doc.clone();
         let doc_id_owned = doc_id.to_string();
+        let documents_dir = self.documents_dir.clone();
 
         let pages = tokio::task::spawn_blocking(move || {
             let handle = tokio::runtime::Handle::current();
-            extract_document_text_per_page(&doc_clone, &doc_repo, &handle)
+            extract_document_text_per_page(&doc_clone, &doc_repo, &handle, &documents_dir)
         })
         .await??;
 

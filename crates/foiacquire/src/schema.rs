@@ -131,7 +131,7 @@ diesel::table! {
         document_id -> Text,
         content_hash -> Text,
         content_hash_blake3 -> Nullable<Text>,
-        file_path -> Text,
+        file_path -> Nullable<Text>,
         file_size -> Integer,
         mime_type -> Text,
         acquired_at -> Text,
@@ -141,6 +141,7 @@ diesel::table! {
         page_count -> Nullable<Integer>,
         archive_snapshot_id -> Nullable<Integer>,
         earliest_archived_at -> Nullable<Text>,
+        dedup_index -> Nullable<Integer>,
     }
 }
 

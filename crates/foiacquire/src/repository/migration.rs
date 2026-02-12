@@ -334,7 +334,7 @@ impl From<super::diesel_models::DocumentVersionRecord> for PortableDocumentVersi
             document_id: r.document_id,
             content_hash: r.content_hash,
             content_hash_blake3: r.content_hash_blake3,
-            file_path: r.file_path,
+            file_path: r.file_path.unwrap_or_default(),
             file_size: r.file_size,
             mime_type: r.mime_type,
             acquired_at: r.acquired_at,

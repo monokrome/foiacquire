@@ -2,6 +2,7 @@
 //!
 //! Runs migrations via blocking tasks to work with async connections.
 
+use cetane::migrator::MigrationStateStore;
 use tracing::info;
 
 use super::pool::DieselError;
@@ -49,9 +50,11 @@ async fn run_sqlite_migrations_async(database_url: &str) -> Result<(), DieselErr
 
         let mut state = SqliteState::new(&conn)?;
 
-        // If this is an existing database migrated with diesel, mark all cetane
-        // migrations as applied since the schema is already up to date.
-        if state.has_diesel_migrations(&conn)? {
+        // One-time transition: if this database was previously managed by Diesel
+        // and cetane hasn't run yet, mark existing migrations as applied.
+        // Only do this when the cetane table is empty (first transition).
+        let already_applied = state.applied_migrations().map_err(migration_error)?;
+        if already_applied.is_empty() && state.has_diesel_migrations(&conn)? {
             mark_existing_as_applied(&registry, &mut state)?;
         }
 
@@ -92,7 +95,9 @@ async fn run_postgres_migrations_async(
 
     let mut state = PostgresState::new(&client).await?;
 
-    if state.has_diesel_migrations(&client).await? {
+    // One-time transition: only auto-mark if cetane has no entries yet
+    let already_applied = state.applied_migrations().map_err(migration_error)?;
+    if already_applied.is_empty() && state.has_diesel_migrations(&client).await? {
         mark_existing_as_applied(&registry, &mut state)?;
     }
 

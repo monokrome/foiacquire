@@ -117,7 +117,7 @@ impl ConfigurableScraper {
                 request_delay,
                 limiter,
                 config.user_agent.as_deref(),
-            ),
+            )?,
             (None, Some(privacy)) => HttpClient::with_privacy(
                 &source.id,
                 Duration::from_secs(30),
@@ -130,7 +130,7 @@ impl ConfigurableScraper {
                 Duration::from_secs(30),
                 request_delay,
                 config.user_agent.as_deref(),
-            ),
+            )?,
         };
         let client = if let Some(repo) = crawl_repo.clone() {
             client.with_crawl_repo(repo)

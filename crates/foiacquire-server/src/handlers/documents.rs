@@ -86,9 +86,7 @@ pub async fn document_detail(
         .iter()
         .map(|v| {
             let relative_path = v
-                .file_path
-                .strip_prefix(&state.documents_dir)
-                .unwrap_or(&v.file_path)
+                .compute_storage_path(&doc.source_url, &doc.title)
                 .to_string_lossy()
                 .to_string();
 

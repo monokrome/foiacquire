@@ -149,7 +149,7 @@ pub async fn api_reocr_document(
         .into_response();
     }
 
-    let pdf_path = state.documents_dir.join(&version.file_path);
+    let pdf_path = version.resolve_path(&state.documents_dir, &doc.source_url, &doc.title);
 
     let config = OcrConfig {
         use_gpu: true,

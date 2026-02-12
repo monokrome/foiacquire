@@ -11,25 +11,37 @@ use crate::schema::service_status;
 use crate::{with_conn, with_conn_split};
 
 /// Convert a database record to a domain model.
-impl From<ServiceStatusRecord> for ServiceStatus {
-    fn from(record: ServiceStatusRecord) -> Self {
-        ServiceStatus {
+impl TryFrom<ServiceStatusRecord> for ServiceStatus {
+    type Error = diesel::result::Error;
+
+    fn try_from(record: ServiceStatusRecord) -> Result<Self, Self::Error> {
+        let stats = serde_json::from_str(&record.stats)
+            .map_err(|e| diesel::result::Error::DeserializationError(Box::new(e)))?;
+
+        Ok(ServiceStatus {
             id: record.id,
-            service_type: ServiceType::from_str(&record.service_type)
-                .unwrap_or(ServiceType::Scraper),
+            service_type: ServiceType::from_str(&record.service_type).ok_or_else(|| {
+                diesel::result::Error::DeserializationError(
+                    format!("Invalid service_type: '{}'", record.service_type).into(),
+                )
+            })?,
             source_id: record.source_id,
-            status: ServiceState::from_str(&record.status).unwrap_or(ServiceState::Running),
+            status: ServiceState::from_str(&record.status).ok_or_else(|| {
+                diesel::result::Error::DeserializationError(
+                    format!("Invalid service state: '{}'", record.status).into(),
+                )
+            })?,
             last_heartbeat: parse_datetime(&record.last_heartbeat),
             last_activity: parse_datetime_opt(record.last_activity),
             current_task: record.current_task,
-            stats: serde_json::from_str(&record.stats).unwrap_or_default(),
+            stats,
             started_at: parse_datetime(&record.started_at),
             host: record.host,
             version: record.version,
             last_error: record.last_error,
             last_error_at: parse_datetime_opt(record.last_error_at),
             error_count: record.error_count,
-        }
+        })
     }
 }
 
@@ -53,7 +65,7 @@ impl DieselServiceStatusRepository {
                 .order(service_status::id.asc())
                 .load::<ServiceStatusRecord>(&mut conn)
                 .await
-                .map(|records| records.into_iter().map(ServiceStatus::from).collect())
+                .and_then(|records| records.into_iter().map(ServiceStatus::try_from).collect())
         })
     }
 
@@ -65,7 +77,7 @@ impl DieselServiceStatusRepository {
                 .order(service_status::id.asc())
                 .load::<ServiceStatusRecord>(&mut conn)
                 .await
-                .map(|records| records.into_iter().map(ServiceStatus::from).collect())
+                .and_then(|records| records.into_iter().map(ServiceStatus::try_from).collect())
         })
     }
 
@@ -77,7 +89,7 @@ impl DieselServiceStatusRepository {
                 .first::<ServiceStatusRecord>(&mut conn)
                 .await
                 .optional()
-                .map(|opt| opt.map(ServiceStatus::from))
+                .and_then(|opt| opt.map(ServiceStatus::try_from).transpose())
         })
     }
 
@@ -366,5 +378,37 @@ mod tests {
         assert_eq!(stats.session_processed, 100);
         assert_eq!(stats.session_new, 50);
         assert_eq!(stats.rate_per_min, Some(12.5));
+    }
+
+    #[tokio::test]
+    async fn test_invalid_stats_json_returns_error() {
+        let (ctx, _dir) = setup_test_db().await;
+
+        // Insert a row with invalid JSON in the stats column via raw SQL
+        use crate::repository::pool::DbPool;
+        use diesel_async::SimpleAsyncConnection;
+        match ctx.pool() {
+            DbPool::Sqlite(ref sqlite_pool) => {
+                let mut conn = sqlite_pool.get().await.unwrap();
+                conn.batch_execute(
+                    "INSERT INTO service_status (id, service_type, status, last_heartbeat, stats, started_at, error_count) \
+                     VALUES ('bad:test', 'scraper', 'running', '2024-01-01T00:00:00Z', 'NOT JSON', '2024-01-01T00:00:00Z', 0)",
+                )
+                .await
+                .unwrap();
+            }
+            #[cfg(feature = "postgres")]
+            DbPool::Postgres(_) => unreachable!("test uses sqlite"),
+        }
+
+        let repo = ctx.service_status();
+        let result = repo.get("bad:test").await;
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Deserialization"),
+            "Expected DeserializationError, got: {}",
+            err,
+        );
     }
 }

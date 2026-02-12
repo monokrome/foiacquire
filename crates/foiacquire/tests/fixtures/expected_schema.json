@@ -779,6 +779,13 @@
           "default_value": null,
           "primary_key": false
         },
+        "dedup_index": {
+          "name": "dedup_index",
+          "col_type": "INTEGER",
+          "not_null": false,
+          "default_value": null,
+          "primary_key": false
+        },
         "document_id": {
           "name": "document_id",
           "col_type": "TEXT",
@@ -796,7 +803,7 @@
         "file_path": {
           "name": "file_path",
           "col_type": "TEXT",
-          "not_null": true,
+          "not_null": false,
           "default_value": null,
           "primary_key": false
         },
@@ -2081,6 +2088,16 @@
       "unique": false,
       "partial": null
     },
+    "idx_versions_content_hash_dedup": {
+      "name": "idx_versions_content_hash_dedup",
+      "table": "document_versions",
+      "columns": [
+        "content_hash",
+        "dedup_index"
+      ],
+      "unique": true,
+      "partial": "dedup_index IS NOT NULL"
+    },
     "idx_versions_doc_mime": {
       "name": "idx_versions_doc_mime",
       "table": "document_versions",
@@ -2147,6 +2164,7 @@
     }
   },
   "triggers": [
+    "tr_archive_checks_cascade_delete",
     "tr_category_count_delete",
     "tr_category_count_insert",
     "tr_category_count_update",

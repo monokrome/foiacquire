@@ -31,7 +31,7 @@ impl DieselCrawlRepository {
                 .limit(limit)
                 .load::<CrawlUrlRecord>(&mut conn)
                 .await
-                .map(|records| records.into_iter().map(CrawlUrl::from).collect())
+                .and_then(|records| records.into_iter().map(CrawlUrl::try_from).collect())
         })
     }
 
@@ -68,7 +68,7 @@ impl DieselCrawlRepository {
                         .execute(conn)
                         .await?;
 
-                        let mut crawl_url = CrawlUrl::from(record);
+                        let mut crawl_url = CrawlUrl::try_from(record)?;
                         crawl_url.status = UrlStatus::Fetching;
                         Ok(Some(crawl_url))
                     } else {
@@ -110,7 +110,7 @@ impl DieselCrawlRepository {
                 .limit(limit)
                 .load::<CrawlUrlRecord>(&mut conn)
                 .await
-                .map(|records| records.into_iter().map(CrawlUrl::from).collect())
+                .and_then(|records| records.into_iter().map(CrawlUrl::try_from).collect())
         })
     }
 

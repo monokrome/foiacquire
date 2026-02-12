@@ -259,9 +259,9 @@ pub async fn cmd_import_stdin(
     use chrono::Utc;
     use url::Url;
 
-    use crate::cli::helpers::content_storage_path_with_name;
     use foiacquire::models::{Document, DocumentVersion, Source, SourceType};
     use foiacquire::repository::extract_filename_parts;
+    use foiacquire::storage::compute_storage_path_with_dedup;
 
     settings.ensure_directories()?;
     let ctx = settings.create_db_context()?;
@@ -330,26 +330,30 @@ pub async fn cmd_import_stdin(
         .clone()
         .unwrap_or_else(|| "document".to_string());
     let (basename, extension) = extract_filename_parts(url, &title, &mime_type);
-    let content_path = content_storage_path_with_name(
+    let (relative_path, dedup_index) = compute_storage_path_with_dedup(
         &settings.documents_dir,
         &content_hash,
         &basename,
         &extension,
+        &content,
     );
 
     // Save content to file
-    std::fs::create_dir_all(content_path.parent().unwrap())?;
+    let content_path = settings.documents_dir.join(&relative_path);
+    if let Some(parent) = content_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::write(&content_path, &content)?;
 
     // Create document version
-    let version = DocumentVersion::new_with_metadata(
+    let mut version = DocumentVersion::new_with_metadata(
         &content,
-        content_path,
         mime_type.clone(),
         Some(url.to_string()),
         original_filename.clone(),
         None, // No server date for stdin import
     );
+    version.dedup_index = dedup_index;
 
     // Check for existing document at this URL
     let existing = doc_repo.get_by_url(url).await?;

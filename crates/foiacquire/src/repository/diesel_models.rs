@@ -177,7 +177,7 @@ pub struct DocumentVersionRecord {
     pub document_id: String,
     pub content_hash: String,
     pub content_hash_blake3: Option<String>,
-    pub file_path: String,
+    pub file_path: Option<String>,
     pub file_size: i32,
     pub mime_type: String,
     pub acquired_at: String,
@@ -187,6 +187,7 @@ pub struct DocumentVersionRecord {
     pub page_count: Option<i32>,
     pub archive_snapshot_id: Option<i32>,
     pub earliest_archived_at: Option<String>,
+    pub dedup_index: Option<i32>,
 }
 
 /// New document version for insertion.
@@ -196,7 +197,7 @@ pub struct NewDocumentVersion<'a> {
     pub document_id: &'a str,
     pub content_hash: &'a str,
     pub content_hash_blake3: Option<&'a str>,
-    pub file_path: &'a str,
+    pub file_path: Option<&'a str>,
     pub file_size: i32,
     pub mime_type: &'a str,
     pub acquired_at: &'a str,
@@ -206,6 +207,7 @@ pub struct NewDocumentVersion<'a> {
     pub page_count: Option<i32>,
     pub archive_snapshot_id: Option<i32>,
     pub earliest_archived_at: Option<&'a str>,
+    pub dedup_index: Option<i32>,
 }
 
 /// Document page record from the database.
