@@ -270,8 +270,7 @@ pub async fn cmd_db_dedup(
             // 2. virtual_files
             foiacquire::with_conn!(pool, conn, {
                 diesel::delete(
-                    virtual_files::table
-                        .filter(virtual_files::document_id.eq_any(&batch_deletes)),
+                    virtual_files::table.filter(virtual_files::document_id.eq_any(&batch_deletes)),
                 )
                 .execute(&mut conn)
                 .await
@@ -309,11 +308,9 @@ pub async fn cmd_db_dedup(
 
             // 6. documents
             foiacquire::with_conn!(pool, conn, {
-                diesel::delete(
-                    documents::table.filter(documents::id.eq_any(&batch_deletes)),
-                )
-                .execute(&mut conn)
-                .await
+                diesel::delete(documents::table.filter(documents::id.eq_any(&batch_deletes)))
+                    .execute(&mut conn)
+                    .await
             })?;
         }
 

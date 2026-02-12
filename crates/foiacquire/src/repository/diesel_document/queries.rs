@@ -1071,8 +1071,7 @@ impl DieselDocumentRepository {
         let ids: Vec<DocIdRow> = with_conn!(self.pool, conn, {
             if let Some(sid) = source_id {
                 diesel_async::RunQueryDsl::load(
-                    diesel::sql_query(&query)
-                        .bind::<diesel::sql_types::Text, _>(sid),
+                    diesel::sql_query(&query).bind::<diesel::sql_types::Text, _>(sid),
                     &mut conn,
                 )
                 .await
@@ -1583,9 +1582,7 @@ mod tests {
         let (pool, _dir) = setup_test_db().await;
         let repo = DieselDocumentRepository::new(pool);
 
-        let result = repo
-            .get_by_tag("'; DROP TABLE documents; --", None)
-            .await;
+        let result = repo.get_by_tag("'; DROP TABLE documents; --", None).await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
     }

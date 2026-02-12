@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tracing::warn;
 use tokio::sync::mpsc;
+use tracing::warn;
 
 use crate::services::youtube;
 use crate::{extract_title_from_url, HttpClient};
@@ -289,9 +289,7 @@ impl DownloadService {
                                 .await;
                                 continue;
                             };
-                            if let Err(e) =
-                                tokio::fs::create_dir_all(parent).await
-                            {
+                            if let Err(e) = tokio::fs::create_dir_all(parent).await {
                                 send_failure_event(
                                     &url,
                                     &failed,

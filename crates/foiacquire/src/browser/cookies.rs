@@ -178,9 +178,12 @@ impl BrowserFetcher {
     pub async fn save_cookies(&mut self, path: &PathBuf) -> Result<()> {
         self.ensure_browser().await?;
 
-        let browser = self.browser.as_ref()
+        let browser = self
+            .browser
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("browser not initialized after ensure_browser"))?
-            .lock().await;
+            .lock()
+            .await;
         // Get all cookies from the browser storage (not a blank page)
         let cookies = browser.get_cookies().await?;
 

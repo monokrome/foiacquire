@@ -587,11 +587,7 @@ impl DieselDocumentRepository {
         })?;
         let metadata = serde_json::from_str(&record.metadata).map_err(|e| {
             diesel::result::Error::DeserializationError(
-                format!(
-                    "Invalid metadata JSON for document '{}': {}",
-                    record.id, e
-                )
-                .into(),
+                format!("Invalid metadata JSON for document '{}': {}", record.id, e).into(),
             )
         })?;
 

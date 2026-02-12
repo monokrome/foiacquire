@@ -96,7 +96,10 @@ pub async fn handle_download_failure(
         failed_url.retry_count += 1;
     }
     if let Err(e) = crawl_repo.update_url(&failed_url).await {
-        warn!("Failed to update crawl URL status for {}: {}", crawl_url.url, e);
+        warn!(
+            "Failed to update crawl URL status for {}: {}",
+            crawl_url.url, e
+        );
     }
     failed.fetch_add(1, Ordering::Relaxed);
     let _ = event_tx
@@ -138,7 +141,10 @@ pub async fn handle_unchanged(
     fetched_url.status = UrlStatus::Fetched;
     fetched_url.fetched_at = Some(chrono::Utc::now());
     if let Err(e) = crawl_repo.update_url(&fetched_url).await {
-        warn!("Failed to update crawl URL status for {}: {}", crawl_url.url, e);
+        warn!(
+            "Failed to update crawl URL status for {}: {}",
+            crawl_url.url, e
+        );
     }
     skipped.fetch_add(1, Ordering::Relaxed);
     let _ = event_tx
@@ -161,11 +167,7 @@ pub async fn save_or_update_document(
     metadata: serde_json::Value,
     discovery_method: &str,
 ) -> Result<bool, foiacquire::repository::DieselError> {
-    let existing = doc_repo
-        .get_by_url(url)
-        .await?
-        .into_iter()
-        .next();
+    let existing = doc_repo.get_by_url(url).await?.into_iter().next();
     let new_document = existing.is_none();
 
     if let Some(mut doc) = existing {

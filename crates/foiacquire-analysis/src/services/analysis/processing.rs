@@ -51,9 +51,7 @@ pub fn extract_document_text_per_page(
             doc.id,
             file_path.display()
         );
-        let count = extractor
-            .get_pdf_page_count(&file_path)
-            .unwrap_or(1);
+        let count = extractor.get_pdf_page_count(&file_path).unwrap_or(1);
         tracing::debug!("Document {} has {} pages", doc.id, count);
         count
     });

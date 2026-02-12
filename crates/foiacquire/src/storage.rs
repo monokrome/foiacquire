@@ -139,8 +139,13 @@ pub async fn save_document_async(
     let (basename, extension) = extract_filename_parts(&input.url, &input.title, &input.mime_type);
 
     // Compute path with collision detection
-    let (relative_path, dedup_index) =
-        compute_storage_path_with_dedup(documents_dir, &content_hash, &basename, &extension, content);
+    let (relative_path, dedup_index) = compute_storage_path_with_dedup(
+        documents_dir,
+        &content_hash,
+        &basename,
+        &extension,
+        content,
+    );
     let abs_path = documents_dir.join(&relative_path);
     if let Some(parent) = abs_path.parent() {
         std::fs::create_dir_all(parent)?;

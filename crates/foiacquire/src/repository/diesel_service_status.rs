@@ -15,9 +15,8 @@ impl TryFrom<ServiceStatusRecord> for ServiceStatus {
     type Error = diesel::result::Error;
 
     fn try_from(record: ServiceStatusRecord) -> Result<Self, Self::Error> {
-        let stats = serde_json::from_str(&record.stats).map_err(|e| {
-            diesel::result::Error::DeserializationError(Box::new(e))
-        })?;
+        let stats = serde_json::from_str(&record.stats)
+            .map_err(|e| diesel::result::Error::DeserializationError(Box::new(e)))?;
 
         Ok(ServiceStatus {
             id: record.id,

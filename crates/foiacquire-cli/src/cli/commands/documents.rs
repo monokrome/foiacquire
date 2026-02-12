@@ -283,8 +283,14 @@ pub async fn cmd_archive(
             .await?
         {
             pb.set_message(truncate(&doc.title, 40));
-            if let Some((discovered, extracted)) =
-                process_archive(&doc, &doc_repo, run_ocr, &text_extractor, &settings.documents_dir).await
+            if let Some((discovered, extracted)) = process_archive(
+                &doc,
+                &doc_repo,
+                run_ocr,
+                &text_extractor,
+                &settings.documents_dir,
+            )
+            .await
             {
                 stats.files_discovered += discovered;
                 stats.files_extracted += extracted;
@@ -302,8 +308,14 @@ pub async fn cmd_archive(
             .await?
         {
             pb.set_message(truncate(&doc.title, 40));
-            if let Some((discovered, extracted)) =
-                process_email(&doc, &doc_repo, run_ocr, &text_extractor, &settings.documents_dir).await
+            if let Some((discovered, extracted)) = process_email(
+                &doc,
+                &doc_repo,
+                run_ocr,
+                &text_extractor,
+                &settings.documents_dir,
+            )
+            .await
             {
                 stats.files_discovered += discovered;
                 stats.files_extracted += extracted;
@@ -494,7 +506,8 @@ pub async fn cmd_info(settings: &Settings, doc_id: &str) -> anyhow::Result<()> {
     if let Some(version) = doc.current_version() {
         println!("\n{}", style("Current Version").bold());
         println!("{}", "-".repeat(60));
-        let resolved_path = version.resolve_path(&settings.documents_dir, &doc.source_url, &doc.title);
+        let resolved_path =
+            version.resolve_path(&settings.documents_dir, &doc.source_url, &doc.title);
         println!("{:<18} {}", "File:", resolved_path.display());
         println!("{:<18} {}", "MIME Type:", version.mime_type);
         println!("{:<18} {}", "Size:", format_bytes(version.file_size));
