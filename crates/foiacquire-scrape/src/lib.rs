@@ -30,6 +30,9 @@ pub use foiacquire::rate_limit::{
     RateLimitError, RateLimiter,
 };
 
+/// Wayback Machine CDX API base URL (shared across archive and discovery modules).
+pub const WAYBACK_CDX_API_URL: &str = "https://web.archive.org/cdx/search/cdx";
+
 use std::path::Path;
 
 use chrono::{DateTime, Utc};

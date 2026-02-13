@@ -9,7 +9,7 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use std::time::Duration;
 
 use super::{ArchiveError, ArchiveSource, SnapshotInfo};
-use crate::HttpClient;
+use crate::{HttpClient, WAYBACK_CDX_API_URL};
 use foiacquire::models::ArchiveService;
 use foiacquire::privacy::PrivacyConfig;
 
@@ -26,12 +26,9 @@ impl Default for WaybackSource {
 }
 
 impl WaybackSource {
-    /// CDX API base URL
-    const CDX_API: &'static str = "https://web.archive.org/cdx/search/cdx";
-
     pub fn new() -> Self {
         Self {
-            cdx_url: Self::CDX_API.to_string(),
+            cdx_url: WAYBACK_CDX_API_URL.to_string(),
             privacy: PrivacyConfig::default(),
         }
     }
@@ -39,7 +36,7 @@ impl WaybackSource {
     /// Create with privacy configuration.
     pub fn with_privacy(privacy: PrivacyConfig) -> Self {
         Self {
-            cdx_url: Self::CDX_API.to_string(),
+            cdx_url: WAYBACK_CDX_API_URL.to_string(),
             privacy,
         }
     }

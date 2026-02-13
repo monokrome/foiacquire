@@ -173,25 +173,6 @@ mod tests {
 
 /// Guess MIME type from file extension.
 pub fn guess_mime_type(path: &Path) -> String {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some("pdf") | Some("PDF") => "application/pdf",
-        Some("tif") | Some("tiff") | Some("TIF") | Some("TIFF") => "image/tiff",
-        Some("jpg") | Some("jpeg") | Some("JPG") | Some("JPEG") => "image/jpeg",
-        Some("png") | Some("PNG") => "image/png",
-        Some("gif") | Some("GIF") => "image/gif",
-        Some("doc") | Some("DOC") => "application/msword",
-        Some("docx") | Some("DOCX") => {
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        }
-        Some("txt") | Some("TXT") => "text/plain",
-        Some("html") | Some("htm") | Some("HTML") | Some("HTM") => "text/html",
-        Some("msg") | Some("MSG") => "application/vnd.ms-outlook",
-        Some("eml") | Some("EML") => "message/rfc822",
-        Some("xls") | Some("XLS") => "application/vnd.ms-excel",
-        Some("xlsx") | Some("XLSX") => {
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        }
-        _ => "application/octet-stream",
-    }
-    .to_string()
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    foiacquire::utils::guess_mime_from_filename(name).to_string()
 }
