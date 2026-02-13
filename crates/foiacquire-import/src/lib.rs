@@ -115,10 +115,39 @@ pub trait ImportSource: Send + Sync {
     }
 
     /// Load previous progress for resumption.
+    ///
+    /// Supports both JSON format (current) and legacy text format
+    /// ("done", "offset:N", "error:msg") from older WARC imports.
     fn load_progress(&self) -> Option<ImportProgress> {
         let path = self.progress_path();
         let content = std::fs::read_to_string(&path).ok()?;
-        serde_json::from_str(&content).ok()
+        let content = content.trim();
+
+        if content == "done" {
+            return Some(ImportProgress {
+                position: 0,
+                done: true,
+                error: None,
+            });
+        }
+        if let Some(error_msg) = content.strip_prefix("error:") {
+            return Some(ImportProgress {
+                position: 0,
+                done: false,
+                error: Some(error_msg.to_string()),
+            });
+        }
+        if let Some(offset_str) = content.strip_prefix("offset:") {
+            if let Ok(offset) = offset_str.parse::<u64>() {
+                return Some(ImportProgress {
+                    position: offset,
+                    done: false,
+                    error: None,
+                });
+            }
+        }
+
+        serde_json::from_str(content).ok()
     }
 
     /// Save current progress for checkpointing.

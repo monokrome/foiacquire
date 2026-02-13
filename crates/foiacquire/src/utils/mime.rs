@@ -68,6 +68,21 @@ pub fn has_file_extension(url: &str) -> bool {
     FILE_EXTENSIONS.contains(&ext.as_str())
 }
 
+/// Check if a MIME type is supported for text extraction (OCR/parsing).
+pub fn is_extractable_mimetype(mime_type: &str) -> bool {
+    matches!(
+        mime_type,
+        "application/pdf"
+            | "image/png"
+            | "image/jpeg"
+            | "image/tiff"
+            | "image/gif"
+            | "image/bmp"
+            | "text/plain"
+            | "text/html"
+    )
+}
+
 /// Check if a MIME type represents a FOIA-relevant document format.
 pub fn is_document_mimetype(mimetype: &str) -> bool {
     matches!(

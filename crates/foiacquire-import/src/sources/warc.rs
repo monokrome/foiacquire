@@ -394,55 +394,6 @@ impl ImportSource for WarcImportSource {
         !self.is_gzip
     }
 
-    fn load_progress(&self) -> Option<ImportProgress> {
-        let path = self.progress_path();
-        let content = std::fs::read_to_string(&path).ok()?;
-        let content = content.trim();
-
-        // Handle legacy format: "done", "offset:12345", or "error:message"
-        if content == "done" {
-            return Some(ImportProgress {
-                position: 0,
-                done: true,
-                error: None,
-            });
-        }
-
-        if let Some(error_msg) = content.strip_prefix("error:") {
-            return Some(ImportProgress {
-                position: 0,
-                done: false,
-                error: Some(error_msg.to_string()),
-            });
-        }
-
-        if let Some(offset_str) = content.strip_prefix("offset:") {
-            if let Ok(offset) = offset_str.parse::<u64>() {
-                return Some(ImportProgress {
-                    position: offset,
-                    done: false,
-                    error: None,
-                });
-            }
-        }
-
-        // Try JSON format
-        serde_json::from_str(content).ok()
-    }
-
-    fn save_progress(&self, progress: &ImportProgress) -> std::io::Result<()> {
-        let path = self.progress_path();
-        // Use legacy format for compatibility
-        let content = if progress.done {
-            "done".to_string()
-        } else if let Some(ref err) = progress.error {
-            format!("error:{}", err)
-        } else {
-            format!("offset:{}", progress.position)
-        };
-        std::fs::write(&path, content)
-    }
-
     async fn run_import(
         &mut self,
         config: &ImportConfig,

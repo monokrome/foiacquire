@@ -548,168 +548,112 @@ impl ImportSource for ConcordanceImportSource {
                 "dat_fields": doc.metadata,
             });
 
-            // Handle different storage modes
-            let save_result: anyhow::Result<bool> = match config.storage_mode {
+            // Read file content
+            let content = match std::fs::read(&file_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("Failed to read {}: {}", file_path.display(), e);
+                    stats.errors += 1;
+                    position += 1;
+                    continue;
+                }
+            };
+
+            // Compute hash, MIME type, and storage path
+            let mime_type = infer::get(&content)
+                .map(|t| t.mime_type().to_string())
+                .unwrap_or_else(|| guess_mime_type(&file_path));
+            let content_hash = DocumentVersion::compute_hash(&content);
+            let (basename, extension) = extract_filename_parts(&url, &title, &mime_type);
+            let (relative_path, dedup_index) = compute_storage_path_with_dedup(
+                &config.documents_dir,
+                &content_hash,
+                &basename,
+                &extension,
+                &content,
+            );
+            let dest_path = config.documents_dir.join(&relative_path);
+
+            if let Some(parent) = dest_path.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    tracing::warn!("Failed to create directory: {}", e);
+                    stats.errors += 1;
+                    position += 1;
+                    continue;
+                }
+            }
+
+            // Perform the storage-mode-specific file operation
+            let file_op_failed = match config.storage_mode {
                 FileStorageMode::Copy => {
-                    // Read content and use standard save helper
-                    let content = match std::fs::read(&file_path) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            tracing::warn!("Failed to read {}: {}", file_path.display(), e);
-                            stats.errors += 1;
-                            position += 1;
-                            continue;
-                        }
-                    };
-
-                    let mime_type = infer::get(&content)
-                        .map(|t| t.mime_type().to_string())
-                        .unwrap_or_else(|| guess_mime_type(&file_path));
-
-                    let content_hash = DocumentVersion::compute_hash(&content);
-                    let (basename, extension) = extract_filename_parts(&url, &title, &mime_type);
-                    let (relative_path, dedup_index) = compute_storage_path_with_dedup(
-                        &config.documents_dir,
-                        &content_hash,
-                        &basename,
-                        &extension,
-                        &content,
-                    );
-                    let dest_path = config.documents_dir.join(&relative_path);
-                    if let Some(parent) = dest_path.parent() {
-                        std::fs::create_dir_all(parent)?;
-                    }
-                    std::fs::write(&dest_path, &content)?;
-
-                    let mut version = DocumentVersion::new_with_metadata(
-                        &content,
-                        mime_type,
-                        Some(url.clone()),
-                        file_path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .map(|s| s.to_string()),
-                        None,
-                    );
-                    version.dedup_index = dedup_index;
-
-                    let existing = doc_repo.get_by_url(&url).await?;
-                    if let Some(mut doc) = existing.into_iter().next() {
-                        if doc.add_version(version) {
-                            doc_repo.save(&doc).await?;
-                        }
+                    if let Err(e) = std::fs::write(&dest_path, &content) {
+                        tracing::warn!("Failed to write {}: {}", dest_path.display(), e);
+                        true
                     } else {
-                        let mut doc = Document::new(
-                            uuid::Uuid::new_v4().to_string(),
-                            source_id.to_string(),
-                            title,
-                            url.clone(),
-                            version,
-                            metadata.clone(),
-                        );
-                        doc.tags = config.tags.clone();
-                        doc_repo.save(&doc).await?;
+                        false
                     }
-
-                    Ok(true)
                 }
-                FileStorageMode::Move | FileStorageMode::HardLink => {
-                    // For move/link, we compute hash without loading entire file into memory
-                    // (for large files this matters)
-                    let content = match std::fs::read(&file_path) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            tracing::warn!("Failed to read {}: {}", file_path.display(), e);
-                            stats.errors += 1;
-                            position += 1;
-                            continue;
-                        }
-                    };
-
-                    let content_hash = DocumentVersion::compute_hash(&content);
-                    let mime_type = infer::get(&content)
-                        .map(|t| t.mime_type().to_string())
-                        .unwrap_or_else(|| guess_mime_type(&file_path));
-
-                    let (basename, extension) = extract_filename_parts(&url, &title, &mime_type);
-                    let (relative_path, dedup_index) = compute_storage_path_with_dedup(
-                        &config.documents_dir,
-                        &content_hash,
-                        &basename,
-                        &extension,
-                        &content,
-                    );
-                    let dest_path = config.documents_dir.join(&relative_path);
-
-                    // Create parent directory
-                    if let Some(parent) = dest_path.parent() {
-                        if let Err(e) = std::fs::create_dir_all(parent) {
-                            tracing::warn!("Failed to create directory: {}", e);
-                            stats.errors += 1;
-                            position += 1;
-                            continue;
-                        }
+                FileStorageMode::Move => {
+                    if let Err(e) = std::fs::rename(&file_path, &dest_path) {
+                        tracing::warn!("Failed to move {}: {}", file_path.display(), e);
+                        true
+                    } else {
+                        false
                     }
-
-                    // Move or link the file
-                    let file_op_result = match config.storage_mode {
-                        FileStorageMode::Move => std::fs::rename(&file_path, &dest_path),
-                        FileStorageMode::HardLink => std::fs::hard_link(&file_path, &dest_path),
-                        _ => unreachable!(),
-                    };
-
-                    if let Err(e) = file_op_result {
-                        // If hard link fails (cross-device), fall back to copy
-                        if config.storage_mode == FileStorageMode::HardLink {
-                            tracing::debug!("Hard link failed ({}), falling back to copy", e);
-                            if let Err(e) = std::fs::copy(&file_path, &dest_path) {
-                                tracing::warn!("Failed to copy {}: {}", file_path.display(), e);
-                                stats.errors += 1;
-                                position += 1;
-                                continue;
-                            }
+                }
+                FileStorageMode::HardLink => {
+                    if let Err(e) = std::fs::hard_link(&file_path, &dest_path) {
+                        tracing::debug!("Hard link failed ({}), falling back to copy", e);
+                        if let Err(e) = std::fs::copy(&file_path, &dest_path) {
+                            tracing::warn!("Failed to copy {}: {}", file_path.display(), e);
+                            true
                         } else {
-                            tracing::warn!("Failed to move {}: {}", file_path.display(), e);
-                            stats.errors += 1;
-                            position += 1;
-                            continue;
-                        }
-                    }
-
-                    // Create document version
-                    let mut version = DocumentVersion::new_with_metadata(
-                        &content,
-                        mime_type,
-                        Some(url.clone()),
-                        file_path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .map(|s| s.to_string()),
-                        None,
-                    );
-                    version.dedup_index = dedup_index;
-
-                    // Save document
-                    let existing = doc_repo.get_by_url(&url).await?;
-                    if let Some(mut doc) = existing.into_iter().next() {
-                        if doc.add_version(version) {
-                            doc_repo.save(&doc).await?;
+                            false
                         }
                     } else {
-                        let mut doc = Document::new(
-                            uuid::Uuid::new_v4().to_string(),
-                            source_id.to_string(),
-                            title,
-                            url.clone(),
-                            version,
-                            metadata,
-                        );
-                        doc.tags = config.tags.clone();
-                        doc_repo.save(&doc).await?;
+                        false
                     }
-
-                    Ok(true)
                 }
+            };
+
+            if file_op_failed {
+                stats.errors += 1;
+                position += 1;
+                continue;
+            }
+
+            // Create document version and save
+            let mut version = DocumentVersion::new_with_metadata(
+                &content,
+                mime_type,
+                Some(url.clone()),
+                file_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|s| s.to_string()),
+                None,
+            );
+            version.dedup_index = dedup_index;
+
+            let save_result: anyhow::Result<bool> = {
+                let existing = doc_repo.get_by_url(&url).await?;
+                if let Some(mut doc) = existing.into_iter().next() {
+                    if doc.add_version(version) {
+                        doc_repo.save_with_versions(&doc).await?;
+                    }
+                } else {
+                    let mut doc = Document::new(
+                        uuid::Uuid::new_v4().to_string(),
+                        source_id.to_string(),
+                        title,
+                        url.clone(),
+                        version,
+                        metadata,
+                    );
+                    doc.tags = config.tags.clone();
+                    doc_repo.save_with_versions(&doc).await?;
+                }
+                Ok(true)
             };
 
             match save_result {

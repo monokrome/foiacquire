@@ -12,8 +12,8 @@ pub mod url_finder;
 pub use format::format_size;
 pub use mime::{
     category_to_mime_patterns, guess_mime_from_filename, guess_mime_from_url,
-    has_document_extension, has_file_extension, is_document_mimetype, mime_icon, mime_to_category,
-    mime_type_category, MimeCategory,
+    has_document_extension, has_file_extension, is_document_mimetype, is_extractable_mimetype,
+    mime_icon, mime_to_category, mime_type_category, MimeCategory,
 };
 pub use url_finder::UrlFinder;
 

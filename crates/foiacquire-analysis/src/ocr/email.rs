@@ -46,17 +46,7 @@ pub struct EmailAttachment {
 impl EmailAttachment {
     /// Check if this attachment type is supported for text extraction.
     pub fn is_extractable(&self) -> bool {
-        matches!(
-            self.mime_type.as_str(),
-            "application/pdf"
-                | "image/png"
-                | "image/jpeg"
-                | "image/tiff"
-                | "image/gif"
-                | "image/bmp"
-                | "text/plain"
-                | "text/html"
-        )
+        foiacquire::utils::is_extractable_mimetype(&self.mime_type)
     }
 }
 
