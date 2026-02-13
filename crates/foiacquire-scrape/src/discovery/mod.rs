@@ -62,7 +62,9 @@ pub trait DiscoverySource: Send + Sync {
     /// Whether this source requires browser-based fetching.
     ///
     /// Sources like Google Search need a browser to bypass bot detection.
-    fn requires_browser(&self) -> bool;
+    fn requires_browser(&self) -> bool {
+        false
+    }
 
     /// Discover URLs for a target domain using the given search terms.
     ///

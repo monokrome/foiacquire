@@ -16,6 +16,7 @@ use foiacquire::models::DiscoveryMethod;
 const DDG_SEARCH_URL: &str = "https://html.duckduckgo.com/html/";
 
 /// Discovery source using DuckDuckGo search.
+#[derive(Default)]
 pub struct DuckDuckGoSource {}
 
 impl DuckDuckGoSource {
@@ -140,12 +141,6 @@ impl DuckDuckGoSource {
     }
 }
 
-impl Default for DuckDuckGoSource {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// A single search result.
 struct SearchResult {
     url: String,
@@ -161,10 +156,6 @@ impl DiscoverySource for DuckDuckGoSource {
 
     fn method(&self) -> DiscoveryMethod {
         DiscoveryMethod::SearchEngine
-    }
-
-    fn requires_browser(&self) -> bool {
-        false
     }
 
     async fn discover(

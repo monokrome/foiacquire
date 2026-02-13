@@ -69,6 +69,7 @@ const COMMON_PATHS: &[&str] = &[
 ];
 
 /// Discovery source that checks common document paths.
+#[derive(Default)]
 pub struct CommonPathsSource {
     /// Additional custom paths to check.
     custom_paths: Vec<String>,
@@ -133,12 +134,6 @@ impl CommonPathsSource {
     }
 }
 
-impl Default for CommonPathsSource {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[async_trait]
 impl DiscoverySource for CommonPathsSource {
     fn name(&self) -> &str {
@@ -147,10 +142,6 @@ impl DiscoverySource for CommonPathsSource {
 
     fn method(&self) -> DiscoveryMethod {
         DiscoveryMethod::CommonPath
-    }
-
-    fn requires_browser(&self) -> bool {
-        false
     }
 
     async fn discover(

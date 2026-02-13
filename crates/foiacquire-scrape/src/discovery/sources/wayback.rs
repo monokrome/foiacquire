@@ -12,6 +12,7 @@ use crate::HttpClient;
 use foiacquire::models::DiscoveryMethod;
 
 /// Discovery source using Wayback Machine CDX API.
+#[derive(Default)]
 pub struct WaybackSource {}
 
 impl WaybackSource {
@@ -26,12 +27,6 @@ impl WaybackSource {
     }
 }
 
-impl Default for WaybackSource {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[async_trait]
 impl DiscoverySource for WaybackSource {
     fn name(&self) -> &str {
@@ -40,10 +35,6 @@ impl DiscoverySource for WaybackSource {
 
     fn method(&self) -> DiscoveryMethod {
         DiscoveryMethod::WaybackMachine
-    }
-
-    fn requires_browser(&self) -> bool {
-        false
     }
 
     async fn discover(

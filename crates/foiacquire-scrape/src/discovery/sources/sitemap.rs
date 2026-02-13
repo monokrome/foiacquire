@@ -20,6 +20,7 @@ const SITEMAP_PATHS: &[&str] = &[
 ];
 
 /// Discovery source that parses sitemaps and robots.txt.
+#[derive(Default)]
 pub struct SitemapSource {}
 
 impl SitemapSource {
@@ -201,12 +202,6 @@ impl SitemapSource {
     }
 }
 
-impl Default for SitemapSource {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[async_trait]
 impl DiscoverySource for SitemapSource {
     fn name(&self) -> &str {
@@ -215,10 +210,6 @@ impl DiscoverySource for SitemapSource {
 
     fn method(&self) -> DiscoveryMethod {
         DiscoveryMethod::Sitemap
-    }
-
-    fn requires_browser(&self) -> bool {
-        false
     }
 
     async fn discover(
