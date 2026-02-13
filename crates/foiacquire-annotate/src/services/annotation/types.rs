@@ -60,7 +60,7 @@ pub struct BatchAnnotationResult {
 #[allow(dead_code)]
 pub enum AnnotationError {
     #[error("Backend not available: {0}")]
-    NotAvailable(String),
+    BackendNotAvailable(String),
 
     #[error("Annotation failed: {0}")]
     Failed(String),

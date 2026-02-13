@@ -8,6 +8,8 @@
 use std::path::Path;
 use thiserror::Error;
 
+use crate::ocr::OcrError;
+
 /// Errors from analysis backends.
 #[derive(Debug, Error)]
 pub enum AnalysisError {
@@ -28,6 +30,25 @@ pub enum AnalysisError {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+impl From<OcrError> for AnalysisError {
+    fn from(err: OcrError) -> Self {
+        match err {
+            OcrError::BackendNotAvailable(msg) => AnalysisError::BackendNotAvailable(msg),
+            OcrError::Io(e) => AnalysisError::Io(e),
+            OcrError::OcrFailed(msg) => AnalysisError::AnalysisFailed(msg),
+            OcrError::RateLimited {
+                backend,
+                retry_after_secs,
+            } => AnalysisError::AnalysisFailed(format!(
+                "Rate limited by {}, retry after {:?}s",
+                backend, retry_after_secs
+            )),
+            OcrError::ModelNotFound(msg) => AnalysisError::BackendNotAvailable(msg),
+            OcrError::ImageError(msg) => AnalysisError::AnalysisFailed(msg),
+        }
+    }
 }
 
 /// Analysis granularity - determines how results are stored.

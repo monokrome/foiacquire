@@ -90,16 +90,12 @@ impl AnalysisBackend for OcrAnalysisAdapter {
     }
 
     fn analyze_page(&self, file_path: &Path, page: u32) -> Result<AnalysisResult, AnalysisError> {
-        self.backend
-            .ocr_pdf_page(file_path, page)
-            .map(|r| self.ocr_to_analysis(r))
-            .map_err(|e| AnalysisError::AnalysisFailed(e.to_string()))
+        let result = self.backend.ocr_pdf_page(file_path, page)?;
+        Ok(self.ocr_to_analysis(result))
     }
 
     fn analyze_image(&self, image_path: &Path) -> Result<AnalysisResult, AnalysisError> {
-        self.backend
-            .ocr_image(image_path)
-            .map(|r| self.ocr_to_analysis(r))
-            .map_err(|e| AnalysisError::AnalysisFailed(e.to_string()))
+        let result = self.backend.ocr_image(image_path)?;
+        Ok(self.ocr_to_analysis(result))
     }
 }
