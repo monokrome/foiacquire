@@ -7,11 +7,8 @@ use std::time::Duration;
 use tracing::debug;
 
 use crate::discovery::{DiscoveredUrl, DiscoveryError, DiscoverySource, DiscoverySourceConfig};
-use crate::HttpClient;
+use crate::{HttpClient, WAYBACK_CDX_API_URL};
 use foiacquire::models::DiscoveryMethod;
-
-/// CDX API base URL.
-const CDX_API_URL: &str = "https://web.archive.org/cdx/search/cdx";
 
 /// Discovery source using Wayback Machine CDX API.
 pub struct WaybackSource {}
@@ -32,7 +29,7 @@ impl WaybackSource {
     ) -> String {
         let mut url = format!(
             "{}?url=*.{}&matchType=domain&output=json&fl=original,mimetype,statuscode,timestamp&collapse=urlkey",
-            CDX_API_URL, domain
+            WAYBACK_CDX_API_URL, domain
         );
 
         // Filter for successful responses only

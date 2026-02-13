@@ -5,7 +5,8 @@ const DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "doc", "docx", "xls", "xlsx", "ppt
 
 /// Known file extensions (documents + images + archives).
 const FILE_EXTENSIONS: &[&str] = &[
-    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "jpg", "jpeg", "png", "gif", "zip",
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "jpg", "jpeg", "png", "gif", "tif",
+    "tiff", "bmp", "zip",
 ];
 
 /// Guess MIME type from a filename's extension.
@@ -29,6 +30,10 @@ pub fn guess_mime_from_filename(name: &str) -> &'static str {
         "jpg" | "jpeg" => "image/jpeg",
         "png" => "image/png",
         "gif" => "image/gif",
+        "tif" | "tiff" => "image/tiff",
+        "bmp" => "image/bmp",
+        "msg" => "application/vnd.ms-outlook",
+        "eml" => "message/rfc822",
         "zip" => "application/zip",
         _ => "application/octet-stream",
     }
@@ -370,6 +375,15 @@ mod tests {
         assert_eq!(guess_mime_from_filename("photo.jpeg"), "image/jpeg");
         assert_eq!(guess_mime_from_filename("image.png"), "image/png");
         assert_eq!(guess_mime_from_filename("anim.gif"), "image/gif");
+        assert_eq!(guess_mime_from_filename("scan.tif"), "image/tiff");
+        assert_eq!(guess_mime_from_filename("scan.tiff"), "image/tiff");
+        assert_eq!(guess_mime_from_filename("scan.TIFF"), "image/tiff");
+        assert_eq!(guess_mime_from_filename("diagram.bmp"), "image/bmp");
+        assert_eq!(
+            guess_mime_from_filename("email.msg"),
+            "application/vnd.ms-outlook"
+        );
+        assert_eq!(guess_mime_from_filename("email.eml"), "message/rfc822");
         assert_eq!(guess_mime_from_filename("archive.zip"), "application/zip");
         assert_eq!(
             guess_mime_from_filename("unknown"),
@@ -432,6 +446,9 @@ mod tests {
         assert!(has_file_extension("https://example.com/photo.jpeg"));
         assert!(has_file_extension("https://example.com/image.png"));
         assert!(has_file_extension("https://example.com/anim.gif"));
+        assert!(has_file_extension("https://example.com/scan.tif"));
+        assert!(has_file_extension("https://example.com/scan.tiff"));
+        assert!(has_file_extension("https://example.com/diagram.bmp"));
         // Archives
         assert!(has_file_extension("https://example.com/archive.zip"));
         // Not files

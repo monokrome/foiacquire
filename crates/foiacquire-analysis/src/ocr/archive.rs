@@ -113,7 +113,7 @@ impl ArchiveExtractor {
                 continue;
             }
 
-            let mime_type = mime_from_filename(&filename);
+            let mime_type = foiacquire::utils::guess_mime_from_filename(&filename).to_string();
 
             entries.push(ArchiveEntry {
                 path: path.clone(),
@@ -167,7 +167,7 @@ impl ArchiveExtractor {
         zip_file.read_to_end(&mut buffer)?;
         outfile.write_all(&buffer)?;
 
-        let mime_type = mime_from_filename(&filename);
+        let mime_type = foiacquire::utils::guess_mime_from_filename(&filename).to_string();
 
         let entry = ArchiveEntry {
             path: entry_path.to_string(),
@@ -206,41 +206,9 @@ impl ArchiveExtractor {
     }
 }
 
-/// Determine MIME type from filename extension.
-fn mime_from_filename(filename: &str) -> String {
-    let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
-
-    match ext.as_str() {
-        "pdf" => "application/pdf",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "bmp" => "image/bmp",
-        "tif" | "tiff" => "image/tiff",
-        "txt" => "text/plain",
-        "html" | "htm" => "text/html",
-        "doc" => "application/msword",
-        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "xls" => "application/vnd.ms-excel",
-        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "zip" => "application/zip",
-        _ => "application/octet-stream",
-    }
-    .to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_mime_from_filename() {
-        assert_eq!(mime_from_filename("test.pdf"), "application/pdf");
-        assert_eq!(mime_from_filename("image.PNG"), "image/png");
-        assert_eq!(mime_from_filename("doc.JPEG"), "image/jpeg");
-        assert_eq!(mime_from_filename("file.txt"), "text/plain");
-        assert_eq!(mime_from_filename("unknown"), "application/octet-stream");
-    }
 
     #[test]
     fn test_is_archive() {
