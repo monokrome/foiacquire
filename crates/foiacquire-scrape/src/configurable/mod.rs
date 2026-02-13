@@ -13,7 +13,7 @@ use std::time::Duration;
 use super::config::{ScraperConfig, ViaMode};
 use super::HttpClient;
 #[cfg(feature = "browser")]
-use foiacquire::browser::BrowserEngineConfig;
+use foiacquire::config::BrowserEngineConfig;
 use foiacquire::models::Source;
 #[allow(unused_imports)]
 use foiacquire::privacy::PrivacyConfig;
@@ -139,11 +139,7 @@ impl ConfigurableScraper {
         };
 
         #[cfg(feature = "browser")]
-        let browser_config = config
-            .browser
-            .as_ref()
-            .filter(|b| b.enabled)
-            .map(|b| b.to_engine_config());
+        let browser_config = config.browser.as_ref().filter(|b| b.enabled).cloned();
 
         Ok(Self {
             source,

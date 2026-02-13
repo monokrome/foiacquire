@@ -100,7 +100,7 @@ impl CustomBackend {
 
         // If SOCKS_PROXY is already set in environment, it gets inherited automatically
         // Just add ALL_PROXY as an alias for compatibility
-        if let Ok(proxy) = std::env::var("SOCKS_PROXY") {
+        if let Some(proxy) = foiacquire::privacy::socks_proxy_from_env() {
             cmd.env("ALL_PROXY", proxy);
         }
 

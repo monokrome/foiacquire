@@ -59,8 +59,9 @@ pub async fn cmd_browser_test(
         wait_for_selector: None,
         chrome_args: vec![],
         remote_url: browser_url,
-        remote_urls: vec![],
+        urls: vec![],
         selection: Default::default(),
+        ..Default::default()
     }
     .with_env_overrides();
 

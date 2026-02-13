@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::browser::BrowserEngineConfig;
 use super::discovery::ExternalDiscoveryConfig;
 use crate::privacy::SourcePrivacyConfig;
 
@@ -86,7 +87,8 @@ pub struct ScraperConfig {
     pub fetch: FetchConfig,
     /// Browser configuration for anti-bot protected sites.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub browser: Option<BrowserConfig>,
+    #[prefer(skip)]
+    pub browser: Option<BrowserEngineConfig>,
     /// Per-source privacy configuration.
     #[serde(default, skip_serializing_if = "SourcePrivacyConfig::is_default")]
     #[prefer(default)]
@@ -106,66 +108,6 @@ impl ScraperConfig {
             .or_else(|| self.discovery.base_url.clone())
             .unwrap_or_else(|| default.to_string())
     }
-}
-
-/// Browser configuration for scraper.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, prefer::FromValue)]
-pub struct BrowserConfig {
-    /// Whether to use browser for fetching (enables browser mode).
-    #[serde(default)]
-    pub enabled: bool,
-
-    /// Browser engine type.
-    /// - "stealth": Chromium with stealth patches (bypasses most bot detection)
-    /// - "cookies": Use saved cookies with regular HTTP (fastest)
-    /// - "standard": Regular Chromium without stealth patches
-    #[serde(default)]
-    pub engine: String,
-
-    /// Run in headless mode (default: true).
-    /// Set to false for debugging or if headless detection is an issue.
-    #[serde(default = "default_headless")]
-    pub headless: bool,
-
-    /// Proxy server URL (e.g., "socks5://127.0.0.1:1080").
-    #[serde(default)]
-    pub proxy: Option<String>,
-
-    /// Path to cookies file for cookie injection mode.
-    #[serde(default)]
-    pub cookies_file: Option<String>,
-
-    /// Page load timeout in seconds.
-    #[serde(default = "default_timeout")]
-    pub timeout: u64,
-
-    /// Wait for this CSS selector before considering page loaded.
-    #[serde(default)]
-    pub wait_for_selector: Option<String>,
-
-    /// Remote Chrome DevTools URL (e.g., "ws://localhost:9222").
-    /// If set, connects to existing browser instead of launching one.
-    /// For a single browser, use this field.
-    #[serde(default)]
-    pub remote_url: Option<String>,
-
-    /// Multiple remote browser URLs for load balancing/failover.
-    /// Overrides BROWSER_URL environment variable when set.
-    #[serde(default)]
-    pub urls: Vec<String>,
-
-    /// Browser selection strategy when multiple URLs are configured.
-    /// Options: "round-robin" (default), "random", "per-domain".
-    #[serde(default)]
-    pub selection: Option<String>,
-}
-
-fn default_headless() -> bool {
-    true
-}
-
-fn default_timeout() -> u64 {
-    30
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, prefer::FromValue)]
@@ -419,123 +361,9 @@ impl FetchConfig {
     }
 }
 
-#[cfg(feature = "browser")]
-impl BrowserConfig {
-    /// Convert to BrowserEngineConfig.
-    /// Per-scraper config overrides environment variables.
-    pub fn to_engine_config(&self) -> crate::browser::BrowserEngineConfig {
-        use crate::browser::{BrowserEngineConfig, BrowserEngineType, SelectionStrategyType};
-
-        let engine = match self.engine.to_lowercase().as_str() {
-            "stealth" => BrowserEngineType::Stealth,
-            "cookies" => BrowserEngineType::Cookies,
-            "standard" => BrowserEngineType::Standard,
-            _ => BrowserEngineType::Stealth,
-        };
-
-        let selection = self
-            .selection
-            .as_ref()
-            .and_then(|s| SelectionStrategyType::from_str(s))
-            .unwrap_or_default();
-
-        // Per-scraper URLs override environment
-        let (remote_url, remote_urls) = if !self.urls.is_empty() {
-            (None, self.urls.clone())
-        } else if let Some(ref url) = self.remote_url {
-            (Some(url.clone()), Vec::new())
-        } else {
-            // Fall back to environment variables
-            let base = BrowserEngineConfig::default().with_env_overrides();
-            (base.remote_url, base.remote_urls)
-        };
-
-        BrowserEngineConfig {
-            engine,
-            headless: self.headless,
-            proxy: self.proxy.clone(),
-            cookies_file: self.cookies_file.as_ref().map(std::path::PathBuf::from),
-            timeout: self.timeout,
-            wait_for_selector: self.wait_for_selector.clone(),
-            chrome_args: Vec::new(),
-            remote_url,
-            remote_urls,
-            selection,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[cfg(feature = "browser")]
-    #[test]
-    fn test_browser_config_to_engine_config() {
-        use crate::browser::BrowserEngineType;
-
-        let config = BrowserConfig {
-            enabled: true,
-            engine: "stealth".to_string(),
-            headless: false,
-            proxy: Some("socks5://127.0.0.1:1080".to_string()),
-            timeout: 60,
-            wait_for_selector: Some("#content".to_string()),
-            ..Default::default()
-        };
-
-        let engine_config = config.to_engine_config();
-        assert!(matches!(engine_config.engine, BrowserEngineType::Stealth));
-        assert!(!engine_config.headless);
-        assert_eq!(
-            engine_config.proxy,
-            Some("socks5://127.0.0.1:1080".to_string())
-        );
-        assert_eq!(engine_config.timeout, 60);
-    }
-
-    #[cfg(feature = "browser")]
-    #[test]
-    fn test_browser_engine_type_parsing() {
-        use crate::browser::BrowserEngineType;
-
-        let stealth = BrowserConfig {
-            engine: "stealth".to_string(),
-            ..Default::default()
-        };
-        assert!(matches!(
-            stealth.to_engine_config().engine,
-            BrowserEngineType::Stealth
-        ));
-
-        let cookies = BrowserConfig {
-            engine: "cookies".to_string(),
-            ..Default::default()
-        };
-        assert!(matches!(
-            cookies.to_engine_config().engine,
-            BrowserEngineType::Cookies
-        ));
-
-        let standard = BrowserConfig {
-            engine: "standard".to_string(),
-            ..Default::default()
-        };
-        assert!(matches!(
-            standard.to_engine_config().engine,
-            BrowserEngineType::Standard
-        ));
-
-        // Unknown defaults to Stealth
-        let unknown = BrowserConfig {
-            engine: "unknown".to_string(),
-            ..Default::default()
-        };
-        assert!(matches!(
-            unknown.to_engine_config().engine,
-            BrowserEngineType::Stealth
-        ));
-    }
 
     #[test]
     fn test_scraper_config_name_or() {

@@ -80,7 +80,7 @@ pub async fn download_video(
     ]);
 
     // Determine proxy to use (explicit parameter or environment variable)
-    let env_proxy = std::env::var("SOCKS_PROXY").ok();
+    let env_proxy = foiacquire::privacy::socks_proxy_from_env();
     let effective_proxy = proxy_url.or(env_proxy.as_deref()).filter(|s| !s.is_empty());
 
     // Add proxy if configured
@@ -139,7 +139,7 @@ pub async fn fetch_metadata(url: &str, proxy_url: Option<&str>) -> Result<VideoM
     cmd.args(["--dump-json", "--no-playlist"]);
 
     // Determine proxy to use (explicit parameter or environment variable)
-    let env_proxy = std::env::var("SOCKS_PROXY").ok();
+    let env_proxy = foiacquire::privacy::socks_proxy_from_env();
     let effective_proxy = proxy_url.or(env_proxy.as_deref()).filter(|s| !s.is_empty());
 
     if let Some(proxy) = effective_proxy {

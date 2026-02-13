@@ -40,8 +40,8 @@ mod arti;
 
 #[allow(unused_imports)] // HiddenServiceSecurityLevel is public API
 pub use config::{
-    HiddenServiceConfig, HiddenServiceProvider, HiddenServiceSecurityLevel, PrivacyConfig,
-    PrivacyMode, SourcePrivacyConfig,
+    socks_proxy_from_env, HiddenServiceConfig, HiddenServiceProvider, HiddenServiceSecurityLevel,
+    PrivacyConfig, PrivacyMode, SourcePrivacyConfig,
 };
 pub use ctor::CTorHiddenService;
 

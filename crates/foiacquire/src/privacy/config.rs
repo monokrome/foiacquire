@@ -3,6 +3,11 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 
+/// Read SOCKS proxy URL from environment.
+pub fn socks_proxy_from_env() -> Option<String> {
+    env::var("SOCKS_PROXY").ok().filter(|s| !s.is_empty())
+}
+
 #[cfg(not(feature = "embedded-tor"))]
 use std::net::TcpStream;
 #[cfg(not(feature = "embedded-tor"))]
@@ -305,10 +310,8 @@ impl PrivacyConfig {
     /// Apply environment variable overrides.
     pub fn with_env_overrides(mut self) -> Self {
         // SOCKS_PROXY takes highest precedence
-        if let Ok(proxy) = env::var("SOCKS_PROXY") {
-            if !proxy.is_empty() {
-                self.socks_proxy = Some(proxy);
-            }
+        if let Some(proxy) = socks_proxy_from_env() {
+            self.socks_proxy = Some(proxy);
         }
 
         // FOIACQUIRE_DIRECT=1 disables Tor

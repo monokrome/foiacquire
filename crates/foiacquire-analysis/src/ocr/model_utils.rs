@@ -76,7 +76,7 @@ impl ModelDirConfig {
 /// Respects SOCKS_PROXY environment variable for privacy routing.
 pub fn download_file(url: &str, dest: &Path) -> Result<(), OcrError> {
     // Check for SOCKS proxy configuration
-    let socks_proxy = std::env::var("SOCKS_PROXY").ok();
+    let socks_proxy = foiacquire::privacy::socks_proxy_from_env();
 
     let mut curl_cmd = Command::new("curl");
     curl_cmd.args(["-fSL", "--progress-bar", "-o"]);

@@ -1,6 +1,7 @@
 //! Configuration management for FOIAcquire using the prefer crate.
 
 mod analysis;
+pub mod browser;
 pub mod discovery;
 mod loader;
 pub mod scraper;
@@ -19,6 +20,7 @@ use crate::privacy::PrivacyConfig;
 use crate::repository::util::validate_database_url;
 
 pub use analysis::{AnalysisConfig, AnalysisMethodConfig, OcrConfig};
+pub use browser::{BrowserEngineConfig, BrowserEngineType, SelectionStrategyType};
 pub use loader::{load_settings_with_options, LoadOptions};
 pub use scraper::{ScraperConfig, ViaMode};
 pub use settings::Settings;

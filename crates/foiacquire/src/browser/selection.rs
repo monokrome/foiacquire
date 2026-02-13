@@ -4,7 +4,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use serde::{Deserialize, Serialize};
+pub use crate::config::browser::SelectionStrategyType;
 
 /// Strategy for selecting which browser to use for a request.
 pub trait BrowserSelectionStrategy: Send + Sync {
@@ -170,19 +170,6 @@ impl BrowserSelectionStrategy for PerDomainStrategy {
     }
 }
 
-/// Selection strategy type enum for config/CLI.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum SelectionStrategyType {
-    /// Rotate through browsers consecutively
-    #[default]
-    RoundRobin,
-    /// Random selection each request
-    Random,
-    /// Consistent hash by domain (sticky)
-    PerDomain,
-}
-
 impl SelectionStrategyType {
     /// Create a boxed strategy instance.
     pub fn create_strategy(&self) -> Box<dyn BrowserSelectionStrategy> {
@@ -191,39 +178,6 @@ impl SelectionStrategyType {
             Self::Random => Box::new(RandomStrategy::new()),
             Self::PerDomain => Box::new(PerDomainStrategy),
         }
-    }
-
-    /// Parse from string (for CLI/env var).
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().replace('-', "").as_str() {
-            "roundrobin" => Some(Self::RoundRobin),
-            "random" => Some(Self::Random),
-            "perdomain" => Some(Self::PerDomain),
-            _ => None,
-        }
-    }
-}
-
-impl std::fmt::Display for SelectionStrategyType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::RoundRobin => write!(f, "round-robin"),
-            Self::Random => write!(f, "random"),
-            Self::PerDomain => write!(f, "per-domain"),
-        }
-    }
-}
-
-impl std::str::FromStr for SelectionStrategyType {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::from_str(s).ok_or_else(|| {
-            format!(
-                "Invalid selection strategy '{}'. Valid options: round-robin, random, per-domain",
-                s
-            )
-        })
     }
 }
 
@@ -319,33 +273,6 @@ mod tests {
         assert!(fallback.is_some());
         assert_ne!(fallback, Some(preferred));
     }
-
-    #[test]
-    fn strategy_type_from_str() {
-        assert_eq!(
-            SelectionStrategyType::from_str("round-robin"),
-            Some(SelectionStrategyType::RoundRobin)
-        );
-        assert_eq!(
-            SelectionStrategyType::from_str("roundrobin"),
-            Some(SelectionStrategyType::RoundRobin)
-        );
-        assert_eq!(
-            SelectionStrategyType::from_str("random"),
-            Some(SelectionStrategyType::Random)
-        );
-        assert_eq!(
-            SelectionStrategyType::from_str("per-domain"),
-            Some(SelectionStrategyType::PerDomain)
-        );
-        assert_eq!(
-            SelectionStrategyType::from_str("perdomain"),
-            Some(SelectionStrategyType::PerDomain)
-        );
-        assert_eq!(SelectionStrategyType::from_str("invalid"), None);
-    }
-
-    // === Edge case tests ===
 
     #[test]
     fn all_strategies_return_none_for_empty_pool() {
@@ -541,27 +468,6 @@ mod tests {
     }
 
     #[test]
-    fn strategy_type_display() {
-        assert_eq!(
-            format!("{}", SelectionStrategyType::RoundRobin),
-            "round-robin"
-        );
-        assert_eq!(format!("{}", SelectionStrategyType::Random), "random");
-        assert_eq!(
-            format!("{}", SelectionStrategyType::PerDomain),
-            "per-domain"
-        );
-    }
-
-    #[test]
-    fn strategy_type_default_is_round_robin() {
-        assert_eq!(
-            SelectionStrategyType::default(),
-            SelectionStrategyType::RoundRobin
-        );
-    }
-
-    #[test]
     fn strategy_type_creates_correct_strategy() {
         let healthy = [true, true, true];
 
@@ -578,19 +484,4 @@ mod tests {
         assert_eq!(first, second, "Per-domain should be consistent");
     }
 
-    #[test]
-    fn strategy_type_from_str_case_insensitive() {
-        assert_eq!(
-            SelectionStrategyType::from_str("ROUND-ROBIN"),
-            Some(SelectionStrategyType::RoundRobin)
-        );
-        assert_eq!(
-            SelectionStrategyType::from_str("Random"),
-            Some(SelectionStrategyType::Random)
-        );
-        assert_eq!(
-            SelectionStrategyType::from_str("PER-DOMAIN"),
-            Some(SelectionStrategyType::PerDomain)
-        );
-    }
 }
