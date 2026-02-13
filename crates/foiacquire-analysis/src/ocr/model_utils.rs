@@ -21,6 +21,15 @@ pub fn check_binary(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Check pdftoppm availability, returning a hint message if missing.
+pub fn check_pdftoppm_hint() -> Option<String> {
+    if check_binary("pdftoppm") {
+        None
+    } else {
+        Some("pdftoppm not installed. Install with: apt install poppler-utils".to_string())
+    }
+}
+
 /// Model file specification for downloading.
 pub struct ModelSpec {
     /// URL to download from.

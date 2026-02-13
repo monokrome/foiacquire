@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError};
-use super::model_utils::check_binary;
+use super::model_utils::{check_binary, check_pdftoppm_hint};
 
 /// DeepSeek OCR backend using subprocess.
 pub struct DeepSeekBackend {
@@ -153,8 +153,8 @@ impl OcrBackend for DeepSeekBackend {
                  cargo install --path crates/cli --features cuda  # or --features metal for Mac",
                 self.binary_path.display()
             )
-        } else if !check_binary("pdftoppm") {
-            "pdftoppm not installed. Install with: apt install poppler-utils".to_string()
+        } else if let Some(hint) = check_pdftoppm_hint() {
+            hint
         } else {
             format!(
                 "DeepSeek-OCR is available (device: {}, model: {})",

@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::Command;
 
 use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError};
-use super::model_utils::check_binary;
+use super::model_utils::{check_binary, check_pdftoppm_hint};
 
 /// Tesseract OCR backend.
 pub struct TesseractBackend {
@@ -74,8 +74,8 @@ impl OcrBackend for TesseractBackend {
     fn availability_hint(&self) -> String {
         if !check_binary("tesseract") {
             "Tesseract not installed. Install with: apt install tesseract-ocr".to_string()
-        } else if !check_binary("pdftoppm") {
-            "pdftoppm not installed. Install with: apt install poppler-utils".to_string()
+        } else if let Some(hint) = check_pdftoppm_hint() {
+            hint
         } else {
             "Tesseract is available".to_string()
         }
