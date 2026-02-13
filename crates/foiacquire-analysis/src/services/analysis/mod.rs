@@ -121,26 +121,42 @@ impl AnalysisService {
 
         // First, finalize any documents that have all pages complete but weren't finalized
         // (this handles documents processed before incremental finalization was added)
+        tracing::debug!("Finalizing pending documents...");
         let pending_finalized = self.doc_repo.finalize_pending_documents().await?;
-        if pending_finalized > 0 {
-            tracing::info!(
-                "Finalized {} documents that had all pages complete",
-                pending_finalized
-            );
-        }
+        tracing::debug!("Finalized {} pending documents", pending_finalized);
 
         // Only run OCR phases if OCR methods are requested
         if has_ocr_methods {
             // ==================== PHASE 0: MIME Detection ====================
+            tracing::debug!("Starting Phase 0: MIME detection");
             self.process_phase0_mime(source_id, limit, mime_type, &event_tx, &mut result)
                 .await?;
+            tracing::debug!(
+                "Phase 0 complete: checked={}, fixed={}",
+                result.mime_checked,
+                result.mime_fixed
+            );
 
             // ==================== PHASE 1: Text Extraction ====================
+            tracing::debug!("Starting Phase 1: Text extraction");
             self.process_phase1(source_id, workers, limit, mime_type, &event_tx, &mut result)
                 .await?;
+            tracing::debug!(
+                "Phase 1 complete: succeeded={}, failed={}, pages={}",
+                result.phase1_succeeded,
+                result.phase1_failed,
+                result.pages_created
+            );
 
             // ==================== PHASE 2: OCR All Pages ====================
+            tracing::debug!("Starting Phase 2: OCR all pages");
             self.process_phase2(workers, &event_tx, &mut result).await?;
+            tracing::debug!(
+                "Phase 2 complete: improved={}, skipped={}, failed={}",
+                result.phase2_improved,
+                result.phase2_skipped,
+                result.phase2_failed
+            );
         }
 
         // TODO: Add document-level analysis phase for methods like Whisper
@@ -172,53 +188,77 @@ impl AnalysisService {
             return Ok(());
         }
 
+        let max_to_check = if limit > 0 {
+            limit
+        } else {
+            total_count as usize
+        };
+
         let _ = event_tx
             .send(AnalysisEvent::MimeCheckStarted {
-                total_documents: if limit > 0 {
-                    limit
-                } else {
-                    total_count as usize
-                },
+                total_documents: max_to_check,
             })
             .await;
 
-        let docs = self
-            .doc_repo
-            .get_needing_ocr_filtered(
-                if limit > 0 { limit.min(10000) } else { 10000 },
-                source_id,
-                mime_type,
-                None,
-            )
-            .await?;
         let mut checked = 0;
         let mut fixed = 0;
+        let mut cursor: Option<String> = None;
+        let batch_size = 200;
 
-        for doc in docs {
-            checked += 1;
+        loop {
+            if checked >= max_to_check {
+                break;
+            }
 
-            // Get the current version's file path and MIME type
-            if let Some(version) = doc.versions.last() {
-                let path = version.resolve_path(&self.documents_dir, &doc.source_url, &doc.title);
-                if path.exists() {
-                    if let Some((detected_mime, old_mime)) =
-                        self.detect_mime_mismatch(&path, &version.mime_type)
-                    {
-                        // Update the MIME type in database
-                        if self
-                            .doc_repo
-                            .update_version_mime_type(version.id, &detected_mime)
-                            .await
-                            .is_ok()
+            let remaining = max_to_check - checked;
+            let docs = self
+                .doc_repo
+                .get_needing_ocr_filtered(
+                    remaining.min(batch_size),
+                    source_id,
+                    mime_type,
+                    cursor.as_deref(),
+                )
+                .await?;
+
+            if docs.is_empty() {
+                break;
+            }
+
+            if let Some(last) = docs.last() {
+                cursor = Some(last.id.clone());
+            }
+
+            for doc in docs {
+                checked += 1;
+                let _ = event_tx
+                    .send(AnalysisEvent::MimeChecked {
+                        document_id: doc.id.clone(),
+                    })
+                    .await;
+
+                if let Some(version) = doc.versions.last() {
+                    let path =
+                        version.resolve_path(&self.documents_dir, &doc.source_url, &doc.title);
+                    if path.exists() {
+                        if let Some((detected_mime, old_mime)) =
+                            self.detect_mime_mismatch(&path, &version.mime_type)
                         {
-                            fixed += 1;
-                            let _ = event_tx
-                                .send(AnalysisEvent::MimeFixed {
-                                    document_id: doc.id.clone(),
-                                    old_mime,
-                                    new_mime: detected_mime,
-                                })
-                                .await;
+                            if self
+                                .doc_repo
+                                .update_version_mime_type(version.id, &detected_mime)
+                                .await
+                                .is_ok()
+                            {
+                                fixed += 1;
+                                let _ = event_tx
+                                    .send(AnalysisEvent::MimeFixed {
+                                        document_id: doc.id.clone(),
+                                        old_mime,
+                                        new_mime: detected_mime,
+                                    })
+                                    .await;
+                            }
                         }
                     }
                 }

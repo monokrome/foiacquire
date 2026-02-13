@@ -7,6 +7,8 @@
 pub enum AnalysisEvent {
     /// Phase 0: MIME detection started
     MimeCheckStarted { total_documents: usize },
+    /// A document's MIME type was checked
+    MimeChecked { document_id: String },
     /// Document MIME type was corrected
     MimeFixed {
         document_id: String,

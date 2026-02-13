@@ -144,6 +144,7 @@ pub async fn cmd_analyze(
 
         // Spawn event handler for UI
         let event_handler = tokio::spawn(async move {
+            let mut mime_fixed = 0;
             let mut phase1_succeeded = 0;
             let mut phase1_failed = 0;
             let mut phase1_pages = 0;
@@ -154,6 +155,47 @@ pub async fn cmd_analyze(
 
             while let Some(event) = event_rx.recv().await {
                 match event {
+                    AnalysisEvent::MimeCheckStarted { total_documents } => {
+                        println!(
+                            "{} Phase 0: Checking MIME types for {} documents",
+                            style("→").cyan(),
+                            total_documents
+                        );
+                        let progress = ProgressBar::new(total_documents as u64);
+                        progress.set_style(
+                            ProgressStyle::default_bar()
+                                .template(
+                                    "{spinner:.green} [{bar:30.cyan/blue}] {pos}/{len} {wide_msg}",
+                                )
+                                .unwrap()
+                                .progress_chars("█▓░"),
+                        );
+                        progress.set_message("Checking MIME types...");
+                        *pb_clone.lock().await = Some(progress);
+                    }
+                    AnalysisEvent::MimeChecked { .. } => {
+                        if let Some(ref progress) = *pb_clone.lock().await {
+                            progress.inc(1);
+                        }
+                    }
+                    AnalysisEvent::MimeFixed { .. } => {
+                        mime_fixed += 1;
+                        if let Some(ref progress) = *pb_clone.lock().await {
+                            progress.set_message(format!("{} fixed", mime_fixed));
+                        }
+                    }
+                    AnalysisEvent::MimeCheckComplete { checked, fixed } => {
+                        if let Some(ref progress) = *pb_clone.lock().await {
+                            progress.finish_and_clear();
+                        }
+                        *pb_clone.lock().await = None;
+                        println!(
+                            "{} Phase 0 complete: {} checked, {} fixed",
+                            style("✓").green(),
+                            checked,
+                            fixed
+                        );
+                    }
                     AnalysisEvent::Phase1Started { total_documents } => {
                         println!(
                             "{} Phase 1: Extracting text from {} documents",
@@ -321,7 +363,8 @@ pub async fn cmd_analyze(
                         }
                         println!("{}", msg);
                     }
-                    _ => {}
+                    AnalysisEvent::DocumentStarted { .. }
+                    | AnalysisEvent::PageOcrStarted { .. } => {}
                 }
             }
         });
