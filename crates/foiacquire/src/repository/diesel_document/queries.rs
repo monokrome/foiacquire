@@ -1470,21 +1470,18 @@ impl DieselDocumentRepository {
 
     /// Finalize pending documents - mark documents with all pages complete as indexed.
     pub async fn finalize_pending_documents(&self) -> Result<u64, DieselError> {
-        let doc_ids: Vec<String> = with_conn!(self.pool, conn, {
-            documents::table
-                .filter(documents::status.eq("ocr_complete"))
-                .select(documents::id)
-                .load(&mut conn)
+        let now = Utc::now().to_rfc3339();
+        let count: usize = with_conn!(self.pool, conn, {
+            diesel::update(documents::table.filter(documents::status.eq("ocr_complete")))
+                .set((
+                    documents::status.eq("indexed"),
+                    documents::updated_at.eq(&now),
+                ))
+                .execute(&mut conn)
                 .await
         })?;
 
-        let mut count = 0u64;
-        for doc_id in doc_ids {
-            self.update_status(&doc_id, DocumentStatus::Indexed).await?;
-            count += 1;
-        }
-
-        Ok(count)
+        Ok(count as u64)
     }
 
     /// Reset annotations for documents, allowing them to be re-annotated.
