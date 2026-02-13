@@ -36,7 +36,7 @@ pub fn migration() -> Migration {
     word_count INTEGER,
     processing_time_ms INTEGER,
     error_message TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TEXT NOT NULL,
     UNIQUE(page_id, backend)
 )"#,
                 ),
@@ -87,7 +87,7 @@ SELECT
     ocr_text,
     LENGTH(ocr_text),
     array_length(regexp_split_to_array(ocr_text, '\s+'), 1),
-    COALESCE(updated_at::timestamptz, created_at::timestamptz, NOW())
+    COALESCE(updated_at, created_at)
 FROM document_pages
 WHERE ocr_text IS NOT NULL AND ocr_text != ''"#,
                 ),
@@ -116,7 +116,7 @@ SELECT
     pdf_text,
     LENGTH(pdf_text),
     array_length(regexp_split_to_array(pdf_text, '\s+'), 1),
-    COALESCE(updated_at::timestamptz, created_at::timestamptz, NOW())
+    COALESCE(updated_at, created_at)
 FROM document_pages
 WHERE pdf_text IS NOT NULL AND pdf_text != ''"#,
                 ),
