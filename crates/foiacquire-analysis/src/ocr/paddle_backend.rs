@@ -8,16 +8,13 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
-use tempfile::TempDir;
 
 use paddle_ocr_rs::ocr_lite::OcrLite;
 
-use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError, OcrResult};
+use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError};
 use super::model_utils::{
-    build_ocr_result, ensure_models_present, model_availability_hint, ModelDirConfig, ModelSpec,
+    ensure_models_present, model_availability_hint, ModelDirConfig, ModelSpec,
 };
-use super::pdf_utils;
 
 /// Global cached OcrLite instance (initialized once, reused for all OCR calls).
 /// OcrLite is Send+Sync, wrapped in Mutex since detect_from_path needs &mut self.
@@ -170,7 +167,7 @@ impl PaddleBackend {
     }
 
     /// Run OCR on an image path.
-    fn run_paddle(&self, image_path: &Path) -> Result<String, OcrError> {
+    fn run_paddle_impl(&self, image_path: &Path) -> Result<String, OcrError> {
         let engine_mutex = self.get_or_init_engine()?;
         let mut ocr = engine_mutex
             .lock()
@@ -226,27 +223,7 @@ impl OcrBackend for PaddleBackend {
         )
     }
 
-    fn ocr_image(&self, image_path: &Path) -> Result<OcrResult, OcrError> {
-        let start = Instant::now();
-        let text = self.run_paddle(image_path)?;
-        Ok(build_ocr_result(
-            text,
-            OcrBackendType::PaddleOcr,
-            None,
-            start,
-        ))
-    }
-
-    fn ocr_pdf_page(&self, pdf_path: &Path, page: u32) -> Result<OcrResult, OcrError> {
-        let start = Instant::now();
-        let temp_dir = TempDir::new()?;
-        let image_path = pdf_utils::pdf_page_to_image(pdf_path, page, temp_dir.path())?;
-        let text = self.run_paddle(&image_path)?;
-        Ok(build_ocr_result(
-            text,
-            OcrBackendType::PaddleOcr,
-            None,
-            start,
-        ))
+    fn run_ocr(&self, image_path: &Path) -> Result<String, OcrError> {
+        self.run_paddle_impl(image_path)
     }
 }

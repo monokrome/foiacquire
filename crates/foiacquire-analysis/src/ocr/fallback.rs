@@ -183,6 +183,10 @@ impl OcrBackend for FallbackOcrBackend {
         }
     }
 
+    fn run_ocr(&self, image_path: &Path) -> Result<String, OcrError> {
+        self.ocr_image(image_path).map(|r| r.text)
+    }
+
     fn ocr_image(&self, image_path: &Path) -> Result<OcrResult, OcrError> {
         self.run_with_fallback(|backend| backend.ocr_image(image_path))
     }

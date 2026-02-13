@@ -9,7 +9,12 @@
 #![allow(dead_code)]
 
 use std::path::Path;
+use std::time::Instant;
+use tempfile::TempDir;
 use thiserror::Error;
+
+use super::model_utils::build_ocr_result;
+use super::pdf_utils;
 
 /// Errors from OCR backends.
 #[derive(Debug, Error)]
@@ -110,12 +115,39 @@ pub trait OcrBackend: Send + Sync {
     /// Get a description of what's needed to make this backend available.
     fn availability_hint(&self) -> String;
 
-    /// Run OCR on an image file.
-    fn ocr_image(&self, image_path: &Path) -> Result<OcrResult, OcrError>;
+    /// Core OCR: extract text from an image file.
+    fn run_ocr(&self, image_path: &Path) -> Result<String, OcrError>;
+
+    /// Model name for this backend, if applicable.
+    fn model_name(&self) -> Option<String> {
+        None
+    }
+
+    /// Run OCR on an image file, returning a timed result.
+    fn ocr_image(&self, image_path: &Path) -> Result<OcrResult, OcrError> {
+        let start = Instant::now();
+        let text = self.run_ocr(image_path)?;
+        Ok(build_ocr_result(
+            text,
+            self.backend_type(),
+            self.model_name(),
+            start,
+        ))
+    }
 
     /// Run OCR on a specific page of a PDF file.
-    /// Default implementation converts page to image first.
-    fn ocr_pdf_page(&self, pdf_path: &Path, page: u32) -> Result<OcrResult, OcrError>;
+    fn ocr_pdf_page(&self, pdf_path: &Path, page: u32) -> Result<OcrResult, OcrError> {
+        let start = Instant::now();
+        let temp_dir = TempDir::new()?;
+        let image_path = pdf_utils::pdf_page_to_image(pdf_path, page, temp_dir.path())?;
+        let text = self.run_ocr(&image_path)?;
+        Ok(build_ocr_result(
+            text,
+            self.backend_type(),
+            self.model_name(),
+            start,
+        ))
+    }
 }
 
 /// Configuration for OCR backends.

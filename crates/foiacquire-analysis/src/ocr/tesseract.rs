@@ -7,12 +7,9 @@
 
 use std::path::Path;
 use std::process::Command;
-use std::time::Instant;
-use tempfile::TempDir;
 
-use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError, OcrResult};
+use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError};
 use super::model_utils::check_binary;
-use super::pdf_utils;
 
 /// Tesseract OCR backend.
 pub struct TesseractBackend {
@@ -33,7 +30,7 @@ impl TesseractBackend {
     }
 
     /// Run Tesseract on an image file.
-    fn run_tesseract(&self, image_path: &Path) -> Result<String, OcrError> {
+    fn run_tesseract_impl(&self, image_path: &Path) -> Result<String, OcrError> {
         let output = Command::new("tesseract")
             .arg(image_path)
             .arg("stdout")
@@ -84,37 +81,7 @@ impl OcrBackend for TesseractBackend {
         }
     }
 
-    fn ocr_image(&self, image_path: &Path) -> Result<OcrResult, OcrError> {
-        let start = Instant::now();
-        let text = self.run_tesseract(image_path)?;
-        let elapsed = start.elapsed();
-
-        Ok(OcrResult {
-            text,
-            confidence: None, // Tesseract can provide this but we're not parsing it yet
-            backend: OcrBackendType::Tesseract,
-            model: None, // Tesseract doesn't have model variants
-            processing_time_ms: elapsed.as_millis() as u64,
-        })
-    }
-
-    fn ocr_pdf_page(&self, pdf_path: &Path, page: u32) -> Result<OcrResult, OcrError> {
-        let start = Instant::now();
-
-        // Create temp directory for the image
-        let temp_dir = TempDir::new()?;
-        let image_path = pdf_utils::pdf_page_to_image(pdf_path, page, temp_dir.path())?;
-
-        // Run OCR on the image
-        let text = self.run_tesseract(&image_path)?;
-        let elapsed = start.elapsed();
-
-        Ok(OcrResult {
-            text,
-            confidence: None,
-            backend: OcrBackendType::Tesseract,
-            model: None,
-            processing_time_ms: elapsed.as_millis() as u64,
-        })
+    fn run_ocr(&self, image_path: &Path) -> Result<String, OcrError> {
+        self.run_tesseract_impl(image_path)
     }
 }

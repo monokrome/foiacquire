@@ -14,23 +14,14 @@
 
 #![allow(dead_code)]
 
-use base64::Engine;
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::Path;
-use std::time::{Duration, Instant};
-use tempfile::TempDir;
-use tokio::runtime::Handle;
-use tracing::{debug, warn};
+use std::time::Duration;
 
-use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError, OcrResult};
-use super::pdf_utils;
+use super::api_backend;
+use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError};
 use foiacquire::http_client::HttpClient;
 use foiacquire::privacy::PrivacyConfig;
-use foiacquire::rate_limit::{backoff_delay, get_delay_from_env, parse_retry_after};
-
-/// Maximum retry attempts on rate limit errors.
-const MAX_RETRIES: u32 = 5;
 
 /// Gemini Vision OCR backend using Google's Generative AI API.
 pub struct GeminiBackend {
@@ -119,16 +110,6 @@ impl GeminiBackend {
         }
     }
 
-    /// Create a new Gemini backend with privacy configuration.
-    pub fn with_privacy(privacy: PrivacyConfig) -> Self {
-        Self {
-            config: OcrConfig::default(),
-            api_key: std::env::var("GEMINI_API_KEY").ok(),
-            model: "gemini-1.5-flash".to_string(),
-            privacy,
-        }
-    }
-
     /// Set the API key.
     pub fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
         self.api_key = Some(api_key.into());
@@ -161,20 +142,13 @@ impl GeminiBackend {
             )
         })?;
 
-        let image_bytes = fs::read(image_path)?;
-        let image_base64 = base64::engine::general_purpose::STANDARD.encode(&image_bytes);
-
-        let mime_type = if image_path.extension().map(|e| e == "png").unwrap_or(false) {
-            "image/png"
-        } else {
-            "image/jpeg"
-        };
+        let (image_base64, mime_type) = api_backend::encode_image_base64(image_path)?;
 
         let request = GeminiRequest {
             contents: vec![GeminiContent {
                 parts: vec![
                     GeminiPart::Text {
-                        text: "Extract all text from this image. Return only the extracted text, preserving the original layout and formatting as much as possible. Do not add any explanations or commentary.".to_string(),
+                        text: api_backend::VISION_OCR_PROMPT.to_string(),
                     },
                     GeminiPart::InlineData {
                         inline_data: GeminiInlineData {
@@ -197,87 +171,43 @@ impl GeminiBackend {
 
         let client = self.create_client()?;
 
-        // Rate limiting: wait before request (default 200ms)
-        let delay = get_delay_from_env("GEMINI_DELAY_MS", 200);
-        if delay > Duration::ZERO {
-            debug!("Gemini: waiting {:?} before request", delay);
-            tokio::time::sleep(delay).await;
-        }
+        api_backend::apply_rate_delay("GEMINI_DELAY_MS", 200, "Gemini").await;
 
-        // Retry loop with exponential backoff on 429
-        let mut attempt = 0;
-        loop {
-            let response = client
+        let response = api_backend::retry_on_rate_limit(OcrBackendType::Gemini, || async {
+            client
                 .post_json(&url, &request)
                 .await
-                .map_err(|e| OcrError::OcrFailed(format!("HTTP request failed: {}", e)))?;
+                .map_err(|e| OcrError::OcrFailed(format!("HTTP request failed: {}", e)))
+        })
+        .await?;
 
-            // Handle rate limiting (429)
-            if response.status.as_u16() == 429 {
-                // Get Retry-After header
-                let retry_after = response.headers.get("retry-after").map(|s| s.as_str());
-                let retry_after_secs = retry_after.and_then(|s| s.parse::<u64>().ok());
-
-                if attempt >= MAX_RETRIES {
-                    // Return RateLimited error so fallback chain can try next backend
-                    return Err(OcrError::RateLimited {
-                        backend: OcrBackendType::Gemini,
-                        retry_after_secs,
-                    });
-                }
-
-                let wait =
-                    parse_retry_after(retry_after).unwrap_or_else(|| backoff_delay(attempt, 1000));
-
-                warn!(
-                    "Gemini rate limited (attempt {}), waiting {:?}",
-                    attempt + 1,
-                    wait
-                );
-                tokio::time::sleep(wait).await;
-                attempt += 1;
-                continue;
-            }
-
-            if !response.status.is_success() {
-                let status = response.status;
-                let body = response.text().await.unwrap_or_default();
-                return Err(OcrError::OcrFailed(format!(
-                    "Gemini API error ({}): {}",
-                    status, body
-                )));
-            }
-
-            let gemini_response: GeminiResponse = response
-                .json()
-                .await
-                .map_err(|e| OcrError::OcrFailed(format!("Failed to parse response: {}", e)))?;
-
-            if let Some(error) = gemini_response.error {
-                return Err(OcrError::OcrFailed(format!(
-                    "Gemini API error: {}",
-                    error.message
-                )));
-            }
-
-            let text = gemini_response
-                .candidates
-                .and_then(|c| c.into_iter().next())
-                .and_then(|c| c.content.parts.into_iter().next())
-                .and_then(|p| p.text)
-                .unwrap_or_default();
-
-            return Ok(text);
+        if !response.status.is_success() {
+            let status = response.status;
+            let body = response.text().await.unwrap_or_default();
+            return Err(OcrError::OcrFailed(format!(
+                "Gemini API error ({}): {}",
+                status, body
+            )));
         }
-    }
 
-    /// Run Gemini OCR on an image (blocking wrapper).
-    fn run_gemini(&self, image_path: &Path) -> Result<String, OcrError> {
-        let handle = Handle::try_current().map_err(|_| {
-            OcrError::OcrFailed("No tokio runtime available for Gemini OCR".to_string())
-        })?;
+        let gemini_response: GeminiResponse = response
+            .json()
+            .await
+            .map_err(|e| OcrError::OcrFailed(format!("Failed to parse response: {}", e)))?;
 
-        handle.block_on(self.run_gemini_async(image_path))
+        if let Some(error) = gemini_response.error {
+            return Err(OcrError::OcrFailed(format!(
+                "Gemini API error: {}",
+                error.message
+            )));
+        }
+
+        gemini_response
+            .candidates
+            .and_then(|c| c.into_iter().next())
+            .and_then(|c| c.content.parts.into_iter().next())
+            .and_then(|p| p.text)
+            .ok_or_else(|| OcrError::OcrFailed("Gemini returned no candidates".to_string()))
     }
 }
 
@@ -306,35 +236,11 @@ impl OcrBackend for GeminiBackend {
         }
     }
 
-    fn ocr_image(&self, image_path: &Path) -> Result<OcrResult, OcrError> {
-        let start = Instant::now();
-        let text = self.run_gemini(image_path)?;
-        let elapsed = start.elapsed();
-
-        Ok(OcrResult {
-            text,
-            confidence: None,
-            backend: OcrBackendType::Gemini,
-            model: Some(self.model.clone()),
-            processing_time_ms: elapsed.as_millis() as u64,
-        })
+    fn run_ocr(&self, image_path: &Path) -> Result<String, OcrError> {
+        api_backend::block_on_async("Gemini", self.run_gemini_async(image_path))
     }
 
-    fn ocr_pdf_page(&self, pdf_path: &Path, page: u32) -> Result<OcrResult, OcrError> {
-        let start = Instant::now();
-
-        let temp_dir = TempDir::new()?;
-        let image_path = pdf_utils::pdf_page_to_image(pdf_path, page, temp_dir.path())?;
-
-        let text = self.run_gemini(&image_path)?;
-        let elapsed = start.elapsed();
-
-        Ok(OcrResult {
-            text,
-            confidence: None,
-            backend: OcrBackendType::Gemini,
-            model: Some(self.model.clone()),
-            processing_time_ms: elapsed.as_millis() as u64,
-        })
+    fn model_name(&self) -> Option<String> {
+        Some(self.model.clone())
     }
 }

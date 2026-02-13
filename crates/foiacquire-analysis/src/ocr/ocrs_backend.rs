@@ -8,15 +8,11 @@
 
 use std::path::Path;
 use std::sync::OnceLock;
-use std::time::Instant;
-use tempfile::TempDir;
 
-use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError, OcrResult};
+use super::backend::{OcrBackend, OcrBackendType, OcrConfig, OcrError};
 use super::model_utils::{
-    build_ocr_result, ensure_models_present, find_model_dir, model_availability_hint,
-    ModelDirConfig, ModelSpec,
+    ensure_models_present, find_model_dir, model_availability_hint, ModelDirConfig, ModelSpec,
 };
-use super::pdf_utils;
 
 /// Global cached OcrEngine instance (initialized once, reused for all OCR calls).
 /// OcrEngine is Send+Sync and its methods take &self, so no Mutex needed.
@@ -106,7 +102,7 @@ impl OcrsBackend {
     }
 
     /// Run OCR on an image.
-    fn run_ocrs(&self, image_path: &Path) -> Result<String, OcrError> {
+    fn run_ocrs_impl(&self, image_path: &Path) -> Result<String, OcrError> {
         let engine = self.get_or_init_engine()?;
 
         // Load image
@@ -159,17 +155,7 @@ impl OcrBackend for OcrsBackend {
         )
     }
 
-    fn ocr_image(&self, image_path: &Path) -> Result<OcrResult, OcrError> {
-        let start = Instant::now();
-        let text = self.run_ocrs(image_path)?;
-        Ok(build_ocr_result(text, OcrBackendType::Ocrs, None, start))
-    }
-
-    fn ocr_pdf_page(&self, pdf_path: &Path, page: u32) -> Result<OcrResult, OcrError> {
-        let start = Instant::now();
-        let temp_dir = TempDir::new()?;
-        let image_path = pdf_utils::pdf_page_to_image(pdf_path, page, temp_dir.path())?;
-        let text = self.run_ocrs(&image_path)?;
-        Ok(build_ocr_result(text, OcrBackendType::Ocrs, None, start))
+    fn run_ocr(&self, image_path: &Path) -> Result<String, OcrError> {
+        self.run_ocrs_impl(image_path)
     }
 }
