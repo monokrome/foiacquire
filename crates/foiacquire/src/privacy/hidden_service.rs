@@ -232,29 +232,7 @@ pub enum HiddenServiceSecurityLevel {
 
 /// Display a hidden service warning with configurable countdown.
 async fn display_hs_warning(message: &str, details: &[&str], warning_delay: u64) {
-    use std::io::{self, Write};
-
-    eprintln!();
-    eprintln!("WARNING: {}", message);
-    eprintln!("Press CTRL+C to abort.");
-    eprintln!();
-    for detail in details {
-        eprintln!("{}", detail);
-    }
-    eprintln!();
-    eprintln!("For security reasons, this message cannot be disabled.");
-    eprintln!();
-    let _ = io::stderr().flush();
-
-    if warning_delay > 0 {
-        for i in (1..=warning_delay).rev() {
-            eprint!("\rServer will start in {} seconds...  ", i);
-            let _ = io::stderr().flush();
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        }
-        eprintln!();
-        let _ = io::stderr().flush();
-    }
+    super::config::display_security_warning(message, details, warning_delay).await;
 }
 
 #[cfg(test)]

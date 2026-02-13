@@ -201,6 +201,9 @@ impl SourcePrivacyConfig {
 /// Default warning delay in seconds.
 const DEFAULT_WARNING_DELAY: u64 = 15;
 
+/// Minimum warning delay in seconds (enforced regardless of config).
+const MIN_WARNING_DELAY: u64 = 3;
+
 /// Global privacy configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, prefer::FromValue)]
 pub struct PrivacyConfig {
@@ -234,7 +237,7 @@ pub struct PrivacyConfig {
 
     /// Delay in seconds before proceeding when insecure (default: 15).
     /// Set via `--privacy-warning-delay` flag.
-    /// Warning is always shown; only the countdown can be skipped with 0.
+    /// Warning is always shown; clamped to a minimum of 3 seconds.
     #[serde(
         default = "default_warning_delay",
         skip_serializing_if = "is_default_warning_delay"
@@ -541,7 +544,7 @@ See https://rustsec.org/advisories/RUSTSEC-2023-0071 for details."#
 
     /// Display mandatory security warning and countdown if insecure.
     /// The warning is always shown; the countdown can be adjusted with warning_delay.
-    /// Set warning_delay to 0 to skip the countdown (warning still shown).
+    /// The delay is clamped to a minimum of 3 seconds.
     ///
     /// When compiled with `unsafe-dev` feature, warnings are skipped entirely.
     pub async fn enforce_security_warning(&self) {
@@ -585,29 +588,7 @@ See https://rustsec.org/advisories/RUSTSEC-2023-0071 for details."#
     /// Display a warning with configurable countdown.
     #[cfg_attr(feature = "unsafe-dev", allow(dead_code))]
     async fn display_warning(&self, message: &str, details: &[&str]) {
-        use std::io::{self, Write};
-
-        eprintln!();
-        eprintln!("WARNING: {}", message);
-        eprintln!("Press CTRL+C to abort.");
-        eprintln!();
-        for detail in details {
-            eprintln!("{}", detail);
-        }
-        eprintln!();
-        eprintln!("For security reasons, this message cannot be disabled.");
-        eprintln!();
-        let _ = io::stderr().flush();
-
-        if self.warning_delay > 0 {
-            for i in (1..=self.warning_delay).rev() {
-                eprint!("\rYour command will execute in {} seconds...  ", i);
-                let _ = io::stderr().flush();
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
-            eprintln!();
-            let _ = io::stderr().flush();
-        }
+        display_security_warning(message, details, self.warning_delay).await;
     }
 }
 
@@ -621,6 +602,35 @@ pub enum SecurityLevel {
     NoObfuscation,
     /// Direct connection without Tor (fully exposed).
     Direct,
+}
+
+/// Display a security warning with countdown. Single implementation used by
+/// both privacy warnings and hidden service warnings.
+///
+/// The delay is clamped to `MIN_WARNING_DELAY` — callers cannot skip the countdown.
+pub(crate) async fn display_security_warning(message: &str, details: &[&str], raw_delay: u64) {
+    use std::io::{self, Write};
+
+    eprintln!();
+    eprintln!("WARNING: {}", message);
+    eprintln!("Press CTRL+C to abort.");
+    eprintln!();
+    for detail in details {
+        eprintln!("{}", detail);
+    }
+    eprintln!();
+    eprintln!("For security reasons, this message cannot be disabled.");
+    eprintln!();
+    let _ = io::stderr().flush();
+
+    let delay = raw_delay.max(MIN_WARNING_DELAY);
+    for i in (1..=delay).rev() {
+        eprint!("\rContinuing in {} seconds...  ", i);
+        let _ = io::stderr().flush();
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    eprintln!();
+    let _ = io::stderr().flush();
 }
 
 #[cfg(test)]
