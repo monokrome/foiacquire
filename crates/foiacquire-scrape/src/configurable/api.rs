@@ -63,7 +63,7 @@ impl ConfigurableScraper {
                 Ok(r) if r.is_success() => r,
                 Ok(r) => {
                     let status = r.status.as_u16();
-                    if status == 429 || status == 503 {
+                    if r.is_rate_limited() {
                         rate_limited = true;
                         last_error = Some(format!("Rate limited (HTTP {})", status));
                         tracing::error!(
@@ -240,7 +240,7 @@ impl ConfigurableScraper {
                     Ok(r) if r.is_success() => r,
                     Ok(r) => {
                         let status = r.status.as_u16();
-                        if status == 429 || status == 503 {
+                        if r.is_rate_limited() {
                             rate_limited = true;
                             last_error = Some(format!("Rate limited (HTTP {})", status));
                             tracing::error!(

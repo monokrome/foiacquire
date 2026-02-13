@@ -276,6 +276,31 @@ impl RateLimiter {
         }
     }
 
+    /// Classify a response status code and report it to the appropriate handler.
+    ///
+    /// Consolidates the duplicated if/else chains that were copy-pasted across
+    /// every HTTP method. Handles 429/503 (rate limit), 403 (pattern detection),
+    /// 5xx (server error), and 2xx/3xx (success).
+    pub async fn report_response_status(
+        &self,
+        domain: &str,
+        status_code: u16,
+        original_url: &str,
+        response_headers: &std::collections::HashMap<String, String>,
+    ) {
+        let has_retry_after = response_headers.contains_key("retry-after");
+        if status_code == 429 || status_code == 503 {
+            self.report_rate_limit(domain, status_code).await;
+        } else if status_code == 403 {
+            self.report_403(domain, original_url, has_retry_after)
+                .await;
+        } else if status_code >= 500 {
+            self.report_server_error(domain).await;
+        } else if (200..400).contains(&status_code) {
+            self.report_success(domain).await;
+        }
+    }
+
     /// Get statistics for all domains (only works with InMemoryRateLimitBackend).
     pub async fn get_stats(&self) -> std::collections::HashMap<String, DomainStats> {
         // This is a limitation - we can't easily get all stats from all backends
@@ -353,6 +378,133 @@ mod tests {
         limiter.acquire("https://example.com/doc").await;
         limiter.report_success("example.com").await;
         // Should not error
+    }
+
+    #[tokio::test]
+    async fn test_report_response_status_rate_limit() {
+        let limiter = create_test_limiter();
+        limiter.acquire("https://example.com/doc").await;
+
+        let headers = std::collections::HashMap::new();
+
+        // 429 should trigger rate limit backoff
+        limiter
+            .report_response_status("example.com", 429, "https://example.com/doc", &headers)
+            .await;
+
+        let state = limiter
+            .backend
+            .get_or_create_domain("example.com", 100)
+            .await
+            .unwrap();
+        assert!(state.in_backoff);
+        assert_eq!(state.rate_limit_hits, 1);
+    }
+
+    #[tokio::test]
+    async fn test_report_response_status_503() {
+        let limiter = create_test_limiter();
+        limiter.acquire("https://example.com/doc").await;
+
+        let headers = std::collections::HashMap::new();
+
+        // 503 should also trigger rate limit backoff
+        limiter
+            .report_response_status("example.com", 503, "https://example.com/doc", &headers)
+            .await;
+
+        let state = limiter
+            .backend
+            .get_or_create_domain("example.com", 100)
+            .await
+            .unwrap();
+        assert!(state.in_backoff);
+        assert_eq!(state.rate_limit_hits, 1);
+    }
+
+    #[tokio::test]
+    async fn test_report_response_status_success() {
+        let limiter = create_test_limiter();
+        limiter.acquire("https://example.com/doc").await;
+
+        // Put into backoff first
+        limiter.report_rate_limit("example.com", 429).await;
+
+        let headers = std::collections::HashMap::new();
+
+        // 200 should count as success
+        limiter
+            .report_response_status("example.com", 200, "https://example.com/doc", &headers)
+            .await;
+
+        let state = limiter
+            .backend
+            .get_or_create_domain("example.com", 100)
+            .await
+            .unwrap();
+        assert_eq!(state.consecutive_successes, 1);
+    }
+
+    #[tokio::test]
+    async fn test_report_response_status_304_is_success() {
+        let limiter = create_test_limiter();
+        limiter.acquire("https://example.com/doc").await;
+
+        let headers = std::collections::HashMap::new();
+
+        // 304 should count as success (in the 200..400 range)
+        limiter
+            .report_response_status("example.com", 304, "https://example.com/doc", &headers)
+            .await;
+
+        let state = limiter
+            .backend
+            .get_or_create_domain("example.com", 100)
+            .await
+            .unwrap();
+        assert_eq!(state.consecutive_successes, 1);
+    }
+
+    #[tokio::test]
+    async fn test_report_response_status_server_error() {
+        let limiter = create_test_limiter();
+        limiter.acquire("https://example.com/doc").await;
+
+        let headers = std::collections::HashMap::new();
+
+        // 500 should trigger mild server error backoff (not rate limit)
+        limiter
+            .report_response_status("example.com", 500, "https://example.com/doc", &headers)
+            .await;
+
+        let state = limiter
+            .backend
+            .get_or_create_domain("example.com", 100)
+            .await
+            .unwrap();
+        // Server error does mild backoff but doesn't set rate_limit_hits
+        assert_eq!(state.rate_limit_hits, 0);
+        assert!(state.current_delay_ms > 100);
+    }
+
+    #[tokio::test]
+    async fn test_report_response_status_403_pattern() {
+        let limiter = create_test_limiter();
+        limiter.acquire("https://example.com/doc").await;
+
+        let headers = std::collections::HashMap::new();
+
+        // Single 403 should not trigger rate limit
+        limiter
+            .report_response_status("example.com", 403, "https://example.com/a", &headers)
+            .await;
+
+        let state = limiter
+            .backend
+            .get_or_create_domain("example.com", 100)
+            .await
+            .unwrap();
+        assert!(!state.in_backoff);
     }
 
     #[tokio::test]

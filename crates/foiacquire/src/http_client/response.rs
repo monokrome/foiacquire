@@ -56,6 +56,12 @@ impl HttpResponse {
         self.status.is_success()
     }
 
+    /// Check if the response indicates rate limiting (429 or 503).
+    pub fn is_rate_limited(&self) -> bool {
+        let code = self.status.as_u16();
+        code == 429 || code == 503
+    }
+
     /// Get the ETag header.
     pub fn etag(&self) -> Option<&str> {
         self.headers.get("etag").map(|s| s.as_str())
@@ -134,6 +140,12 @@ impl HeadResponse {
     /// Check if the response is successful.
     pub fn is_success(&self) -> bool {
         self.status.is_success()
+    }
+
+    /// Check if the response indicates rate limiting (429 or 503).
+    pub fn is_rate_limited(&self) -> bool {
+        let code = self.status.as_u16();
+        code == 429 || code == 503
     }
 
     /// Get the ETag header.

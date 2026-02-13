@@ -535,7 +535,7 @@ impl HttpClient {
         // Make first browser request
         if let Some(response) = self.do_browser_fetch(pool, &initial_url, url).await {
             let status = response.status.as_u16();
-            let should_retry = can_fallback && (status == 429 || status == 503);
+            let should_retry = can_fallback && RateLimiter::is_definite_rate_limit(status);
 
             if should_retry {
                 let alternate_url = match self.via_mode {
@@ -605,20 +605,16 @@ impl HttpClient {
                     let _ = repo.log_request(&request_log).await;
                 }
 
+                let mut headers = HashMap::new();
+                headers.insert("content-type".to_string(), browser_response.content_type);
+
                 if let Some(ref domain) = domain {
-                    if (200..400).contains(&status_code) {
-                        self.rate_limiter.report_success(domain).await;
-                    } else if status_code == 429 || status_code == 503 {
-                        self.rate_limiter
-                            .report_rate_limit(domain, status_code)
-                            .await;
-                    }
+                    self.rate_limiter
+                        .report_response_status(domain, status_code, original_url, &headers)
+                        .await;
                 }
 
                 tokio::time::sleep(self.request_delay).await;
-
-                let mut headers = HashMap::new();
-                headers.insert("content-type".to_string(), browser_response.content_type);
 
                 Some(HttpResponse::from_bytes(
                     StatusCode::from_u16(status_code).unwrap_or(StatusCode::OK),
@@ -668,7 +664,7 @@ impl HttpClient {
 
         // Check if we should retry with alternate URL
         let status = result.status.as_u16();
-        let should_retry = can_fallback && (status == 429 || status == 503);
+        let should_retry = can_fallback && RateLimiter::is_definite_rate_limit(status);
 
         if should_retry {
             let alternate_url = match self.via_mode {
@@ -757,27 +753,10 @@ impl HttpClient {
             let _ = repo.log_request(&request_log).await;
         }
 
-        // Report status to rate limiter for adaptive backoff
         if let Some(ref domain) = domain {
-            let has_retry_after = response_headers.contains_key("retry-after");
-
-            if status_code == 429 || status_code == 503 {
-                // Definite rate limit
-                self.rate_limiter
-                    .report_rate_limit(domain, status_code)
-                    .await;
-            } else if status_code == 403 {
-                // Possible rate limit - needs pattern detection
-                self.rate_limiter
-                    .report_403(domain, original_url, has_retry_after)
-                    .await;
-            } else if status_code >= 500 {
-                // Server error - mild backoff
-                self.rate_limiter.report_server_error(domain).await;
-            } else if response.status().is_success() || status_code == 304 {
-                // Success - may recover from backoff
-                self.rate_limiter.report_success(domain).await;
-            }
+            self.rate_limiter
+                .report_response_status(domain, status_code, original_url, &response_headers)
+                .await;
         }
 
         // Apply base delay (rate limiter handles additional adaptive delay)
@@ -843,17 +822,10 @@ impl HttpClient {
             let _ = repo.log_request(&request_log).await;
         }
 
-        // Report status to rate limiter for adaptive backoff
         if let Some(ref domain) = domain {
-            if status_code == 429 || status_code == 503 {
-                self.rate_limiter
-                    .report_rate_limit(domain, status_code)
-                    .await;
-            } else if status_code >= 500 {
-                self.rate_limiter.report_server_error(domain).await;
-            } else if response.status().is_success() {
-                self.rate_limiter.report_success(domain).await;
-            }
+            self.rate_limiter
+                .report_response_status(domain, status_code, url, &response_headers)
+                .await;
         }
 
         // Apply base delay
@@ -936,17 +908,10 @@ impl HttpClient {
             let _ = repo.log_request(&request_log).await;
         }
 
-        // Report status to rate limiter for adaptive backoff
         if let Some(ref domain) = domain {
-            if status_code == 429 || status_code == 503 {
-                self.rate_limiter
-                    .report_rate_limit(domain, status_code)
-                    .await;
-            } else if status_code >= 500 {
-                self.rate_limiter.report_server_error(domain).await;
-            } else if response.status().is_success() {
-                self.rate_limiter.report_success(domain).await;
-            }
+            self.rate_limiter
+                .report_response_status(domain, status_code, url, &response_headers)
+                .await;
         }
 
         // Apply base delay
@@ -1002,27 +967,10 @@ impl HttpClient {
             let _ = repo.log_request(&request_log).await;
         }
 
-        // Report status to rate limiter for adaptive backoff
         if let Some(ref domain) = domain {
-            let has_retry_after = response_headers.contains_key("retry-after");
-
-            if status_code == 429 || status_code == 503 {
-                // Definite rate limit
-                self.rate_limiter
-                    .report_rate_limit(domain, status_code)
-                    .await;
-            } else if status_code == 403 {
-                // Possible rate limit - needs pattern detection
-                self.rate_limiter
-                    .report_403(domain, url, has_retry_after)
-                    .await;
-            } else if status_code >= 500 {
-                // Server error - mild backoff
-                self.rate_limiter.report_server_error(domain).await;
-            } else if response.status().is_success() {
-                // Success - may recover from backoff
-                self.rate_limiter.report_success(domain).await;
-            }
+            self.rate_limiter
+                .report_response_status(domain, status_code, url, &response_headers)
+                .await;
         }
 
         // Apply base delay (rate limiter handles additional adaptive delay)
@@ -1078,27 +1026,10 @@ impl HttpClient {
             let _ = repo.log_request(&request_log).await;
         }
 
-        // Report status to rate limiter for adaptive backoff
         if let Some(ref domain) = domain {
-            let has_retry_after = response_headers.contains_key("retry-after");
-
-            if status_code == 429 || status_code == 503 {
-                // Definite rate limit
-                self.rate_limiter
-                    .report_rate_limit(domain, status_code)
-                    .await;
-            } else if status_code == 403 {
-                // Possible rate limit - needs pattern detection
-                self.rate_limiter
-                    .report_403(domain, url, has_retry_after)
-                    .await;
-            } else if status_code >= 500 {
-                // Server error - mild backoff
-                self.rate_limiter.report_server_error(domain).await;
-            } else if response.status().is_success() {
-                // Success - may recover from backoff
-                self.rate_limiter.report_success(domain).await;
-            }
+            self.rate_limiter
+                .report_response_status(domain, status_code, url, &response_headers)
+                .await;
         }
 
         // Apply base delay (rate limiter handles additional adaptive delay)
@@ -1173,23 +1104,10 @@ impl HttpClient {
             let _ = repo.log_request(&request_log).await;
         }
 
-        // Report status to rate limiter
         if let Some(ref domain) = domain {
-            let has_retry_after = response_headers.contains_key("retry-after");
-
-            if status_code == 429 || status_code == 503 {
-                self.rate_limiter
-                    .report_rate_limit(domain, status_code)
-                    .await;
-            } else if status_code == 403 {
-                self.rate_limiter
-                    .report_403(domain, url, has_retry_after)
-                    .await;
-            } else if status_code >= 500 {
-                self.rate_limiter.report_server_error(domain).await;
-            } else if response.status().is_success() || status_code == 304 {
-                self.rate_limiter.report_success(domain).await;
-            }
+            self.rate_limiter
+                .report_response_status(domain, status_code, url, &response_headers)
+                .await;
         }
 
         // Apply base delay

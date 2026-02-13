@@ -204,7 +204,7 @@ impl DriveFolder {
             .map_err(|e| GoogleDriveError::Http(e.to_string()))?;
 
         if !response.is_success() {
-            if response.status == 429 {
+            if response.is_rate_limited() {
                 return Err(GoogleDriveError::RateLimited);
             }
             return Err(GoogleDriveError::Http(format!("HTTP {}", response.status)));
