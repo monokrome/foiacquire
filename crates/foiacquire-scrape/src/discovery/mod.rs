@@ -16,7 +16,7 @@ pub mod term_extraction;
 pub use config::{
     DiscoverySourceConfig, ExternalDiscoveryConfig, SearchEngineSourceConfig, TermExtractionConfig,
 };
-pub use result::DiscoveredUrl;
+pub use result::{is_listing_url, DiscoveredUrl};
 
 use async_trait::async_trait;
 

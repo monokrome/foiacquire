@@ -53,28 +53,7 @@ impl WaybackSource {
 
     /// Check if URL looks like a listing page.
     fn is_likely_listing(url: &str) -> bool {
-        if foiacquire::utils::has_document_extension(url) {
-            return false;
-        }
-
-        let url_lower = url.to_lowercase();
-
-        // Listing patterns
-        let listing_patterns = [
-            "/index",
-            "/browse",
-            "/list",
-            "/search",
-            "/documents/",
-            "/reports/",
-            "/publications/",
-            "/library/",
-            "/reading-room",
-            "/foia/",
-            "/archive",
-        ];
-
-        listing_patterns.iter().any(|p| url_lower.contains(p))
+        crate::discovery::is_listing_url(url)
     }
 }
 
