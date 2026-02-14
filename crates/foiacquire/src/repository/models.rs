@@ -13,7 +13,6 @@ use crate::schema;
 /// Source record from the database.
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::sources)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct SourceRecord {
     pub id: String,
     pub source_type: String,
@@ -44,7 +43,6 @@ pub struct NewSource<'a> {
 /// Crawl URL record from the database.
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::crawl_urls)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct CrawlUrlRecord {
     pub id: i32,
     pub url: String,
@@ -94,7 +92,6 @@ pub struct NewCrawlUrl<'a> {
 /// Crawl request record from the database.
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::crawl_requests)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct CrawlRequestRecord {
     pub id: i32,
     pub source_id: String,
@@ -139,7 +136,6 @@ pub struct NewCrawlRequest<'a> {
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::crawl_config)]
 #[diesel(primary_key(source_id))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct CrawlConfigRecord {
     pub source_id: String,
     pub config_hash: String,
@@ -153,7 +149,6 @@ pub struct CrawlConfigRecord {
 /// Document record from the database.
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::documents)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct DocumentRecord {
     pub id: String,
     pub source_id: String,
@@ -204,7 +199,6 @@ pub struct NewDocument<'a> {
 /// Document version record from the database.
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::document_versions)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct DocumentVersionRecord {
     pub id: i32,
     pub document_id: String,
@@ -250,7 +244,6 @@ pub struct NewDocumentVersion<'a> {
 /// Document page record from the database.
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::document_pages)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct DocumentPageRecord {
     pub id: i32,
     pub document_id: String,
@@ -286,7 +279,6 @@ pub struct NewDocumentPage<'a> {
 /// Page OCR result record from the database.
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::page_ocr_results)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct PageOcrResultRecord {
     pub id: i32,
     pub page_id: i32,
@@ -328,7 +320,6 @@ pub struct NewPageOcrResult<'a> {
 /// Virtual file record from the database.
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::virtual_files)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct VirtualFileRecord {
     pub id: String,
     pub document_id: String,
@@ -397,7 +388,6 @@ pub struct NewScraperConfig<'a> {
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::configuration_history)]
 #[diesel(primary_key(uuid))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ConfigHistoryRecord {
     pub uuid: String,
     pub created_at: String,
@@ -425,7 +415,6 @@ pub struct NewConfigHistory<'a> {
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::rate_limit_state)]
 #[diesel(primary_key(domain))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct RateLimitStateRecord {
     pub domain: String,
     pub current_delay_ms: i32,
@@ -454,7 +443,6 @@ pub struct NewRateLimitState<'a> {
 /// Service status record from the database.
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::service_status)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ServiceStatusRecord {
     pub id: String,
     pub service_type: String,
@@ -479,7 +467,6 @@ pub struct ServiceStatusRecord {
 /// Document entity record from the database.
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::document_entities)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct DocumentEntityRecord {
     pub id: i32,
     pub document_id: String,
@@ -511,7 +498,6 @@ pub struct NewDocumentEntity<'a> {
 /// Document analysis result record from the database.
 #[derive(Queryable, Selectable, Identifiable, Debug, Clone)]
 #[diesel(table_name = schema::document_analysis_results)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct DocumentAnalysisResultRecord {
     pub id: i32,
     pub page_id: Option<i32>,
