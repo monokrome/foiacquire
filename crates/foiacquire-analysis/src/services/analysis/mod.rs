@@ -393,11 +393,24 @@ impl AnalysisService {
             for doc in docs {
                 // Skip documents whose files aren't on disk yet
                 let file_available = doc.current_version().is_some_and(|v| {
-                    v.resolve_path(&self.documents_dir, &doc.source_url, &doc.title)
-                        .exists()
+                    let path = v.resolve_path(&self.documents_dir, &doc.source_url, &doc.title);
+                    match std::fs::metadata(&path) {
+                        Ok(_) => true,
+                        Err(e) => {
+                            tracing::debug!(
+                                "File unavailable for {}: {} (path: {})",
+                                doc.title,
+                                e,
+                                path.display()
+                            );
+                            false
+                        }
+                    }
                 });
                 if !file_available {
-                    tracing::debug!("Skipping {}: file not on disk yet", doc.title);
+                    if doc.current_version().is_none() {
+                        tracing::debug!("Skipping {}: no version record", doc.title);
+                    }
                     skipped_missing.fetch_add(1, Ordering::Relaxed);
                     let _ = event_tx
                         .send(AnalysisEvent::DocumentSkipped {
