@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::llm::LlmConfig;
+use crate::prefer_db::FoiaConfigLoader;
 use crate::privacy::PrivacyConfig;
 use crate::repository::util::validate_database_url;
 
@@ -96,23 +97,34 @@ fn is_via_mode_default(mode: &ViaMode) -> bool {
     *mode == ViaMode::default()
 }
 
-/// Legacy source interaction settings for backwards-compatible deserialization.
-/// Used only for migration from configuration_history to scraper_configs.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// Source interaction settings synced to database.
+/// Describes how to reach and interact with sources (HTTP behavior, scraper configs, proxy routing).
+/// Excludes device-specific (data_dir, privacy, analysis, llm) and bootstrap (rate_limit_backend, broker_url) settings.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, prefer::FromValue)]
 pub struct SourcesConfig {
-    #[serde(default)]
+    /// User agent string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
-    #[serde(default)]
+    /// Request timeout in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_timeout: Option<u64>,
-    #[serde(default)]
+    /// Delay between requests in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_delay_ms: Option<u64>,
-    #[serde(default)]
+    /// Default refresh TTL in days for re-checking fetched URLs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_refresh_ttl_days: Option<u64>,
-    #[serde(default)]
+    /// Scraper configurations.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[prefer(default)]
     pub scrapers: HashMap<String, ScraperConfig>,
-    #[serde(default)]
+    /// URL rewriting for caching proxies (CDN bypass).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[prefer(default)]
     pub via: HashMap<String, String>,
-    #[serde(default)]
+    /// Via proxy mode — controls when via mappings are used for requests.
+    #[serde(default, skip_serializing_if = "is_via_mode_default")]
+    #[prefer(default)]
     pub via_mode: ViaMode,
 }
 
@@ -302,8 +314,46 @@ impl Config {
         hex::encode(hasher.finalize())
     }
 
+    /// Extract source interaction settings for database storage.
+    /// Excludes device-specific and bootstrap settings that shouldn't be synced.
+    pub fn to_sources_config(&self) -> SourcesConfig {
+        SourcesConfig {
+            user_agent: self.user_agent.clone(),
+            request_timeout: self.request_timeout,
+            request_delay_ms: self.request_delay_ms,
+            default_refresh_ttl_days: self.default_refresh_ttl_days,
+            scrapers: self.scrapers.clone(),
+            via: self.via.clone(),
+            via_mode: self.via_mode,
+        }
+    }
+
+    /// Apply source interaction settings from database.
+    pub fn apply_sources_config(&mut self, sources: SourcesConfig) {
+        self.user_agent = sources.user_agent;
+        self.request_timeout = sources.request_timeout;
+        self.request_delay_ms = sources.request_delay_ms;
+        self.default_refresh_ttl_days = sources.default_refresh_ttl_days;
+        self.scrapers = sources.scrapers;
+        self.via = sources.via;
+        self.via_mode = sources.via_mode;
+    }
+
+    /// Load configuration from the scraper_configs table.
+    /// Loads app-level settings only and merges with default config.
+    /// Device-specific and bootstrap settings are not stored in DB.
+    pub async fn load_from_db(db_path: &Path) -> Option<Self> {
+        let loader = FoiaConfigLoader::new(db_path);
+        let snapshot = loader.load_snapshot().await?;
+
+        let mut config = Config::default();
+        config.apply_sources_config(snapshot);
+        Some(config)
+    }
+
     /// Serialize config to JSON with paths converted to relative.
     /// Any paths pointing to `base_dir` are converted to relative paths.
+    /// Note: This serializes the full config (for config files). For DB storage, use `to_sources_config()`.
     #[allow(dead_code)]
     pub fn to_json_relative(&self, base_dir: &Path) -> String {
         let mut config = self.clone();

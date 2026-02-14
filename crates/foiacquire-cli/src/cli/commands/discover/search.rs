@@ -40,14 +40,11 @@ pub async fn cmd_discover_search(
     let mut search_terms: Vec<String> = if let Some(t) = terms {
         t.split(',').map(|s| s.trim().to_string()).collect()
     } else {
-        // Try to get terms from scraper_configs table
-        let repos = settings.repositories()?;
-        repos
-            .scraper_configs
+        // Try to get terms from config
+        let config = foiacquire::config::Config::load().await;
+        config
+            .scrapers
             .get(source_id)
-            .await
-            .ok()
-            .flatten()
             .map(|s| s.discovery.search_queries.clone())
             .unwrap_or_default()
     };

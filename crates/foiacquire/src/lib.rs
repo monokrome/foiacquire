@@ -15,6 +15,7 @@ pub mod http_client;
 pub mod llm;
 pub mod migrations;
 pub mod models;
+pub mod prefer_db;
 pub mod privacy;
 pub mod rate_limit;
 pub mod repository;

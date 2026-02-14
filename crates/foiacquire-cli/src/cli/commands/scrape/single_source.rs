@@ -43,11 +43,11 @@ pub(super) async fn cmd_scrape_single_tui(
         }
     };
 
-    // Load scraper config from database
-    let repos = settings.repositories()?;
-    let mut scraper_config = match repos.scraper_configs.get(source_id).await {
-        Ok(Some(c)) => c,
-        Ok(None) => {
+    // Load scraper config
+    let config = Config::load().await;
+    let mut scraper_config = match config.scrapers.get(source_id) {
+        Some(c) => c.clone(),
+        None => {
             log_msg(&format!(
                 "{} No scraper configured for '{}'",
                 style("✗").red(),
@@ -55,17 +55,8 @@ pub(super) async fn cmd_scrape_single_tui(
             ));
             return Ok(());
         }
-        Err(e) => {
-            log_msg(&format!(
-                "{} Failed to load scraper config for '{}': {}",
-                style("✗").red(),
-                source_id,
-                e
-            ));
-            return Ok(());
-        }
     };
-    let config = Config::load().await;
+    let repos = settings.repositories()?;
 
     update_status(&format!("{} loading config...", source_id));
 
@@ -188,32 +179,22 @@ pub(super) async fn cmd_scrape_single_tui(
 
     // Create scraper and start streaming
     let refresh_ttl_days = config.get_refresh_ttl_days(source_id);
-    // Per-source overrides for request delay
-    let effective_delay_ms = scraper_config
-        .request_delay_ms
-        .unwrap_or(settings.request_delay_ms);
     // Clone rate limiter - RateLimiter uses Arc internally so cloning shares state
     let limiter_opt = rate_limiter.as_ref().map(|r| (**r).clone());
     let scraper = ConfigurableScraper::with_rate_limiter_and_privacy(
         source.clone(),
         scraper_config.clone(),
         Some(crawl_repo.clone()),
-        Duration::from_millis(effective_delay_ms),
+        Duration::from_millis(settings.request_delay_ms),
         refresh_ttl_days,
         limiter_opt,
         Some(privacy_config),
     )
     .map_err(|e| anyhow::anyhow!("Failed to create scraper: {}", e))?;
 
-    // Apply via mappings: per-source overrides take priority over global config
-    let effective_via = if !scraper_config.via.is_empty() {
-        scraper_config.via.clone()
-    } else {
-        config.via.clone()
-    };
-    let effective_via_mode = scraper_config.via_mode.unwrap_or(config.via_mode);
-    let scraper = if !effective_via.is_empty() {
-        scraper.with_via_config(effective_via, effective_via_mode)
+    // Apply via mappings for caching proxy support if configured
+    let scraper = if !config.via.is_empty() {
+        scraper.with_via_config(config.via.clone(), config.via_mode)
     } else {
         scraper
     };

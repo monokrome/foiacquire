@@ -142,11 +142,11 @@ pub async fn cmd_crawl_clear(
 pub async fn cmd_crawl(settings: &Settings, source_id: &str, _limit: usize) -> anyhow::Result<()> {
     settings.ensure_directories()?;
 
-    // Load scraper config from database
-    let repos = settings.repositories()?;
-    let scraper_config = match repos.scraper_configs.get(source_id).await {
-        Ok(Some(c)) => c,
-        Ok(None) => {
+    // Load scraper config
+    let config = Config::load().await;
+    let scraper_config = match config.scrapers.get(source_id) {
+        Some(c) => c.clone(),
+        None => {
             println!(
                 "{} No scraper configured for '{}'",
                 style("✗").red(),
@@ -154,17 +154,9 @@ pub async fn cmd_crawl(settings: &Settings, source_id: &str, _limit: usize) -> a
             );
             return Ok(());
         }
-        Err(e) => {
-            println!(
-                "{} Failed to load scraper config for '{}': {}",
-                style("✗").red(),
-                source_id,
-                e
-            );
-            return Ok(());
-        }
     };
-    let config = Config::load().await;
+
+    let repos = settings.repositories()?;
     let source_repo = repos.sources;
     let crawl_repo = Arc::new(repos.crawl);
 
@@ -223,26 +215,17 @@ pub async fn cmd_crawl(settings: &Settings, source_id: &str, _limit: usize) -> a
 
     // Create scraper for discovery
     let refresh_ttl_days = config.get_refresh_ttl_days(source_id);
-    let effective_delay_ms = scraper_config
-        .request_delay_ms
-        .unwrap_or(settings.request_delay_ms);
     let scraper = ConfigurableScraper::new(
         source.clone(),
-        scraper_config.clone(),
+        scraper_config,
         Some(crawl_repo.clone()),
-        Duration::from_millis(effective_delay_ms),
+        Duration::from_millis(settings.request_delay_ms),
         refresh_ttl_days,
     );
 
-    // Apply via mappings: per-source overrides take priority over global config
-    let effective_via = if !scraper_config.via.is_empty() {
-        scraper_config.via.clone()
-    } else {
-        config.via.clone()
-    };
-    let effective_via_mode = scraper_config.via_mode.unwrap_or(config.via_mode);
-    let scraper = if !effective_via.is_empty() {
-        scraper.with_via_config(effective_via, effective_via_mode)
+    // Apply via mappings for caching proxy support if configured
+    let scraper = if !config.via.is_empty() {
+        scraper.with_via_config(config.via.clone(), config.via_mode)
     } else {
         scraper
     };

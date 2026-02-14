@@ -19,16 +19,17 @@ pub use pattern::cmd_discover_pattern;
 pub use search::cmd_discover_search;
 pub use sources::{cmd_discover_paths, cmd_discover_sitemap, cmd_discover_wayback};
 
-/// Helper to get base URL for a source from scraper_configs table.
+/// Helper to get base URL for a source from config.
 pub(super) async fn get_source_base_url(
-    settings: &Settings,
+    _settings: &Settings,
     source_id: &str,
 ) -> anyhow::Result<String> {
-    let repos = settings.repositories()?;
-    let scraper = repos
-        .scraper_configs
+    use foiacquire::config::Config;
+
+    let config = Config::load().await;
+    let scraper = config
+        .scrapers
         .get(source_id)
-        .await?
         .ok_or_else(|| anyhow::anyhow!("Source '{}' not found in configuration", source_id))?;
 
     scraper

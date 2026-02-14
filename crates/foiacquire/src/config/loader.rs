@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::repository::util::{is_postgres_url, validate_database_url};
 
-use super::{Config, ResolvedData, Settings};
+use super::{Config, ResolvedData, Settings, SourcesConfig};
 
 /// Options for loading settings.
 #[derive(Debug, Clone, Default)]
@@ -87,13 +87,32 @@ fn resolve_data_path_to_dir(path: &Path) -> PathBuf {
 }
 
 /// Load config from the appropriate source based on options.
-/// File config only — scraper configs come from the database via repositories.
+/// Merges file config with DB app settings for cross-device sync.
 async fn load_config_from_sources(
     options: &LoadOptions,
     data_dir_override: Option<&PathBuf>,
-    _resolved_data: Option<&ResolvedData>,
+    resolved_data: Option<&ResolvedData>,
 ) -> Config {
-    load_file_config(options, data_dir_override).await
+    // Step 1: Load file-based config
+    let mut config = load_file_config(options, data_dir_override).await;
+
+    // Step 2: Merge with DB app settings (synced across devices)
+    // DB provides baseline, file overrides take priority
+    if let Some(resolved) = resolved_data {
+        if let Some(db_config) = Config::load_from_db(&resolved.database_path).await {
+            tracing::debug!(
+                "Merging DB app settings from: {}",
+                resolved.database_path.display()
+            );
+            // Apply DB app settings as baseline, then re-apply file overrides
+            let file_snapshot = config.to_sources_config();
+            config.apply_sources_config(db_config.to_sources_config());
+            // Re-apply file settings on top (file takes priority)
+            merge_sources_configs(&mut config, &file_snapshot);
+        }
+    }
+
+    config
 }
 
 /// Load config from file sources only (no DB merge).
@@ -117,6 +136,38 @@ async fn load_file_config(options: &LoadOptions, data_dir_override: Option<&Path
 
     // Priority 3: Auto-discover via prefer
     Config::load().await
+}
+
+/// Merge non-default values from a sources config overlay into config.
+/// Only applies values that differ from defaults (preserves explicit settings).
+fn merge_sources_configs(config: &mut Config, overlay: &SourcesConfig) {
+    let defaults = SourcesConfig::default();
+
+    if overlay.user_agent != defaults.user_agent {
+        config.user_agent = overlay.user_agent.clone();
+    }
+    if overlay.request_timeout != defaults.request_timeout {
+        config.request_timeout = overlay.request_timeout;
+    }
+    if overlay.request_delay_ms != defaults.request_delay_ms {
+        config.request_delay_ms = overlay.request_delay_ms;
+    }
+    if overlay.default_refresh_ttl_days != defaults.default_refresh_ttl_days {
+        config.default_refresh_ttl_days = overlay.default_refresh_ttl_days;
+    }
+    if overlay.scrapers != defaults.scrapers {
+        for (key, value) in &overlay.scrapers {
+            config.scrapers.insert(key.clone(), value.clone());
+        }
+    }
+    if overlay.via != defaults.via {
+        for (key, value) in &overlay.via {
+            config.via.insert(key.clone(), value.clone());
+        }
+    }
+    if overlay.via_mode != defaults.via_mode {
+        config.via_mode = overlay.via_mode;
+    }
 }
 
 /// Load settings with explicit options.
