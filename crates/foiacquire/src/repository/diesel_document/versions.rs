@@ -60,7 +60,6 @@ impl DieselDocumentRepository {
     }
 
     /// Add a new version.
-    #[allow(dead_code)]
     pub async fn add_version(
         &self,
         document_id: &str,

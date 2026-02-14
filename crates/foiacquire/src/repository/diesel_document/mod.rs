@@ -225,6 +225,23 @@ impl DieselDocumentRepository {
         })
     }
 
+    /// Save a document and persist any new versions (id == 0).
+    ///
+    /// Use this instead of `save()` when creating a new document or adding
+    /// versions, so the version rows are actually written to document_versions.
+    /// Use `save()` alone when only updating document metadata/status.
+    pub async fn save_with_versions(&self, doc: &Document) -> Result<(), DieselError> {
+        self.save(doc).await?;
+
+        for version in &doc.versions {
+            if version.id == 0 {
+                self.add_version(&doc.id, version).await?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Delete a document.
     #[allow(dead_code)]
     pub async fn delete(&self, id: &str) -> Result<bool, DieselError> {

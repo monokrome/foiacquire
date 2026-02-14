@@ -67,7 +67,7 @@ async fn handle_refresh_result(
             false
         }
         RefreshResult::Redownloaded(updated_doc) => {
-            if let Err(e) = doc_repo.save(&updated_doc).await {
+            if let Err(e) = doc_repo.save_with_versions(&updated_doc).await {
                 pb.println(format!(
                     "{} Failed to save {}: {}",
                     style("✗").red(),

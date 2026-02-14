@@ -359,7 +359,7 @@ pub async fn cmd_import_stdin(
     let (doc_id, is_new) = if let Some(mut doc) = existing.into_iter().next() {
         let added = doc.add_version(version);
         if added {
-            doc_repo.save(&doc).await?;
+            doc_repo.save_with_versions(&doc).await?;
         }
         (doc.id.clone(), false)
     } else {
@@ -373,7 +373,7 @@ pub async fn cmd_import_stdin(
             serde_json::json!({ "discovery_method": "stdin-import" }),
         );
         let doc_id = doc.id.clone();
-        doc_repo.save(&doc).await?;
+        doc_repo.save_with_versions(&doc).await?;
         (doc_id, true)
     };
 

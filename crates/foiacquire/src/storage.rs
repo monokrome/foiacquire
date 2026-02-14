@@ -166,7 +166,7 @@ pub async fn save_document_async(
 
     if let Some(mut doc) = existing.into_iter().next() {
         if doc.add_version(version) {
-            doc_repo.save(&doc).await?;
+            doc_repo.save_with_versions(&doc).await?;
         }
         Ok(false) // Updated existing
     } else {
@@ -178,7 +178,7 @@ pub async fn save_document_async(
             version,
             input.metadata.clone(),
         );
-        doc_repo.save(&doc).await?;
+        doc_repo.save_with_versions(&doc).await?;
         Ok(true) // Created new
     }
 }

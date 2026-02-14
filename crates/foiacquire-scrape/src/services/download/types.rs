@@ -172,7 +172,7 @@ pub async fn save_or_update_document(
 
     if let Some(mut doc) = existing {
         if doc.add_version(version) {
-            doc_repo.save(&doc).await?;
+            doc_repo.save_with_versions(&doc).await?;
         }
     } else {
         let doc = Document::with_discovery_method(
@@ -184,7 +184,7 @@ pub async fn save_or_update_document(
             metadata,
             discovery_method.to_string(),
         );
-        doc_repo.save(&doc).await?;
+        doc_repo.save_with_versions(&doc).await?;
     }
 
     Ok(new_document)
