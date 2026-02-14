@@ -4,6 +4,8 @@ use std::sync::Arc;
 use tracing::debug;
 
 use super::ConfigurableScraper;
+#[cfg(feature = "browser")]
+use super::fetch::FetchError;
 use crate::{ScrapeStream, ScraperResult};
 #[cfg(feature = "browser")]
 use foiacquire::browser::BrowserFetcher;
@@ -14,8 +16,14 @@ pub const DEFAULT_CONCURRENCY: usize = 4;
 impl ConfigurableScraper {
     /// Scrape documents from the source (legacy batch interface).
     pub async fn scrape(&self) -> Vec<ScraperResult> {
+        let stream = match self.scrape_stream(DEFAULT_CONCURRENCY).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("Failed to start scrape: {}", e);
+                return Vec::new();
+            }
+        };
         let mut results = Vec::new();
-        let stream = self.scrape_stream(DEFAULT_CONCURRENCY).await;
         let mut rx = stream.receiver;
         while let Some(result) = rx.recv().await {
             results.push(result);
@@ -25,7 +33,13 @@ impl ConfigurableScraper {
 
     /// Scrape documents with streaming results.
     /// Returns a ScrapeStream with the receiver and optional total count.
-    pub async fn scrape_stream(&self, concurrency: usize) -> ScrapeStream {
+    ///
+    /// Returns an error if a browser is configured but unreachable, preventing
+    /// URLs from being silently marked as failed due to infrastructure issues.
+    pub async fn scrape_stream(&self, concurrency: usize) -> anyhow::Result<ScrapeStream> {
+        #[cfg(feature = "browser")]
+        self.preflight_browser_check().await?;
+
         let (result_tx, result_rx) = tokio::sync::mpsc::channel::<ScraperResult>(100);
         let (url_tx, url_rx) = tokio::sync::mpsc::channel::<String>(500);
 
@@ -48,10 +62,10 @@ impl ConfigurableScraper {
             }
         });
 
-        ScrapeStream {
+        Ok(ScrapeStream {
             receiver: result_rx,
             total_count,
-        }
+        })
     }
 
     /// Query the total count from an API source.
@@ -163,7 +177,7 @@ impl ConfigurableScraper {
                     #[cfg(feature = "browser")]
                     let fetch_result = if let Some(ref mut browser) = browser_fetcher {
                         let is_pdf = url.to_lowercase().ends_with(".pdf");
-                        if binary_fetch && is_pdf {
+                        let browser_result = if binary_fetch && is_pdf {
                             Self::fetch_url_with_browser_binary(
                                 browser,
                                 &url,
@@ -172,6 +186,22 @@ impl ConfigurableScraper {
                             .await
                         } else {
                             Self::fetch_url_with_browser(browser, &client, &url).await
+                        };
+
+                        match browser_result {
+                            Ok(result) => Some(result),
+                            Err(FetchError::BrowserUnavailable(msg)) => {
+                                tracing::error!(
+                                    "Browser unavailable, stopping worker: {}",
+                                    msg
+                                );
+                                // Don't mark URL as failed — it's infrastructure, not the URL
+                                break;
+                            }
+                            Err(FetchError::UrlFailed(msg)) => {
+                                debug!("{}", msg);
+                                None
+                            }
                         }
                     } else {
                         Self::fetch_url(&client, &url).await
@@ -292,6 +322,35 @@ impl ConfigurableScraper {
             .await;
             #[cfg(not(feature = "browser"))]
             Self::discover_streaming(&config, &client, &source_id, &crawl_repo, &url_tx).await;
+        })
+    }
+
+    /// Pre-flight check: verify browser connectivity before processing any URLs.
+    ///
+    /// If the browser is configured with a remote URL but unreachable, returns an
+    /// error. This prevents silently burning through the crawl queue when the
+    /// browser infrastructure is down.
+    #[cfg(feature = "browser")]
+    async fn preflight_browser_check(&self) -> anyhow::Result<()> {
+        let browser_config = match &self.browser_config {
+            Some(cfg) => cfg,
+            None => return Ok(()),
+        };
+
+        if browser_config.remote_url.is_none() {
+            return Ok(());
+        }
+
+        let mut test_browser = BrowserFetcher::new(browser_config.clone());
+        let result = test_browser.check_connectivity().await;
+        test_browser.close().await;
+
+        result.map_err(|e| {
+            anyhow::anyhow!(
+                "Browser unreachable ({}). Aborting scrape to avoid \
+                 marking URLs as failed due to infrastructure issues.",
+                e
+            )
         })
     }
 }

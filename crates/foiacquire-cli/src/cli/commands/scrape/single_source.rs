@@ -199,7 +199,17 @@ pub(super) async fn cmd_scrape_single_tui(
         scraper
     };
 
-    let stream = scraper.scrape_stream(workers).await;
+    let stream = match scraper.scrape_stream(workers).await {
+        Ok(s) => s,
+        Err(e) => {
+            service_status.record_error(&e.to_string());
+            service_status.set_stopped();
+            if let Err(status_err) = service_status_repo.upsert(&service_status).await {
+                tracing::warn!("Failed to update service status: {}", status_err);
+            }
+            return Err(e);
+        }
+    };
     let mut rx = stream.receiver;
 
     let mut count = 0u64;

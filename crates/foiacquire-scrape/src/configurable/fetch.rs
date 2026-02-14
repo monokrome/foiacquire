@@ -8,6 +8,17 @@ use crate::{extract_title_from_url, HttpClient, ScraperResult};
 #[cfg(feature = "browser")]
 use foiacquire::browser::BrowserFetcher;
 
+/// Error type distinguishing browser infrastructure failures from URL-specific failures.
+#[cfg(feature = "browser")]
+pub(crate) enum FetchError {
+    /// The browser itself is unreachable (infrastructure failure).
+    /// URLs should NOT be marked as failed — the problem is not URL-specific.
+    BrowserUnavailable(String),
+    /// The specific URL failed to fetch (URL-specific failure).
+    /// URLs should be marked as failed normally.
+    UrlFailed(String),
+}
+
 impl ConfigurableScraper {
     /// Static fetch method for use in workers.
     pub(crate) async fn fetch_url(client: &HttpClient, url: &str) -> Option<ScraperResult> {
@@ -90,19 +101,31 @@ impl ConfigurableScraper {
     }
 
     /// Fetch URL using browser for anti-bot protected sites.
+    ///
+    /// Returns `FetchError::BrowserUnavailable` if the browser itself can't be reached
+    /// (infrastructure failure — URL should not be marked as failed), or
+    /// `FetchError::UrlFailed` if the browser is fine but this URL couldn't be fetched.
     #[cfg(feature = "browser")]
     pub(crate) async fn fetch_url_with_browser(
         browser: &mut BrowserFetcher,
         _client: &HttpClient,
         url: &str,
-    ) -> Option<ScraperResult> {
+    ) -> Result<ScraperResult, FetchError> {
         debug!("Fetching with browser: {}", url);
+
+        // Check browser connectivity first — separate from URL-specific errors.
+        // ensure_browser() is idempotent: returns Ok immediately if already connected.
+        if let Err(e) = browser.ensure_browser().await {
+            return Err(FetchError::BrowserUnavailable(e.to_string()));
+        }
 
         let response = match browser.fetch(url).await {
             Ok(r) => r,
             Err(e) => {
-                debug!("Browser fetch failed for {}: {}", url, e);
-                return None;
+                return Err(FetchError::UrlFailed(format!(
+                    "Browser fetch failed for {}: {}",
+                    url, e
+                )));
             }
         };
 
@@ -122,7 +145,7 @@ impl ConfigurableScraper {
 
         let content = response.content.into_bytes();
 
-        Some(ScraperResult {
+        Ok(ScraperResult {
             url: url.to_string(),
             title,
             content: Some(content),
@@ -145,19 +168,28 @@ impl ConfigurableScraper {
 
     /// Fetch binary URL (PDF, images) using JavaScript fetch from browser context.
     /// This bypasses Akamai/Cloudflare bot protection on PDF endpoints.
+    ///
+    /// Returns `FetchError::BrowserUnavailable` if the browser itself can't be reached,
+    /// or `FetchError::UrlFailed` if the browser is fine but this URL couldn't be fetched.
     #[cfg(feature = "browser")]
     pub(crate) async fn fetch_url_with_browser_binary(
         browser: &mut BrowserFetcher,
         url: &str,
         context_url: Option<&str>,
-    ) -> Option<ScraperResult> {
+    ) -> Result<ScraperResult, FetchError> {
         debug!("Fetching binary with browser: {}", url);
+
+        if let Err(e) = browser.ensure_browser().await {
+            return Err(FetchError::BrowserUnavailable(e.to_string()));
+        }
 
         let response = match browser.fetch_binary(url, context_url).await {
             Ok(r) => r,
             Err(e) => {
-                debug!("Browser binary fetch failed for {}: {}", url, e);
-                return None;
+                return Err(FetchError::UrlFailed(format!(
+                    "Browser binary fetch failed for {}: {}",
+                    url, e
+                )));
             }
         };
 
@@ -174,7 +206,7 @@ impl ConfigurableScraper {
             response.content_type
         );
 
-        Some(ScraperResult {
+        Ok(ScraperResult {
             url: url.to_string(),
             title,
             content: Some(response.data),

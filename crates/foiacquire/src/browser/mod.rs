@@ -297,6 +297,15 @@ impl BrowserFetcher {
         Ok(new_url.to_string())
     }
 
+    /// Check if the browser is reachable.
+    ///
+    /// Attempts to connect to the browser (local or remote). Returns Ok if
+    /// the browser is available, or an error describing why it's not.
+    /// Use this as a pre-flight check before processing URLs.
+    pub async fn check_connectivity(&mut self) -> Result<()> {
+        self.ensure_browser().await
+    }
+
     /// Close the browser.
     pub async fn close(&mut self) {
         self.browser = None;
