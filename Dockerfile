@@ -1,13 +1,31 @@
 # FOIAcquire - FOIA document acquisition and research system
+#
+# Uses cargo-chef for dependency caching: when only source changes,
+# the dependency layer is reused and only workspace crates are rebuilt.
 
-# Stage 1: Build the Rust binary
-FROM rust:alpine AS builder
+# Stage 1: Install cargo-chef
+FROM rust:alpine AS chef
+RUN apk add --no-cache musl-dev && cargo install cargo-chef
+WORKDIR /build
 
+# Stage 2: Generate dependency recipe
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+RUN cargo chef prepare --recipe-path recipe.json
+
+# Stage 3: Build
+FROM chef AS builder
 ARG FEATURES="browser,postgres,redis-backend,gis"
 
-RUN apk add --no-cache musl-dev
+COPY --from=planner /build/recipe.json recipe.json
 
-WORKDIR /build
+RUN if [ -n "$FEATURES" ]; then \
+      cargo chef cook --release --features "$FEATURES" --recipe-path recipe.json; \
+    else \
+      cargo chef cook --release --recipe-path recipe.json; \
+    fi
+
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 
@@ -18,7 +36,7 @@ RUN if [ -n "$FEATURES" ]; then \
     fi \
     && strip target/release/foia
 
-# Stage 2: Runtime image
+# Stage 4: Runtime image
 FROM alpine:3.21
 
 ARG WITH_TESSERACT="false"
