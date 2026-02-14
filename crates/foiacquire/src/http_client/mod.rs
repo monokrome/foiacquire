@@ -1141,7 +1141,9 @@ mod tests {
         let result = HttpClient::builder("test", test_timeout(), test_delay())
             .privacy(&config)
             .build();
-        let err = result.err().expect("expected error for Tor without Tor available");
+        let err = result
+            .err()
+            .expect("expected error for Tor without Tor available");
         assert!(
             err.contains("Tor mode requested"),
             "Expected Tor error, got: {}",

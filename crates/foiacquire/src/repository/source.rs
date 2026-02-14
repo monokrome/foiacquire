@@ -186,18 +186,14 @@ impl SourceRepository {
         let sql_sources = build_sql(&self.pool, &update_sources);
 
         with_conn!(self.pool, conn, {
-            let docs_updated = diesel::sql_query(&sql_docs)
-                .execute(&mut conn)
-                .await?;
+            let docs_updated = diesel::sql_query(&sql_docs).execute(&mut conn).await?;
             let crawls_updated = diesel::sql_query(&sql_crawl_urls)
                 .execute(&mut conn)
                 .await?;
             diesel::sql_query(&sql_crawl_config)
                 .execute(&mut conn)
                 .await?;
-            diesel::sql_query(&sql_sources)
-                .execute(&mut conn)
-                .await?;
+            diesel::sql_query(&sql_sources).execute(&mut conn).await?;
             Ok((docs_updated, crawls_updated))
         })
     }

@@ -228,8 +228,7 @@ pub fn ocr_document_page_with_config(
             }
         } else {
             // Run OCR with this entry (single backend or fallback chain)
-            let fallback =
-                FallbackOcrBackend::from_names(&backend_names, BackendConfig::default());
+            let fallback = FallbackOcrBackend::from_names(&backend_names, BackendConfig::default());
 
             match fallback.ocr_pdf_page(&file_path, page.page_number) {
                 Ok(result) => {

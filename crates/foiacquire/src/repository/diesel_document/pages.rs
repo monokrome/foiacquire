@@ -24,8 +24,7 @@ impl From<DocumentPageRecord> for DocumentPage {
             pdf_text: r.pdf_text,
             ocr_text: r.ocr_text,
             final_text: r.final_text,
-            ocr_status: PageOcrStatus::from_str(&r.ocr_status)
-                .unwrap_or(PageOcrStatus::Pending),
+            ocr_status: PageOcrStatus::from_str(&r.ocr_status).unwrap_or(PageOcrStatus::Pending),
             created_at: parse_datetime(&r.created_at),
             updated_at: parse_datetime(&r.updated_at),
         }
@@ -244,7 +243,9 @@ impl DieselDocumentRepository {
                 .bind::<diesel::sql_types::Nullable<diesel::sql_types::Integer>, _>(None::<i32>)
                 .bind::<diesel::sql_types::Nullable<diesel::sql_types::Integer>, _>(char_count)
                 .bind::<diesel::sql_types::Nullable<diesel::sql_types::Integer>, _>(word_count)
-                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Integer>, _>(processing_time_ms)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Integer>, _>(
+                    processing_time_ms,
+                )
                 .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(None::<&str>)
                 .bind::<diesel::sql_types::Text, _>(&now)
                 .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(model)

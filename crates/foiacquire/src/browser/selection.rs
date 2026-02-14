@@ -483,5 +483,4 @@ mod tests {
         let second = pd.select("http://a.com", 3, &healthy);
         assert_eq!(first, second, "Per-domain should be consistent");
     }
-
 }

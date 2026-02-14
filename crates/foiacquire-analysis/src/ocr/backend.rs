@@ -210,8 +210,11 @@ impl BackendConfig {
     /// Create an HTTP client, applying privacy settings if configured.
     /// When privacy is None, HttpClient picks up env overrides (SOCKS_PROXY, etc.).
     pub fn create_http_client(&self, service_name: &str) -> Result<HttpClient, OcrError> {
-        let mut builder =
-            HttpClient::builder(service_name, Duration::from_secs(120), Duration::from_millis(0));
+        let mut builder = HttpClient::builder(
+            service_name,
+            Duration::from_secs(120),
+            Duration::from_millis(0),
+        );
         if let Some(ref privacy) = self.privacy {
             builder = builder.privacy(privacy);
         }

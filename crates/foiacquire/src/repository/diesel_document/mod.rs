@@ -163,9 +163,11 @@ impl DieselDocumentRepository {
         let updated_at = doc.updated_at.to_rfc3339();
         let status = doc.status.as_str().to_string();
 
-        let category_id: Option<String> = doc
-            .current_version()
-            .map(|v| crate::utils::mime_type_category(&v.mime_type).id().to_string());
+        let category_id: Option<String> = doc.current_version().map(|v| {
+            crate::utils::mime_type_category(&v.mime_type)
+                .id()
+                .to_string()
+        });
 
         let stmt = Query::insert()
             .into_table(Documents::Table)

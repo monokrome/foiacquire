@@ -4,12 +4,12 @@ use async_trait::async_trait;
 use diesel_async::RunQueryDsl;
 
 use super::PostgresMigrator;
-use crate::repository::models::*;
 use crate::repository::migration::{
     DatabaseExporter, PortableConfigHistory, PortableCrawlConfig, PortableCrawlRequest,
     PortableCrawlUrl, PortableDocument, PortableDocumentPage, PortableDocumentVersion,
     PortableRateLimitState, PortableSource, PortableVirtualFile,
 };
+use crate::repository::models::*;
 use crate::repository::util::to_diesel_error;
 use crate::repository::DieselError;
 use crate::schema::*;

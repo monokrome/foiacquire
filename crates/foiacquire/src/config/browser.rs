@@ -319,15 +319,9 @@ mod tests {
         assert!(config.enabled);
         assert_eq!(config.engine, BrowserEngineType::Stealth);
         assert!(!config.headless);
-        assert_eq!(
-            config.proxy,
-            Some("socks5://127.0.0.1:1080".to_string())
-        );
+        assert_eq!(config.proxy, Some("socks5://127.0.0.1:1080".to_string()));
         assert_eq!(config.timeout, 60);
-        assert_eq!(
-            config.wait_for_selector,
-            Some("#content".to_string())
-        );
+        assert_eq!(config.wait_for_selector, Some("#content".to_string()));
     }
 
     #[test]

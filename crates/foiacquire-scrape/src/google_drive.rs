@@ -489,13 +489,22 @@ mod tests {
 
     #[test]
     fn test_guess_mime_type() {
-        assert_eq!(foiacquire::utils::guess_mime_from_filename("document.pdf"), "application/pdf");
-        assert_eq!(foiacquire::utils::guess_mime_from_filename("DOCUMENT.PDF"), "application/pdf");
+        assert_eq!(
+            foiacquire::utils::guess_mime_from_filename("document.pdf"),
+            "application/pdf"
+        );
+        assert_eq!(
+            foiacquire::utils::guess_mime_from_filename("DOCUMENT.PDF"),
+            "application/pdf"
+        );
         assert_eq!(
             foiacquire::utils::guess_mime_from_filename("file.docx"),
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         );
-        assert_eq!(foiacquire::utils::guess_mime_from_filename("image.jpg"), "image/jpeg");
+        assert_eq!(
+            foiacquire::utils::guess_mime_from_filename("image.jpg"),
+            "image/jpeg"
+        );
         assert_eq!(
             foiacquire::utils::guess_mime_from_filename("unknown"),
             "application/octet-stream"

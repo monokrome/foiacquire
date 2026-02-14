@@ -74,17 +74,15 @@ impl WaybackSource {
         from: Option<DateTime<Utc>>,
         to: Option<DateTime<Utc>>,
     ) -> Result<Vec<SnapshotInfo>, ArchiveError> {
-        let mut query = CdxQuery::new(url)
-            .base_url(&self.cdx_url)
-            .fields(&[
-                "urlkey",
-                "timestamp",
-                "original",
-                "mimetype",
-                "statuscode",
-                "digest",
-                "length",
-            ]);
+        let mut query = CdxQuery::new(url).base_url(&self.cdx_url).fields(&[
+            "urlkey",
+            "timestamp",
+            "original",
+            "mimetype",
+            "statuscode",
+            "digest",
+            "length",
+        ]);
 
         if let Some(from) = from {
             query = query.from_date(cdx::format_cdx_timestamp(from));

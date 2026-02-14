@@ -215,10 +215,7 @@ pub fn format_cdx_timestamp(dt: DateTime<Utc>) -> String {
 
 /// Build a Wayback Machine archive URL (with toolbar/frame).
 pub fn build_archive_url(timestamp: &str, original_url: &str) -> String {
-    format!(
-        "https://web.archive.org/web/{}/{}",
-        timestamp, original_url
-    )
+    format!("https://web.archive.org/web/{}/{}", timestamp, original_url)
 }
 
 /// Build a raw Wayback Machine archive URL (without toolbar/frame).

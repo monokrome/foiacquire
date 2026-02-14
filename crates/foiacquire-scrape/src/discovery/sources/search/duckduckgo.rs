@@ -33,8 +33,7 @@ impl DuckDuckGoSource {
     ) -> Result<Vec<SearchResult>, DiscoveryError> {
         debug!("DuckDuckGo search: {}", query);
 
-        let client =
-            create_discovery_client("duckduckgo", config, None, Some("impersonate"))?;
+        let client = create_discovery_client("duckduckgo", config, None, Some("impersonate"))?;
 
         let response = client
             .post(DDG_SEARCH_URL, &[("q", query), ("kl", "us-en")])

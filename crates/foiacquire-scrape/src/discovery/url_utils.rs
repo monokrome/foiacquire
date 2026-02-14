@@ -92,10 +92,7 @@ mod tests {
 
     #[test]
     fn normalize_base_url_without_scheme() {
-        assert_eq!(
-            normalize_base_url("example.gov"),
-            "https://example.gov"
-        );
+        assert_eq!(normalize_base_url("example.gov"), "https://example.gov");
     }
 
     #[test]

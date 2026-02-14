@@ -8,8 +8,8 @@ use diesel_async::RunQueryDsl;
 
 use super::{CountRow, DieselDocumentRepository, DocIdRow, MimeCount, TagRow};
 use crate::models::{Document, DocumentStatus};
-use crate::repository::models::DocumentRecord;
 use crate::repository::document::DocumentNavigation;
+use crate::repository::models::DocumentRecord;
 use crate::repository::pool::DieselError;
 use crate::schema::documents;
 use crate::{with_conn, with_conn_split};

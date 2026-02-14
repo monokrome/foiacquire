@@ -83,17 +83,16 @@ impl DownloadService {
             let event_tx = event_tx.clone();
 
             let handle = tokio::spawn(async move {
-                let client =
-                    match HttpClient::builder("download", timeout, delay)
-                        .privacy(&privacy)
-                        .build()
-                    {
-                        Ok(c) => c,
-                        Err(e) => {
-                            tracing::error!("Failed to create HTTP client: {}", e);
-                            return;
-                        }
-                    };
+                let client = match HttpClient::builder("download", timeout, delay)
+                    .privacy(&privacy)
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!("Failed to create HTTP client: {}", e);
+                        return;
+                    }
+                };
 
                 // Apply via mappings for caching proxy support
                 let client = if !via.is_empty() {

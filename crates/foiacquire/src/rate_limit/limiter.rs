@@ -292,8 +292,7 @@ impl RateLimiter {
         if status_code == 429 || status_code == 503 {
             self.report_rate_limit(domain, status_code).await;
         } else if status_code == 403 {
-            self.report_403(domain, original_url, has_retry_after)
-                .await;
+            self.report_403(domain, original_url, has_retry_after).await;
         } else if status_code >= 500 {
             self.report_server_error(domain).await;
         } else if (200..400).contains(&status_code) {

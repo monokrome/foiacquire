@@ -11,8 +11,8 @@ use foiacquire_annotate::services::annotation::{
     AnnotationEvent, AnnotationManager, Annotator, DateAnnotator, LlmAnnotator, NerAnnotator,
 };
 
-use super::helpers::truncate;
 use super::daemon::{ConfigWatcher, DaemonAction, ReloadMode};
+use super::helpers::truncate;
 
 /// Spawn a task that drives a progress bar from annotation events.
 ///

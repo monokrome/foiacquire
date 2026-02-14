@@ -74,8 +74,7 @@ where
             });
         }
 
-        let wait =
-            parse_retry_after(retry_after).unwrap_or_else(|| backoff_delay(attempt, 1000));
+        let wait = parse_retry_after(retry_after).unwrap_or_else(|| backoff_delay(attempt, 1000));
 
         warn!(
             "{} rate limited (attempt {}), waiting {:?}",

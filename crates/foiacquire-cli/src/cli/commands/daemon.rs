@@ -48,8 +48,7 @@ impl ConfigWatcher {
         config_history: DieselConfigHistoryRepository,
         initial_hash: String,
     ) -> Self {
-        let watcher = if daemon && matches!(reload, ReloadMode::StopProcess | ReloadMode::Inplace)
-        {
+        let watcher = if daemon && matches!(reload, ReloadMode::StopProcess | ReloadMode::Inplace) {
             prefer::watch("foiacquire").await.ok()
         } else {
             None
@@ -107,7 +106,8 @@ impl ConfigWatcher {
                     }
                 }
             }
-        } else if self.daemon && matches!(self.reload, ReloadMode::StopProcess | ReloadMode::Inplace)
+        } else if self.daemon
+            && matches!(self.reload, ReloadMode::StopProcess | ReloadMode::Inplace)
         {
             tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
 

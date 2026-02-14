@@ -198,7 +198,10 @@ pub async fn cmd_download(
 }
 
 /// Get pending document count for a source or all sources.
-async fn get_pending_count(crawl_repo: &DieselCrawlRepository, source_id: Option<&str>) -> anyhow::Result<u64> {
+async fn get_pending_count(
+    crawl_repo: &DieselCrawlRepository,
+    source_id: Option<&str>,
+) -> anyhow::Result<u64> {
     if let Some(sid) = source_id {
         Ok(crawl_repo.get_crawl_state(sid).await?.urls_pending)
     } else {

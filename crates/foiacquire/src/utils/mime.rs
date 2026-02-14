@@ -5,8 +5,8 @@ const DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "doc", "docx", "xls", "xlsx", "ppt
 
 /// Known file extensions (documents + images + archives).
 const FILE_EXTENSIONS: &[&str] = &[
-    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "jpg", "jpeg", "png", "gif", "tif",
-    "tiff", "bmp", "zip",
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "jpg", "jpeg", "png", "gif", "tif", "tiff",
+    "bmp", "zip",
 ];
 
 /// Guess MIME type from a filename's extension.
@@ -446,9 +446,7 @@ mod tests {
         assert!(has_document_extension("https://example.com/slides.pptx"));
         assert!(!has_document_extension("https://example.com/image.png"));
         assert!(!has_document_extension("https://example.com/page"));
-        assert!(!has_document_extension(
-            "https://example.com/documents/"
-        ));
+        assert!(!has_document_extension("https://example.com/documents/"));
     }
 
     #[test]
