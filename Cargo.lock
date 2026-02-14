@@ -2709,7 +2709,7 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
 name = "foiacquire"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "arti-client",
@@ -2773,7 +2773,7 @@ dependencies = [
 
 [[package]]
 name = "foiacquire-analysis"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -2801,7 +2801,7 @@ dependencies = [
 
 [[package]]
 name = "foiacquire-annotate"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2817,7 +2817,7 @@ dependencies = [
 
 [[package]]
 name = "foiacquire-cli"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2851,7 +2851,7 @@ dependencies = [
 
 [[package]]
 name = "foiacquire-import"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2870,7 +2870,7 @@ dependencies = [
 
 [[package]]
 name = "foiacquire-scrape"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2892,7 +2892,7 @@ dependencies = [
 
 [[package]]
 name = "foiacquire-server"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "askama",
