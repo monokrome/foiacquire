@@ -309,9 +309,16 @@ impl DieselDocumentRepository {
     }
 
     /// Get all document URLs as a HashSet.
+    ///
+    /// Only includes documents that have at least one version row, since
+    /// documents without versions are incomplete imports that should be retried.
     pub async fn get_all_urls_set(&self) -> Result<std::collections::HashSet<String>, DieselError> {
         with_conn!(self.pool, conn, {
             let urls: Vec<String> = documents::table
+                .filter(diesel::dsl::exists(
+                    document_versions::table
+                        .filter(document_versions::document_id.eq(documents::id)),
+                ))
                 .select(documents::source_url)
                 .load(&mut conn)
                 .await?;
