@@ -56,11 +56,20 @@ impl ConfigWatcher {
             None
         };
 
+        // Use scraper_configs MAX(updated_at) as the initial hash so change
+        // detection compares like with like. Fall back to the config file
+        // hash when the table is empty.
+        let current_hash = if let Ok(Some(ts)) = scraper_configs.max_updated_at().await {
+            ts
+        } else {
+            initial_hash
+        };
+
         Self {
             watcher,
             config_history,
             scraper_configs,
-            current_hash: initial_hash,
+            current_hash,
             reload,
             daemon,
         }
