@@ -4,7 +4,7 @@
 
 set -e
 
-BINARY_NAME=$(grep -A1 '^\[\[bin\]\]' crates/foiacquire-cli/Cargo.toml | grep 'name' | cut -d'"' -f2)
+BINARY_NAME=$(grep -A1 '^\[\[bin\]\]' crates/foia-cli/Cargo.toml | grep 'name' | cut -d'"' -f2)
 
 if [ -z "$BINARY_NAME" ]; then
     echo "ERROR: Could not find [[bin]] name in Cargo.toml"
@@ -39,4 +39,4 @@ if [ $ERRORS -gt 0 ]; then
     exit 1
 fi
 
-echo "✓ All CI workflows reference correct binary name: $BINARY_NAME"
+echo "All CI workflows reference correct binary name: $BINARY_NAME"

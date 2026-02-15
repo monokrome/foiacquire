@@ -1,4 +1,4 @@
-# FOIAcquire Scripts
+# foia Scripts
 
 This directory contains utility scripts for development, CI/CD, and automation.
 
@@ -78,48 +78,6 @@ Ensures database migrations remain immutable after release.
 
 ---
 
-## Docker
-
-### `entrypoint.sh`
-
-Standard Docker container entrypoint.
-
-**Purpose:** Entry point for production Docker containers.
-
-**Usage:** Automatically used by `Dockerfile`, not called directly.
-
-**Features:**
-- Sets up container environment
-- Handles signal forwarding
-- Runs the foiacquire binary
-
----
-
-### `entrypoint-stealth.sh`
-
-Stealth browser container entrypoint.
-
-**Purpose:** Entry point for stealth browser Docker container (Chrome with anti-detection patches).
-
-**Usage:** Used by `Dockerfile.stealth-browser`, not called directly.
-
-**Features:**
-- Launches Chrome with stealth patches
-- Configures Chrome DevTools Protocol (CDP)
-- Sets up proxy if configured
-
----
-
-## Development Tools
-
-### Future Scripts
-
-This directory will also contain:
-- Performance benchmarking scripts
-- Database backup/restore utilities
-- Release automation scripts
-- Testing utilities
-
 ---
 
 ## Contributing
@@ -180,6 +138,4 @@ When adding new scripts:
 
 ## See Also
 
-- Privacy automation details: `../.foiacquire.info/privacy-automation.md`
-- Developer guidelines: `../CONTRIBUTING.md`
-- CI configuration: `../.github/workflows/ci.yml`
+- CI configuration: `../.github/workflows/docker.yml`

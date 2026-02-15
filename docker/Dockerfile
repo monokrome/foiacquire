@@ -1,4 +1,4 @@
-# FOIAcquire - FOIA document acquisition and research system
+# foia - FOIA document acquisition and research system
 #
 # Uses cargo-chef for dependency caching: when only source changes,
 # the dependency layer is reused and only workspace crates are rebuilt.
@@ -51,20 +51,20 @@ RUN apk add --no-cache ca-certificates su-exec python3 py3-pip poppler-utils \
          apk add --no-cache tor snowflake; \
        fi
 
-ENV DATA_DIR=/opt/foiacquire
+ENV DATA_DIR=/opt/foia
 ENV USER_ID=1000
 ENV GROUP_ID=1000
 
-RUN adduser -D -u 1000 foiacquire \
-    && mkdir -p /opt/foiacquire \
-    && chown foiacquire:foiacquire /opt/foiacquire
+RUN adduser -D -u 1000 foia \
+    && mkdir -p /opt/foia \
+    && chown foia:foia /opt/foia
 
-WORKDIR /opt/foiacquire
-VOLUME /opt/foiacquire
+WORKDIR /opt/foia
+VOLUME /opt/foia
 
-COPY --from=builder /build/target/release/foia /usr/local/bin/foiacquire
-COPY bin/foiacquire-entrypoint.sh /entrypoint.sh
-RUN chmod 755 /usr/local/bin/foiacquire /entrypoint.sh
+COPY --from=builder /build/target/release/foia /usr/local/bin/foia
+COPY bin/foia-entrypoint.sh /entrypoint.sh
+RUN chmod 755 /usr/local/bin/foia /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["--help"]

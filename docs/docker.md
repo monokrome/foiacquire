@@ -1,17 +1,17 @@
 # Docker Deployment
 
-Run foiacquire in containers for easy deployment and isolation.
+Run foia in containers for easy deployment and isolation.
 
 ## Quick Start
 
 ```bash
 # Pull the image
-docker pull monokrome/foiacquire:latest
+docker pull monokrome/foia:latest
 
 # Run with a local data directory
-docker run -v ./foia-data:/opt/foiacquire \
+docker run -v ./foia-data:/opt/foia \
   -e USER_ID=$(id -u) -e GROUP_ID=$(id -g) \
-  monokrome/foiacquire:latest scrape fbi_vault --limit 100
+  monokrome/foia:latest scrape fbi_vault --limit 100
 ```
 
 ## Images
@@ -20,9 +20,9 @@ docker run -v ./foia-data:/opt/foiacquire \
 
 | Image | Description |
 |-------|-------------|
-| `monokrome/foiacquire:latest` | Main application (Alpine-based) |
-| `monokrome/foiacquire:tesseract` | With Tesseract OCR included |
-| `monokrome/foiacquire:redis` | With Redis rate limiting support |
+| `monokrome/foia:latest` | Main application (Alpine-based) |
+| `monokrome/foia:tesseract` | With Tesseract OCR included |
+| `monokrome/foia:redis` | With Redis rate limiting support |
 
 ### Chromium Images
 
@@ -39,7 +39,7 @@ Both Chromium images support VNC for remote viewing (see [VNC Support](#vnc-supp
 |----------|---------|-------------|
 | `USER_ID` | `1000` | UID to run as inside container |
 | `GROUP_ID` | `1000` | GID to run as inside container |
-| `DATA_DIR` | `/opt/foiacquire` | Data directory inside container |
+| `DATA_DIR` | `/opt/foia` | Data directory inside container |
 | `DATABASE_URL` | - | Database connection string |
 | `BROWSER_URL` | - | Remote Chrome DevTools URL |
 | `RUST_LOG` | `info` | Log level |
@@ -47,15 +47,15 @@ Both Chromium images support VNC for remote viewing (see [VNC Support](#vnc-supp
 
 ## Volume Mounts
 
-The container expects data at `/opt/foiacquire`:
+The container expects data at `/opt/foia`:
 
 ```bash
-docker run -v /path/to/data:/opt/foiacquire ...
+docker run -v /path/to/data:/opt/foia ...
 ```
 
 The directory should contain:
-- `foiacquire.json` - Configuration file
-- `foiacquire.db` - SQLite database (created automatically)
+- `foia.json` - Configuration file
+- `foia.db` - SQLite database (created automatically)
 - `documents/` - Downloaded files (created automatically)
 
 ## Docker Compose
@@ -66,10 +66,10 @@ The directory should contain:
 version: '3.8'
 
 services:
-  foiacquire:
-    image: monokrome/foiacquire:latest
+  foia:
+    image: monokrome/foia:latest
     volumes:
-      - ./data:/opt/foiacquire
+      - ./data:/opt/foia
     environment:
       - USER_ID=1000
       - GROUP_ID=1000
@@ -83,14 +83,14 @@ services:
 version: '3.8'
 
 services:
-  foiacquire:
-    image: monokrome/foiacquire:latest
+  foia:
+    image: monokrome/foia:latest
     volumes:
-      - ./data:/opt/foiacquire
+      - ./data:/opt/foia
     environment:
       - USER_ID=1000
       - GROUP_ID=1000
-      - DATABASE_URL=postgres://foiacquire:secret@postgres:5432/foiacquire
+      - DATABASE_URL=postgres://foia:secret@postgres:5432/foia
       - RUST_LOG=info
     depends_on:
       postgres:
@@ -102,11 +102,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
-      - POSTGRES_USER=foiacquire
+      - POSTGRES_USER=foia
       - POSTGRES_PASSWORD=secret
-      - POSTGRES_DB=foiacquire
+      - POSTGRES_DB=foia
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U foiacquire"]
+      test: ["CMD-SHELL", "pg_isready -U foia"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -121,10 +121,10 @@ volumes:
 version: '3.8'
 
 services:
-  foiacquire:
-    image: monokrome/foiacquire:latest
+  foia:
+    image: monokrome/foia:latest
     volumes:
-      - ./data:/opt/foiacquire
+      - ./data:/opt/foia
     environment:
       - USER_ID=1000
       - GROUP_ID=1000
@@ -147,13 +147,13 @@ version: '3.8'
 
 services:
   scraper:
-    image: monokrome/foiacquire:latest
+    image: monokrome/foia:latest
     volumes:
-      - ./data:/opt/foiacquire
+      - ./data:/opt/foia
     environment:
       - USER_ID=1000
       - GROUP_ID=1000
-      - DATABASE_URL=postgres://foiacquire:secret@postgres:5432/foiacquire
+      - DATABASE_URL=postgres://foia:secret@postgres:5432/foia
       - BROWSER_URL=ws://chromium:9222
       - RUST_LOG=info
     depends_on:
@@ -164,11 +164,11 @@ services:
     command: scrape --all --daemon --interval 3600
 
   web:
-    image: monokrome/foiacquire:latest
+    image: monokrome/foia:latest
     volumes:
-      - ./data:/opt/foiacquire:ro
+      - ./data:/opt/foia:ro
     environment:
-      - DATABASE_URL=postgres://foiacquire:secret@postgres:5432/foiacquire
+      - DATABASE_URL=postgres://foia:secret@postgres:5432/foia
     ports:
       - "3030:3030"
     depends_on:
@@ -177,13 +177,13 @@ services:
     command: serve 0.0.0.0:3030
 
   analyzer:
-    image: monokrome/foiacquire:tesseract
+    image: monokrome/foia:tesseract
     volumes:
-      - ./data:/opt/foiacquire
+      - ./data:/opt/foia
     environment:
       - USER_ID=1000
       - GROUP_ID=1000
-      - DATABASE_URL=postgres://foiacquire:secret@postgres:5432/foiacquire
+      - DATABASE_URL=postgres://foia:secret@postgres:5432/foia
       - RUST_LOG=info
     depends_on:
       postgres:
@@ -199,11 +199,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
-      - POSTGRES_USER=foiacquire
+      - POSTGRES_USER=foia
       - POSTGRES_PASSWORD=secret
-      - POSTGRES_DB=foiacquire
+      - POSTGRES_DB=foia
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U foiacquire"]
+      test: ["CMD-SHELL", "pg_isready -U foia"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -266,24 +266,24 @@ vnc://localhost:5900
 ### Container Manager Setup
 
 1. **Download the image:**
-   - Registry → Search for `monokrome/foiacquire`
+   - Registry → Search for `monokrome/foia`
    - Download the `latest` tag
 
 2. **Create the container:**
-   - Image → Select foiacquire → Launch
+   - Image → Select foia → Launch
    - **General Settings:**
-     - Container Name: `foiacquire-scraper`
+     - Container Name: `foia-scraper`
      - Enable auto-restart: Yes
 
 3. **Volume Settings:**
-   - Add folder: `/volume1/docker/foiacquire` → `/opt/foiacquire`
+   - Add folder: `/volume1/docker/foia` → `/opt/foia`
    - Ensure the folder has correct permissions
 
 4. **Environment Variables:**
    ```
    USER_ID=1024          # Match your Synology user
    GROUP_ID=100          # Usually 'users' group
-   DATA_DIR=/opt/foiacquire
+   DATA_DIR=/opt/foia
    RUST_LOG=info
    ```
 
@@ -297,17 +297,17 @@ vnc://localhost:5900
 If using the Synology PostgreSQL package or a container:
 
 ```
-DATABASE_URL=postgres://foiacquire:password@localhost:5432/foiacquire
+DATABASE_URL=postgres://foia:password@localhost:5432/foia
 ```
 
 ### Viewing Logs
 
 In Container Manager:
-- Container → foiacquire-scraper → Log
+- Container → foia-scraper → Log
 
 Or via SSH:
 ```bash
-docker logs foiacquire-scraper -f
+docker logs foia-scraper -f
 ```
 
 ### Troubleshooting Permissions
@@ -316,7 +316,7 @@ If you see permission errors:
 
 1. Check the host directory ownership:
    ```bash
-   ls -la /volume1/docker/foiacquire
+   ls -la /volume1/docker/foia
    ```
 
 2. Ensure `USER_ID` matches the directory owner:
@@ -346,26 +346,26 @@ The Dockerfile supports build-time arguments for customization:
 
 ```bash
 # Default build (browser + postgres)
-docker build -t foiacquire:local .
+docker build -t foia:local .
 
 # With Tesseract OCR
-docker build --build-arg WITH_TESSERACT=true -t foiacquire:tesseract .
+docker build --build-arg WITH_TESSERACT=true -t foia:tesseract .
 
 # With Tor support for privacy routing
-docker build --build-arg WITH_TOR=true -t foiacquire:tor .
+docker build --build-arg WITH_TOR=true -t foia:tor .
 
 # Minimal build (no browser, no postgres)
-docker build --build-arg FEATURES="" -t foiacquire:minimal .
+docker build --build-arg FEATURES="" -t foia:minimal .
 
 # With Redis rate limiting
-docker build --build-arg FEATURES="browser,postgres,redis-backend" -t foiacquire:redis .
+docker build --build-arg FEATURES="browser,postgres,redis-backend" -t foia:redis .
 
 # Full build with everything
 docker build \
   --build-arg FEATURES="browser,postgres,redis-backend" \
   --build-arg WITH_TESSERACT=true \
   --build-arg WITH_TOR=true \
-  -t foiacquire:full .
+  -t foia:full .
 ```
 
 ### Multi-Platform Builds
@@ -376,14 +376,14 @@ For cross-platform images (amd64 + arm64):
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   --build-arg WITH_TESSERACT=true \
-  -t myregistry/foiacquire:custom \
+  -t myregistry/foia:custom \
   --push .
 ```
 
 ### With Additional OCR Languages
 
 ```dockerfile
-FROM monokrome/foiacquire:tesseract
+FROM monokrome/foia:tesseract
 
 # Add more Tesseract languages
 RUN apk add --no-cache \
@@ -398,10 +398,10 @@ Add health checks to your compose file:
 
 ```yaml
 services:
-  foiacquire:
+  foia:
     # ...
     healthcheck:
-      test: ["CMD", "foiacquire", "status"]
+      test: ["CMD", "foia", "status"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -412,7 +412,7 @@ services:
 
 ```yaml
 services:
-  foiacquire:
+  foia:
     # ...
     deploy:
       resources:
@@ -430,15 +430,15 @@ For multiple containers that need to communicate:
 
 ```yaml
 services:
-  foiacquire:
+  foia:
     networks:
-      - foiacquire-net
+      - foia-net
 
   postgres:
     networks:
-      - foiacquire-net
+      - foia-net
 
 networks:
-  foiacquire-net:
+  foia-net:
     driver: bridge
 ```

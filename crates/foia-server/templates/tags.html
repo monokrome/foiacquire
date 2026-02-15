@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block content %}
+<nav class="breadcrumb">
+    <a href="/tags">Tags</a>
+</nav>
+{% if has_tags %}
+<p>Click a tag to view all documents with that tag:</p>
+<div class="tag-cloud">
+    {% for tag in tags %}
+    <a href="/tags/{{ tag.encoded }}" class="tag-chip">{{ tag.name }} <span class="tag-count">{{ tag.count }}</span></a>
+    {% endfor %}
+</div>
+{% else %}
+<p>No tags found. Run 'foia summarize' to generate tags for your documents.</p>
+{% endif %}
+{% endblock %}

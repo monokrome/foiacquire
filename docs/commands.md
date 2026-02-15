@@ -1,6 +1,6 @@
 # Commands Reference
 
-Complete reference for all foiacquire commands.
+Complete reference for all foia commands.
 
 ## Global Options
 
@@ -19,7 +19,7 @@ These options apply to all commands:
 
 ### Privacy Modes
 
-By default, foiacquire routes traffic through Tor with obfuscation when the embedded-tor feature is enabled. Override with:
+By default, foia routes traffic through Tor with obfuscation when the embedded-tor feature is enabled. Override with:
 
 | Flag | Description |
 |------|-------------|
@@ -30,8 +30,8 @@ Or via environment variables:
 
 | Variable | Description |
 |----------|-------------|
-| `FOIACQUIRE_DIRECT=1` | Same as `--direct` |
-| `FOIACQUIRE_NO_OBFUSCATION=1` | Same as `--no-obfuscation` |
+| `FOIA_DIRECT=1` | Same as `--direct` |
+| `FOIA_NO_OBFUSCATION=1` | Same as `--no-obfuscation` |
 | `SOCKS_PROXY` | Use external SOCKS5 proxy instead of embedded Tor |
 
 ## Initialization
@@ -41,15 +41,15 @@ Or via environment variables:
 Initialize database and create directory structure.
 
 ```bash
-foiacquire init [OPTIONS]
+foia init [OPTIONS]
 ```
 
 Creates the database schema and `documents/` directory in the target location.
 
 **Examples:**
 ```bash
-foiacquire init --target ./foia-data
-foiacquire init  # Uses config file or default location
+foia init --target ./foia-data
+foia init  # Uses config file or default location
 ```
 
 ## Source Management
@@ -59,7 +59,7 @@ foiacquire init  # Uses config file or default location
 List all configured scraper sources.
 
 ```bash
-foiacquire source list
+foia source list
 ```
 
 Shows source IDs, base URLs, and document counts.
@@ -69,12 +69,12 @@ Shows source IDs, base URLs, and document counts.
 Rename a source and update all associated documents.
 
 ```bash
-foiacquire source rename <OLD_NAME> <NEW_NAME>
+foia source rename <OLD_NAME> <NEW_NAME>
 ```
 
 **Example:**
 ```bash
-foiacquire source rename fbi fbi_vault
+foia source rename fbi fbi_vault
 ```
 
 ## Discovery & Crawling
@@ -84,7 +84,7 @@ foiacquire source rename fbi fbi_vault
 Discover document URLs without downloading.
 
 ```bash
-foiacquire crawl <SOURCE_ID> [OPTIONS]
+foia crawl <SOURCE_ID> [OPTIONS]
 ```
 
 | Option | Description |
@@ -93,7 +93,7 @@ foiacquire crawl <SOURCE_ID> [OPTIONS]
 
 **Example:**
 ```bash
-foiacquire crawl fbi_vault --limit 1000
+foia crawl fbi_vault --limit 1000
 ```
 
 ### discover
@@ -101,7 +101,7 @@ foiacquire crawl fbi_vault --limit 1000
 Analyze URL patterns to generate new candidates.
 
 ```bash
-foiacquire discover <SOURCE_ID> [OPTIONS]
+foia discover <SOURCE_ID> [OPTIONS]
 ```
 
 | Option | Description |
@@ -113,7 +113,7 @@ Analyzes existing URLs to find patterns (e.g., sequential IDs, date-based paths)
 
 **Example:**
 ```bash
-foiacquire discover fbi_vault --dry-run
+foia discover fbi_vault --dry-run
 ```
 
 ### state status
@@ -121,7 +121,7 @@ foiacquire discover fbi_vault --dry-run
 Show crawl state for a source.
 
 ```bash
-foiacquire state status [SOURCE_ID]
+foia state status [SOURCE_ID]
 ```
 
 ### state clear
@@ -129,7 +129,7 @@ foiacquire state status [SOURCE_ID]
 Clear crawl state to restart from beginning.
 
 ```bash
-foiacquire state clear <SOURCE_ID>
+foia state clear <SOURCE_ID>
 ```
 
 ## Downloading
@@ -139,7 +139,7 @@ foiacquire state clear <SOURCE_ID>
 Download documents from the crawl queue.
 
 ```bash
-foiacquire download [SOURCE_ID] [OPTIONS]
+foia download [SOURCE_ID] [OPTIONS]
 ```
 
 | Option | Description |
@@ -150,7 +150,7 @@ foiacquire download [SOURCE_ID] [OPTIONS]
 
 **Example:**
 ```bash
-foiacquire download fbi_vault --workers 8 --limit 500
+foia download fbi_vault --workers 8 --limit 500
 ```
 
 ### scrape
@@ -158,7 +158,7 @@ foiacquire download fbi_vault --workers 8 --limit 500
 Combined crawl and download in one command.
 
 ```bash
-foiacquire scrape [SOURCE_IDS...] [OPTIONS]
+foia scrape [SOURCE_IDS...] [OPTIONS]
 ```
 
 | Option | Description |
@@ -178,19 +178,19 @@ foiacquire scrape [SOURCE_IDS...] [OPTIONS]
 **Examples:**
 ```bash
 # Single source
-foiacquire scrape fbi_vault --limit 100
+foia scrape fbi_vault --limit 100
 
 # Multiple sources
-foiacquire scrape fbi_vault cia_foia --workers 4
+foia scrape fbi_vault cia_foia --workers 4
 
 # All sources in daemon mode
-foiacquire scrape --all --daemon --interval 3600
+foia scrape --all --daemon --interval 3600
 
 # Daemon with hot-reload on config change
-foiacquire scrape --all --daemon --reload
+foia scrape --all --daemon --reload
 
 # Daemon with explicit reload mode
-foiacquire scrape --all --daemon --reload=next-run
+foia scrape --all --daemon --reload=next-run
 ```
 
 ### refresh
@@ -198,7 +198,7 @@ foiacquire scrape --all --daemon --reload=next-run
 Re-fetch metadata for existing documents.
 
 ```bash
-foiacquire refresh [SOURCE_ID] [OPTIONS]
+foia refresh [SOURCE_ID] [OPTIONS]
 ```
 
 | Option | Description |
@@ -216,7 +216,7 @@ Import documents from various sources.
 Import documents from WARC archive files.
 
 ```bash
-foiacquire import warc <FILES...> [OPTIONS]
+foia import warc <FILES...> [OPTIONS]
 ```
 
 | Option | Description |
@@ -231,7 +231,7 @@ foiacquire import warc <FILES...> [OPTIONS]
 
 **Example:**
 ```bash
-foiacquire import warc archive.warc.gz --source archive_org --filter "\.pdf$"
+foia import warc archive.warc.gz --source archive_org --filter "\.pdf$"
 ```
 
 #### import url
@@ -239,7 +239,7 @@ foiacquire import warc archive.warc.gz --source archive_org --filter "\.pdf$"
 Import a single document from a URL.
 
 ```bash
-foiacquire import url <URL> [OPTIONS]
+foia import url <URL> [OPTIONS]
 ```
 
 | Option | Description |
@@ -249,7 +249,7 @@ foiacquire import url <URL> [OPTIONS]
 
 **Example:**
 ```bash
-foiacquire import url https://example.gov/document.pdf --source manual --title "FOIA Response"
+foia import url https://example.gov/document.pdf --source manual --title "FOIA Response"
 ```
 
 #### import stdin
@@ -257,7 +257,7 @@ foiacquire import url https://example.gov/document.pdf --source manual --title "
 Import document content from stdin.
 
 ```bash
-foiacquire import stdin [OPTIONS]
+foia import stdin [OPTIONS]
 ```
 
 | Option | Description |
@@ -270,10 +270,10 @@ foiacquire import stdin [OPTIONS]
 **Examples:**
 ```bash
 # Import a PDF from stdin
-cat document.pdf | foiacquire import stdin --title "My Document" --mimetype application/pdf
+cat document.pdf | foia import stdin --title "My Document" --mimetype application/pdf
 
 # Pipe from curl
-curl -s https://example.gov/doc.pdf | foiacquire import stdin --title "Downloaded Doc" --url https://example.gov/doc.pdf
+curl -s https://example.gov/doc.pdf | foia import stdin --title "Downloaded Doc" --url https://example.gov/doc.pdf
 ```
 
 ## Document Processing
@@ -283,7 +283,7 @@ curl -s https://example.gov/doc.pdf | foiacquire import stdin --title "Downloade
 Extract text and run OCR on documents.
 
 ```bash
-foiacquire analyze [SOURCE_ID] [OPTIONS]
+foia analyze [SOURCE_ID] [OPTIONS]
 ```
 
 | Option | Description |
@@ -296,8 +296,8 @@ foiacquire analyze [SOURCE_ID] [OPTIONS]
 
 **Examples:**
 ```bash
-foiacquire analyze --workers 4
-foiacquire analyze fbi_vault --limit 100
+foia analyze --workers 4
+foia analyze fbi_vault --limit 100
 ```
 
 ### analyze-check
@@ -305,7 +305,7 @@ foiacquire analyze fbi_vault --limit 100
 Verify OCR tools are installed and working.
 
 ```bash
-foiacquire analyze-check
+foia analyze-check
 ```
 
 Checks for: tesseract, pdftotext, and optional backends (ocrs, paddle).
@@ -315,7 +315,7 @@ Checks for: tesseract, pdftotext, and optional backends (ocrs, paddle).
 Compare OCR backends on a test file.
 
 ```bash
-foiacquire analyze-compare <FILE> [OPTIONS]
+foia analyze-compare <FILE> [OPTIONS]
 ```
 
 | Option | Description |
@@ -326,7 +326,7 @@ foiacquire analyze-compare <FILE> [OPTIONS]
 
 **Example:**
 ```bash
-foiacquire analyze-compare scan.pdf --backends tesseract,ocrs
+foia analyze-compare scan.pdf --backends tesseract,ocrs
 ```
 
 ### archive
@@ -334,7 +334,7 @@ foiacquire analyze-compare scan.pdf --backends tesseract,ocrs
 Extract contents from ZIP archives and email attachments.
 
 ```bash
-foiacquire archive [SOURCE_ID] [OPTIONS]
+foia archive [SOURCE_ID] [OPTIONS]
 ```
 
 | Option | Description |
@@ -347,7 +347,7 @@ foiacquire archive [SOURCE_ID] [OPTIONS]
 Generate summaries and tags using LLM.
 
 ```bash
-foiacquire annotate [SOURCE_ID] [OPTIONS]
+foia annotate [SOURCE_ID] [OPTIONS]
 ```
 
 | Option | Description |
@@ -361,10 +361,10 @@ foiacquire annotate [SOURCE_ID] [OPTIONS]
 **Examples:**
 ```bash
 # Using Ollama (default)
-foiacquire annotate --limit 50 --model llama3.2
+foia annotate --limit 50 --model llama3.2
 
 # Using Groq (via environment)
-GROQ_API_KEY=gsk_... LLM_MODEL=llama-3.1-70b-versatile foiacquire annotate
+GROQ_API_KEY=gsk_... LLM_MODEL=llama-3.1-70b-versatile foia annotate
 ```
 
 ### annotate reset
@@ -372,7 +372,7 @@ GROQ_API_KEY=gsk_... LLM_MODEL=llama-3.1-70b-versatile foiacquire annotate
 Clear annotations to allow re-annotation.
 
 ```bash
-foiacquire annotate reset [SOURCE_ID] [OPTIONS]
+foia annotate reset [SOURCE_ID] [OPTIONS]
 ```
 
 | Option | Description |
@@ -382,7 +382,7 @@ foiacquire annotate reset [SOURCE_ID] [OPTIONS]
 **Example:**
 ```bash
 # Reset all annotations for a source
-foiacquire annotate reset fbi_vault
+foia annotate reset fbi_vault
 ```
 
 ### detect-dates
@@ -390,7 +390,7 @@ foiacquire annotate reset fbi_vault
 Detect and estimate publication dates.
 
 ```bash
-foiacquire detect-dates [SOURCE_ID] [OPTIONS]
+foia detect-dates [SOURCE_ID] [OPTIONS]
 ```
 
 | Option | Description |
@@ -403,7 +403,7 @@ foiacquire detect-dates [SOURCE_ID] [OPTIONS]
 Extract named entities (people, organizations, locations, file numbers) from document text.
 
 ```bash
-foiacquire extract-entities [SOURCE_ID] [OPTIONS]
+foia extract-entities [SOURCE_ID] [OPTIONS]
 ```
 
 | Option | Description |
@@ -414,8 +414,8 @@ Extracts entities using regex-based NER and stores them in the `document_entitie
 
 **Examples:**
 ```bash
-foiacquire extract-entities
-foiacquire extract-entities fbi_vault -l 100
+foia extract-entities
+foia extract-entities fbi_vault -l 100
 ```
 
 ### backfill-entities
@@ -423,7 +423,7 @@ foiacquire extract-entities fbi_vault -l 100
 Backfill the `document_entities` table from existing NER annotation metadata.
 
 ```bash
-foiacquire backfill-entities [SOURCE_ID] [OPTIONS]
+foia backfill-entities [SOURCE_ID] [OPTIONS]
 ```
 
 | Option | Description |
@@ -437,7 +437,7 @@ For documents that already have NER annotations in metadata JSON but no rows in 
 Search documents by extracted entities.
 
 ```bash
-foiacquire search-entities <QUERY> [OPTIONS]
+foia search-entities <QUERY> [OPTIONS]
 ```
 
 | Option | Description |
@@ -449,9 +449,9 @@ foiacquire search-entities <QUERY> [OPTIONS]
 
 **Examples:**
 ```bash
-foiacquire search-entities CIA
-foiacquire search-entities "Fort Meade" --type location
-foiacquire search-entities Moscow --near "55.75,37.61,100"
+foia search-entities CIA
+foia search-entities "Fort Meade" --type location
+foia search-entities Moscow --near "55.75,37.61,100"
 ```
 
 ### llm-models
@@ -459,7 +459,7 @@ foiacquire search-entities Moscow --near "55.75,37.61,100"
 List available LLM models from Ollama.
 
 ```bash
-foiacquire llm-models
+foia llm-models
 ```
 
 ## Browsing & Search
@@ -469,7 +469,7 @@ foiacquire llm-models
 List documents with filtering.
 
 ```bash
-foiacquire ls [OPTIONS]
+foia ls [OPTIONS]
 ```
 
 | Option | Description |
@@ -482,8 +482,8 @@ foiacquire ls [OPTIONS]
 
 **Examples:**
 ```bash
-foiacquire ls --source fbi_vault --limit 20
-foiacquire ls --tag classified --format json
+foia ls --source fbi_vault --limit 20
+foia ls --tag classified --format json
 ```
 
 ### info
@@ -491,7 +491,7 @@ foiacquire ls --tag classified --format json
 Show document metadata.
 
 ```bash
-foiacquire info <DOC_ID>
+foia info <DOC_ID>
 ```
 
 Displays: title, URL, source, dates, hashes, status, tags, and extracted text preview.
@@ -501,7 +501,7 @@ Displays: title, URL, source, dates, hashes, status, tags, and extracted text pr
 Output document content.
 
 ```bash
-foiacquire read <DOC_ID> [OPTIONS]
+foia read <DOC_ID> [OPTIONS]
 ```
 
 | Option | Description |
@@ -510,8 +510,8 @@ foiacquire read <DOC_ID> [OPTIONS]
 
 **Example:**
 ```bash
-foiacquire read abc123 --text | less
-foiacquire read abc123 > document.pdf
+foia read abc123 --text | less
+foia read abc123 > document.pdf
 ```
 
 ### search
@@ -519,7 +519,7 @@ foiacquire read abc123 > document.pdf
 Full-text search across documents.
 
 ```bash
-foiacquire search <QUERY> [OPTIONS]
+foia search <QUERY> [OPTIONS]
 ```
 
 | Option | Description |
@@ -529,7 +529,7 @@ foiacquire search <QUERY> [OPTIONS]
 
 **Example:**
 ```bash
-foiacquire search "project blue book" --limit 50
+foia search "project blue book" --limit 50
 ```
 
 ### serve
@@ -537,16 +537,16 @@ foiacquire search "project blue book" --limit 50
 Start the web interface.
 
 ```bash
-foiacquire serve [BIND_ADDRESS]
+foia serve [BIND_ADDRESS]
 ```
 
 Default bind address: `127.0.0.1:3030`
 
 **Examples:**
 ```bash
-foiacquire serve                    # localhost only
-foiacquire serve 0.0.0.0:3030      # all interfaces
-foiacquire serve 192.168.1.10:8080 # specific IP
+foia serve                    # localhost only
+foia serve 0.0.0.0:3030      # all interfaces
+foia serve 192.168.1.10:8080 # specific IP
 ```
 
 ## Configuration Management
@@ -556,7 +556,7 @@ foiacquire serve 192.168.1.10:8080 # specific IP
 Recover a skeleton config from an existing database.
 
 ```bash
-foiacquire config recover
+foia config recover
 ```
 
 Generates a basic config based on sources found in the database.
@@ -566,7 +566,7 @@ Generates a basic config based on sources found in the database.
 Restore the most recent config from database history.
 
 ```bash
-foiacquire config restore
+foia config restore
 ```
 
 ### config history
@@ -574,7 +574,7 @@ foiacquire config restore
 List configuration history entries.
 
 ```bash
-foiacquire config history
+foia config history
 ```
 
 ## Database Management
@@ -584,7 +584,7 @@ foiacquire config history
 Copy data between databases (SQLite ↔ PostgreSQL).
 
 ```bash
-foiacquire db copy <FROM> <TO> [OPTIONS]
+foia db copy <FROM> <TO> [OPTIONS]
 ```
 
 | Option | Description |
@@ -600,10 +600,10 @@ foiacquire db copy <FROM> <TO> [OPTIONS]
 **Examples:**
 ```bash
 # SQLite to PostgreSQL
-foiacquire db copy ./foiacquire.db postgres://user:pass@host/db --copy --progress
+foia db copy ./foia.db postgres://user:pass@host/db --copy --progress
 
 # PostgreSQL to SQLite backup
-foiacquire db copy postgres://... ./backup.db
+foia db copy postgres://... ./backup.db
 ```
 
 ### db load-regions
@@ -611,7 +611,7 @@ foiacquire db copy postgres://... ./backup.db
 Load region boundary data for spatial queries. Requires PostgreSQL with PostGIS and the `gis` feature.
 
 ```bash
-foiacquire db load-regions [OPTIONS]
+foia db load-regions [OPTIONS]
 ```
 
 | Option | Description |
@@ -622,8 +622,8 @@ Loads Natural Earth country and state/province boundaries into the `regions` tab
 
 **Examples:**
 ```bash
-foiacquire db load-regions
-foiacquire db load-regions --file custom_boundaries.geojson
+foia db load-regions
+foia db load-regions --file custom_boundaries.geojson
 ```
 
 ### db remap-categories
@@ -631,7 +631,7 @@ foiacquire db load-regions --file custom_boundaries.geojson
 Update document categories based on MIME types.
 
 ```bash
-foiacquire db remap-categories [OPTIONS]
+foia db remap-categories [OPTIONS]
 ```
 
 | Option | Description |
@@ -646,7 +646,7 @@ foiacquire db remap-categories [OPTIONS]
 Test browser-based fetching.
 
 ```bash
-foiacquire browser-test <URL> [OPTIONS]
+foia browser-test <URL> [OPTIONS]
 ```
 
 | Option | Description |
@@ -663,7 +663,7 @@ foiacquire browser-test <URL> [OPTIONS]
 
 **Example:**
 ```bash
-foiacquire browser-test https://example.gov/protected --engine stealth --headed
+foia browser-test https://example.gov/protected --engine stealth --headed
 ```
 
 ## Status
@@ -673,7 +673,7 @@ foiacquire browser-test https://example.gov/protected --engine stealth --headed
 Show system status.
 
 ```bash
-foiacquire status
+foia status
 ```
 
 Displays database stats, queue status, and configuration info.

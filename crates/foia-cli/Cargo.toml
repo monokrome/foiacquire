@@ -1,0 +1,57 @@
+[package]
+name = "foia-cli"
+description = "CLI interface for foia FOIA document acquisition system"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+autobins = false
+
+[[bin]]
+name = "foia"
+path = "src/main.rs"
+
+[dependencies]
+foia = { path = "../foia", default-features = false }
+foia-analysis = { path = "../foia-analysis", default-features = false }
+foia-annotate = { path = "../foia-annotate", default-features = false }
+foia-import = { path = "../foia-import" }
+foia-scrape = { path = "../foia-scrape", default-features = false }
+foia-server = { path = "../foia-server", default-features = false }
+
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+console = { workspace = true }
+crossterm = { workspace = true }
+diesel = { workspace = true }
+diesel-async = { workspace = true }
+dotenvy = { workspace = true }
+hex = { workspace = true }
+indicatif = { workspace = true }
+infer = { workspace = true }
+prefer = { workspace = true }
+ratatui = { workspace = true }
+regex = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+
+[features]
+default = ["browser"]
+gis = ["foia/gis", "foia-annotate/gis", "foia-server/gis"]
+browser = ["foia/browser", "foia-scrape/browser"]
+postgres = ["foia/postgres"]
+redis-backend = ["foia/redis-backend", "foia-scrape/redis-backend"]
+amqp-broker = ["foia/amqp-broker"]
+ocr-ocrs = ["foia-analysis/ocr-ocrs"]
+ocr-paddle = ["foia-analysis/ocr-paddle"]
+ocr-all = ["ocr-ocrs", "ocr-paddle"]
+embedded-tor = ["foia/embedded-tor", "foia-analysis/embedded-tor"]
+unsafe-dev = ["foia/unsafe-dev"]

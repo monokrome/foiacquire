@@ -1,13 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/foiacquire",
-    "crates/foiacquire-analysis",
-    "crates/foiacquire-annotate",
-    "crates/foiacquire-cli",
-    "crates/foiacquire-import",
-    "crates/foiacquire-scrape",
-    "crates/foiacquire-server",
+    "crates/foia",
+    "crates/foia-analysis",
+    "crates/foia-annotate",
+    "crates/foia-cli",
+    "crates/foia-import",
+    "crates/foia-scrape",
+    "crates/foia-server",
 ]
 
 [workspace.package]
@@ -15,7 +15,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["monokrome"]
 license = "MIT"
-repository = "https://github.com/monokrome/foiacquire"
+repository = "https://github.com/foiacquire/foia"
 
 [workspace.dependencies]
 # Async runtime

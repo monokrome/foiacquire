@@ -7,7 +7,7 @@ Named entity recognition (NER) extracts people, organizations, locations, and fi
 ### 1. Run migrations
 
 ```bash
-foiacquire db migrate
+foia db migrate
 ```
 
 This creates the `document_entities` table on both SQLite and PostgreSQL.
@@ -15,19 +15,19 @@ This creates the `document_entities` table on both SQLite and PostgreSQL.
 ### 2. Extract entities
 
 ```bash
-foiacquire extract-entities [source_id] [-l limit]
+foia extract-entities [source_id] [-l limit]
 ```
 
 This scans documents that have extracted text, runs regex-based NER, and populates the entity table. With the `gis` feature enabled, location entities are automatically geocoded using an embedded database of ~25,000 cities.
 
-Entities are also populated automatically when running `foiacquire annotate` via the NER annotator's post-processing hook.
+Entities are also populated automatically when running `foia annotate` via the NER annotator's post-processing hook.
 
 ### 3. (Optional) Load region boundaries
 
 For spatial queries like "documents mentioning locations in France":
 
 ```bash
-foiacquire db load-regions
+foia db load-regions
 ```
 
 This requires PostgreSQL with PostGIS. It loads Natural Earth country and state/province boundaries into a `regions` table. Safe to run repeatedly.
@@ -46,9 +46,9 @@ This requires PostgreSQL with PostGIS. It loads Natural Earth country and state/
 ### Search by entity text
 
 ```bash
-foiacquire search-entities CIA
-foiacquire search-entities "Fort Meade" --type location
-foiacquire search-entities Mueller --type person --source fbi_vault
+foia search-entities CIA
+foia search-entities "Fort Meade" --type location
+foia search-entities Mueller --type person --source fbi_vault
 ```
 
 ### Spatial search (PostgreSQL + PostGIS)
@@ -56,7 +56,7 @@ foiacquire search-entities Mueller --type person --source fbi_vault
 Search by raw coordinates with a radius in kilometers:
 
 ```bash
-foiacquire search-entities Moscow --near "55.75,37.61,100"
+foia search-entities Moscow --near "55.75,37.61,100"
 ```
 
 ### Backfill from existing annotations
@@ -64,7 +64,7 @@ foiacquire search-entities Moscow --near "55.75,37.61,100"
 If you've already run `extract-entities` before the entity table existed:
 
 ```bash
-foiacquire backfill-entities [source_id] [-l limit]
+foia backfill-entities [source_id] [-l limit]
 ```
 
 This reads NER results from document metadata JSON and populates entity rows.

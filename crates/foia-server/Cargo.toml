@@ -1,0 +1,30 @@
+[package]
+name = "foia-server"
+description = "Web server and API handlers for foia"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+foia = { path = "../foia", default-features = false }
+foia-analysis = { path = "../foia-analysis", default-features = false }
+anyhow = { workspace = true }
+askama = { workspace = true }
+axum = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+mime_guess = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+urlencoding = { workspace = true }
+utoipa = { workspace = true }
+uuid = { workspace = true }
+
+[features]
+default = []
+gis = ["foia/gis"]

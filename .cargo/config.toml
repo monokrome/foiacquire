@@ -1,4 +1,4 @@
-# Cargo configuration for foiacquire
+# Cargo configuration for foia
 # https://doc.rust-lang.org/cargo/reference/config.html
 
 [alias]

@@ -194,7 +194,7 @@ jobs:
 
       - name: Verify binary name matches Cargo.toml
         run: |
-          BINARY_NAME=$(grep -A1 '^\[\[bin\]\]' crates/foiacquire-cli/Cargo.toml | grep 'name' | cut -d'"' -f2)
+          BINARY_NAME=$(grep -A1 '^\[\[bin\]\]' crates/foia-cli/Cargo.toml | grep 'name' | cut -d'"' -f2)
           if [ ! -f "target/release/$BINARY_NAME" ]; then
             echo "ERROR: Binary 'target/release/$BINARY_NAME' not found!"
             echo "Check that [[bin]] name in Cargo.toml matches CI workflow paths"
@@ -206,7 +206,7 @@ jobs:
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: foiacquire-linux-x86_64
+          name: foia-linux-x86_64
           path: target/release/foia
           if-no-files-found: error
 

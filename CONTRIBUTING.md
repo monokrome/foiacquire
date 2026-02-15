@@ -1,11 +1,11 @@
-# Contributing to FOIAcquire
+# Contributing to foia
 
 ## Development Setup
 
 ```bash
 # Clone the repository
-git clone https://github.com/monokrome/foiacquire
-cd foiacquire
+git clone https://github.com/foiacquire/foia
+cd foia
 
 # Build
 cargo build
@@ -68,7 +68,7 @@ Only `src/scrapers/http_client/mod.rs` is allowed to use reqwest directly.
 
 ## Privacy Enforcement & Automation
 
-FOIAcquire has multiple layers of automated privacy enforcement to prevent accidental leaks:
+foia has multiple layers of automated privacy enforcement to prevent accidental leaks:
 
 ### 1. Clippy Disallowed Methods
 
@@ -190,7 +190,7 @@ The CI pipeline enforces this - commits that modify existing migrations will be 
 
 ### Version Numbering
 
-FOIAcquire follows [Semantic Versioning](https://semver.org/):
+foia follows [Semantic Versioning](https://semver.org/):
 
 - **MAJOR** (x.0.0): Breaking changes to core functionality, database schema migrations required
 - **MINOR** (0.x.0): New features, CLI changes, backwards-incompatible config changes

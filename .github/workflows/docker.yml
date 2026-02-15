@@ -133,7 +133,7 @@ jobs:
           file: ./docker/Dockerfile.builder
           push: false
           load: true
-          tags: foiacquire-builder:${{ matrix.name }}
+          tags: foia-builder:${{ matrix.name }}
           platforms: linux/amd64
           build-args: |
             FEATURES=${{ matrix.features }}
@@ -142,7 +142,7 @@ jobs:
 
       - name: Extract binary
         run: |
-          docker create --name extract foiacquire-builder:${{ matrix.name }}
+          docker create --name extract foia-builder:${{ matrix.name }}
           docker cp extract:/build/target/release/foia ./foia-${{ matrix.name }}
           docker rm extract
 
@@ -153,8 +153,8 @@ jobs:
           path: ./foia-${{ matrix.name }}
           retention-days: 1
 
-  foiacquire:
-    name: Build FOIAcquire Image (${{ matrix.tag }})
+  foia:
+    name: Build foia Image (${{ matrix.tag }})
     needs: build-binary
     runs-on: ubuntu-latest
     permissions:
@@ -206,7 +206,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/foiacquire/foiacquire
+          images: ghcr.io/foiacquire/foia
           tags: |
             type=raw,value=${{ matrix.tag }},enable={{is_default_branch}}
             type=raw,value=${{ matrix.tag }}-{{tag}},enable=${{ startsWith(github.ref, 'refs/tags/') }}

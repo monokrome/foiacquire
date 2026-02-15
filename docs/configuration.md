@@ -1,23 +1,23 @@
 # Configuration Reference
 
-foiacquire uses JSON configuration files for defining scrapers and application settings.
+foia uses JSON configuration files for defining scrapers and application settings.
 
 ## Configuration File Location
 
 The configuration file is discovered in this order:
 
 1. `--config` flag (explicit path)
-2. `foiacquire.json` or `foiacquire.toml` next to the database
+2. `foia.json` or `foia.toml` next to the database
 3. Configuration stored in database history
-4. Standard config locations (`~/.config/foiacquire/`, etc.)
+4. Standard config locations (`~/.config/foia/`, etc.)
 
 ## Global Settings
 
 ```json
 {
   "target": "./foia_documents/",
-  "database": "foiacquire.db",
-  "user_agent": "FOIAcquire/0.6 (academic research)",
+  "database": "foia.db",
+  "user_agent": "foia/0.6 (academic research)",
   "request_timeout": 30,
   "request_delay_ms": 500,
   "default_refresh_ttl_days": 14,
@@ -31,8 +31,8 @@ The configuration file is discovered in this order:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `target` | string | `~/Documents/foia/` | Base directory for data and documents |
-| `database` | string | `foiacquire.db` | Database filename or URL (e.g. `sqlite:///path/to/db`, `postgres://...`) |
-| `user_agent` | string | `FOIAcquire/0.6...` | HTTP User-Agent header |
+| `database` | string | `foia.db` | Database filename or URL (e.g. `sqlite:///path/to/db`, `postgres://...`) |
+| `user_agent` | string | `foia/0.6...` | HTTP User-Agent header |
 | `request_timeout` | integer | `30` | HTTP request timeout in seconds |
 | `request_delay_ms` | integer | `500` | Delay between requests in milliseconds |
 | `default_refresh_ttl_days` | integer | `14` | Days before re-checking fetched URLs |
@@ -56,17 +56,17 @@ Environment variables override configuration file settings:
 | Variable | Description |
 |----------|-------------|
 | `SOCKS_PROXY` | External SOCKS5 proxy URL (e.g., `socks5://127.0.0.1:9050`) |
-| `FOIACQUIRE_DIRECT` | Set to `1` to disable Tor (direct connections) |
-| `FOIACQUIRE_NO_OBFUSCATION` | Set to `1` to use Tor without pluggable transports |
+| `FOIA_DIRECT` | Set to `1` to disable Tor (direct connections) |
+| `FOIA_NO_OBFUSCATION` | Set to `1` to use Tor without pluggable transports |
 
 When embedded Tor is enabled (default), traffic is routed through Tor with obfuscation. Use these variables to override:
 
 ```bash
 # Use external Tor instance
-SOCKS_PROXY=socks5://localhost:9050 foiacquire scrape fbi_vault
+SOCKS_PROXY=socks5://localhost:9050 foia scrape fbi_vault
 
 # Direct connection (no Tor)
-FOIACQUIRE_DIRECT=1 foiacquire scrape fbi_vault
+FOIA_DIRECT=1 foia scrape fbi_vault
 ```
 
 ### LLM Configuration
@@ -109,7 +109,7 @@ The simplest way to get started - just set two environment variables:
 ```bash
 export GROQ_API_KEY="gsk_your_key_here"
 export LLM_MODEL="llama-3.1-70b-versatile"
-foiacquire annotate
+foia annotate
 ```
 
 Groq's free tier provides ~6000 tokens/minute, enough for ~1 document/minute continuously.
@@ -121,7 +121,7 @@ Groq's free tier provides ~6000 tokens/minute, enough for ~1 document/minute con
 ollama run dolphin-llama3:8b
 
 # Run annotation (Ollama is the default)
-foiacquire annotate
+foia annotate
 ```
 
 ### Configuration File
@@ -178,10 +178,10 @@ export GROQ_API_KEY="gsk_..."
 export OPENAI_API_KEY="sk-..."
 
 # Use Groq (auto-detected, GROQ_API_KEY checked first)
-foiacquire annotate
+foia annotate
 
 # Explicitly use OpenAI instead
-LLM_PROVIDER=openai foiacquire annotate
+LLM_PROVIDER=openai foia annotate
 ```
 
 ## Scraper Configuration
@@ -363,7 +363,7 @@ SQLite is used by default. The database file is created in the target directory:
 ```json
 {
   "target": "./foia-data/",
-  "database": "foiacquire.db"
+  "database": "foia.db"
 }
 ```
 
@@ -371,7 +371,7 @@ The `database` field also accepts full URLs:
 
 ```json
 {
-  "database": "sqlite:///absolute/path/to/foiacquire.db"
+  "database": "sqlite:///absolute/path/to/foia.db"
 }
 ```
 
@@ -381,18 +381,18 @@ Use a full URL in the config file or `DATABASE_URL` environment variable:
 
 ```json
 {
-  "database": "postgres://user:password@localhost:5432/foiacquire"
+  "database": "postgres://user:password@localhost:5432/foia"
 }
 ```
 
 ```bash
-export DATABASE_URL="postgres://user:password@localhost:5432/foiacquire"
+export DATABASE_URL="postgres://user:password@localhost:5432/foia"
 ```
 
 Or in Docker:
 
 ```bash
-docker run -e DATABASE_URL=postgres://... foiacquire scrape
+docker run -e DATABASE_URL=postgres://... foia scrape
 ```
 
 `DATABASE_URL` takes precedence over the config file `database` field when both are set.

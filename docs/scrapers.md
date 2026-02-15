@@ -24,7 +24,7 @@ Each scraper configuration defines:
 }
 ```
 
-The `source_id` is a unique identifier used in commands like `foiacquire scrape source_id`.
+The `source_id` is a unique identifier used in commands like `foia scrape source_id`.
 
 ## Discovery Strategies
 
@@ -277,7 +277,7 @@ Using saved cookies:
 
 To get cookies:
 ```bash
-foiacquire browser-test https://example.gov/login --headed --save-cookies cookies.json
+foia browser-test https://example.gov/login --headed --save-cookies cookies.json
 ```
 
 ### Remote Browser
@@ -437,27 +437,27 @@ Using a separate Chrome container:
 
 ```bash
 # Dry run to see what would be found
-foiacquire crawl my_source --limit 10
+foia crawl my_source --limit 10
 ```
 
 ### 2. Test Browser Setup
 
 ```bash
 # Test browser connectivity
-foiacquire browser-test https://example.gov/test-page --headed
+foia browser-test https://example.gov/test-page --headed
 ```
 
 ### 3. Test Download
 
 ```bash
 # Download a few documents
-foiacquire download my_source --limit 5
+foia download my_source --limit 5
 ```
 
 ### 4. Check Logs
 
 ```bash
-RUST_LOG=debug foiacquire scrape my_source --limit 1
+RUST_LOG=debug foia scrape my_source --limit 1
 ```
 
 ## Troubleshooting

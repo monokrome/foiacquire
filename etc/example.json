@@ -1,6 +1,6 @@
 {
   "target": "./foia_documents/",
-  "database": "foiacquire.db",
+  "database": "foia.db",
   "scrapers": {
     "fbi_vault": {
       "discovery": {

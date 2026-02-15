@@ -1,4 +1,4 @@
-# cargo-audit configuration for foiacquire
+# cargo-audit configuration for foia
 # https://rustsec.org/advisories/
 
 [advisories]

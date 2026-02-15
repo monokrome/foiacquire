@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide walks you through setting up foiacquire and downloading your first documents.
+This guide walks you through setting up foia and downloading your first documents.
 
 ## Prerequisites
 
@@ -32,19 +32,19 @@ Download Tesseract from [UB-Mannheim](https://github.com/UB-Mannheim/tesseract/w
 
 ### Pre-built Binaries
 
-Download the latest release for your platform from [GitHub Releases](https://github.com/monokrome/foiacquire/releases):
+Download the latest release for your platform from [GitHub Releases](https://github.com/foiacquire/foia/releases):
 
-- `foiacquire-linux-x86_64.tar.gz` - Linux (Intel/AMD)
-- `foiacquire-linux-aarch64.tar.gz` - Linux (ARM64)
-- `foiacquire-macos-x86_64.tar.gz` - macOS (Intel)
-- `foiacquire-macos-aarch64.tar.gz` - macOS (Apple Silicon)
-- `foiacquire-windows-x86_64.zip` - Windows
+- `foia-linux-x86_64.tar.gz` - Linux (Intel/AMD)
+- `foia-linux-aarch64.tar.gz` - Linux (ARM64)
+- `foia-macos-x86_64.tar.gz` - macOS (Intel)
+- `foia-macos-aarch64.tar.gz` - macOS (Apple Silicon)
+- `foia-windows-x86_64.zip` - Windows
 
 Extract and move to your PATH:
 
 ```bash
-tar -xzf foiacquire-linux-x86_64.tar.gz
-sudo mv foiacquire /usr/local/bin/
+tar -xzf foia-linux-x86_64.tar.gz
+sudo mv foia /usr/local/bin/
 ```
 
 ### Building from Source
@@ -53,11 +53,11 @@ Requires Rust 1.70+:
 
 ```bash
 # Clone and build
-git clone https://github.com/monokrome/foiacquire
-cd foiacquire
+git clone https://github.com/foiacquire/foia
+cd foia
 cargo build --release
 
-# The binary is at target/release/foiacquire
+# The binary is at target/release/foia
 ```
 
 ## Initial Setup
@@ -74,16 +74,16 @@ cd ~/foia-documents
 ### 2. Initialize the Database
 
 ```bash
-foiacquire init --target .
+foia init --target .
 ```
 
 This creates:
-- `foiacquire.db` - SQLite database for metadata
+- `foia.db` - SQLite database for metadata
 - `documents/` - Directory for downloaded files
 
 ### 3. Create a Configuration File
 
-Create `foiacquire.json` in your data directory:
+Create `foia.json` in your data directory:
 
 ```json
 {
@@ -111,17 +111,17 @@ Create `foiacquire.json` in your data directory:
 Or copy the example configuration:
 
 ```bash
-cp /path/to/foiacquire/etc/example.json foiacquire.json
+cp /path/to/foia/etc/example.json foia.json
 ```
 
 ### 4. Verify Setup
 
 ```bash
 # List configured sources
-foiacquire source list
+foia source list
 
 # Check OCR tools
-foiacquire analyze-check
+foia analyze-check
 ```
 
 ## Your First Scrape
@@ -131,7 +131,7 @@ foiacquire analyze-check
 First, crawl to find document URLs without downloading:
 
 ```bash
-foiacquire crawl fbi_vault --limit 50
+foia crawl fbi_vault --limit 50
 ```
 
 This discovers documents and adds them to the download queue.
@@ -139,13 +139,13 @@ This discovers documents and adds them to the download queue.
 ### Download Documents
 
 ```bash
-foiacquire download fbi_vault --workers 4 --limit 50
+foia download fbi_vault --workers 4 --limit 50
 ```
 
 Or combine both steps:
 
 ```bash
-foiacquire scrape fbi_vault --workers 4 --limit 50
+foia scrape fbi_vault --workers 4 --limit 50
 ```
 
 ### Monitor Progress
@@ -153,7 +153,7 @@ foiacquire scrape fbi_vault --workers 4 --limit 50
 The CLI shows real-time progress. You can also check status:
 
 ```bash
-foiacquire state status fbi_vault
+foia state status fbi_vault
 ```
 
 ## Processing Documents
@@ -162,10 +162,10 @@ foiacquire state status fbi_vault
 
 ```bash
 # Process all documents needing OCR
-foiacquire analyze --workers 4
+foia analyze --workers 4
 
 # Process specific source
-foiacquire analyze fbi_vault --workers 4 --limit 100
+foia analyze fbi_vault --workers 4 --limit 100
 ```
 
 ### Generate Summaries (Optional)
@@ -177,7 +177,7 @@ Requires [Ollama](https://ollama.ai/) running locally:
 ollama pull llama3.2
 
 # Generate summaries
-foiacquire annotate --limit 50
+foia annotate --limit 50
 ```
 
 ## Browsing Documents
@@ -187,7 +187,7 @@ foiacquire annotate --limit 50
 Start the built-in web server:
 
 ```bash
-foiacquire serve
+foia serve
 ```
 
 Open http://localhost:3030 in your browser to:
@@ -200,16 +200,16 @@ Open http://localhost:3030 in your browser to:
 
 ```bash
 # List recent documents
-foiacquire ls --limit 20
+foia ls --limit 20
 
 # Search documents
-foiacquire search "classified"
+foia search "classified"
 
 # View document details
-foiacquire info <document_id>
+foia info <document_id>
 
 # Read document content
-foiacquire read <document_id> --text
+foia read <document_id> --text
 ```
 
 ## Next Steps

@@ -1,4 +1,4 @@
-# FOIAcquire Builder - Compiles Rust binary only
+# foia Builder - Compiles Rust binary only
 # Used by CI to pre-build binaries that runtime images can copy
 #
 # Uses cargo-chef for dependency caching: when only source changes,

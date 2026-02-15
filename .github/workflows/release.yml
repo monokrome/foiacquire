@@ -18,31 +18,31 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            name: foiacquire-linux-x86_64
+            name: foia-linux-x86_64
 
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            name: foiacquire-linux-x86_64-musl
+            name: foia-linux-x86_64-musl
 
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            name: foiacquire-linux-aarch64
+            name: foia-linux-aarch64
 
           - target: x86_64-apple-darwin
             os: macos-latest
-            name: foiacquire-macos-x86_64
+            name: foia-macos-x86_64
 
           - target: aarch64-apple-darwin
             os: macos-latest
-            name: foiacquire-macos-aarch64
+            name: foia-macos-aarch64
 
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            name: foiacquire-windows-x86_64
+            name: foia-windows-x86_64
 
           - target: aarch64-pc-windows-msvc
             os: windows-latest
-            name: foiacquire-windows-aarch64
+            name: foia-windows-aarch64
 
     steps:
       - uses: actions/checkout@v4

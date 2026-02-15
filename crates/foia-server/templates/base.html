@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - foia</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header id="main-header">
+        <nav>
+            <a href="/" class="logo">foia</a>
+            <a href="/tags">tags</a>
+        </nav>
+    </header>
+    {% block timeline %}{% endblock %}
+    <main>
+        <h1>{{ title }}</h1>
+        {% block content %}{% endblock %}
+    </main>
+    <script src="/static/timeline.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
