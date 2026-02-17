@@ -1,8 +1,11 @@
-//! LLM client configuration.
+//! Annotation LLM client configuration.
 //!
 //! Split into two tiers:
 //! - `LlmAppConfig`: Stored in DB, synced across devices (prompts, generation params)
 //! - `LlmDeviceConfig`: From env vars, device-specific (provider, endpoint, model, api_key)
+//!
+//! Env vars: ANNOTATE_PROVIDER, ANNOTATE_MODEL, ANNOTATE_ENDPOINT, ANNOTATE_API_KEY
+//! (legacy LLM_* names also accepted as fallback)
 
 #![allow(dead_code)]
 
@@ -207,6 +210,12 @@ impl Default for LlmDeviceConfig {
 
 impl LlmDeviceConfig {
     /// Create device config from environment variables.
+    ///
+    /// Env vars (ANNOTATE_* preferred, LLM_* accepted as fallback):
+    /// - ANNOTATE_PROVIDER / LLM_PROVIDER: ollama, groq, openai, together
+    /// - ANNOTATE_MODEL / LLM_MODEL: model ID
+    /// - ANNOTATE_ENDPOINT / LLM_ENDPOINT: API base URL
+    /// - ANNOTATE_API_KEY / LLM_API_KEY: API key
     pub fn from_env() -> Self {
         let mut config = Self {
             provider: LlmProvider::default(),
@@ -216,7 +225,9 @@ impl LlmDeviceConfig {
         };
 
         // Check if provider is explicitly set
-        let explicit_provider = std::env::var("LLM_PROVIDER").ok();
+        let explicit_provider = std::env::var("ANNOTATE_PROVIDER")
+            .or_else(|_| std::env::var("LLM_PROVIDER"))
+            .ok();
         if let Some(ref val) = explicit_provider {
             if let Some(provider) = LlmProvider::from_str(val) {
                 config.provider = provider;
@@ -224,7 +235,9 @@ impl LlmDeviceConfig {
         }
 
         // Explicit endpoint always wins, then OLLAMA_HOST for Ollama provider
-        let explicit_endpoint = std::env::var("LLM_ENDPOINT").ok();
+        let explicit_endpoint = std::env::var("ANNOTATE_ENDPOINT")
+            .or_else(|_| std::env::var("LLM_ENDPOINT"))
+            .ok();
         if let Some(ref endpoint) = explicit_endpoint {
             config.endpoint = endpoint.clone();
         } else if let Ok(ollama_host) = std::env::var("OLLAMA_HOST") {
@@ -232,12 +245,16 @@ impl LlmDeviceConfig {
         }
 
         // Explicit API key always wins
-        if let Ok(val) = std::env::var("LLM_API_KEY") {
+        if let Ok(val) = std::env::var("ANNOTATE_API_KEY")
+            .or_else(|_| std::env::var("LLM_API_KEY"))
+        {
             config.api_key = Some(val);
         }
 
         // Explicit model
-        let explicit_model = std::env::var("LLM_MODEL").ok();
+        let explicit_model = std::env::var("ANNOTATE_MODEL")
+            .or_else(|_| std::env::var("LLM_MODEL"))
+            .ok();
 
         // If provider was explicitly set, use provider-specific defaults
         if let Some(ref provider_str) = explicit_provider {
@@ -332,7 +349,7 @@ impl LlmDeviceConfig {
             }
             LlmProvider::OpenAI => {
                 if self.api_key.is_none() {
-                    "OpenAI API key not set. Set OPENAI_API_KEY or LLM_API_KEY".to_string()
+                    "OpenAI API key not set. Set OPENAI_API_KEY or ANNOTATE_API_KEY".to_string()
                 } else {
                     format!("OpenAI API not available at {}", self.endpoint)
                 }
