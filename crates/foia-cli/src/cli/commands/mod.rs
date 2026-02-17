@@ -174,7 +174,7 @@ enum Commands {
         #[arg(short = 'r', long, value_enum, num_args = 0..=1, default_value = "next-run", default_missing_value = "inplace", require_equals = true)]
         reload: ReloadMode,
         /// Rate limit backend: memory, database (default), or redis
-        #[arg(long, value_enum, default_value = "database")]
+        #[arg(long, value_enum, default_value = "database", env = "RATE_LIMIT_BACKEND")]
         rate_limit_backend: RateLimitBackendType,
     },
 
