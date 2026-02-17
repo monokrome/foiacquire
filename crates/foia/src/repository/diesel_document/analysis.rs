@@ -509,6 +509,44 @@ impl DieselDocumentRepository {
         })
     }
 
+    /// Backfill `document_analysis_results` completion rows for documents
+    /// that are already fully processed (status 'indexed' or 'ocr_complete')
+    /// but don't yet have a completion row for the given analysis type.
+    ///
+    /// Uses a single INSERT ... SELECT for efficiency. Returns the number of
+    /// rows inserted.
+    pub async fn backfill_analysis_completions(
+        &self,
+        analysis_type: &str,
+    ) -> Result<u64, DieselError> {
+        let now = Utc::now().to_rfc3339();
+
+        with_conn!(self.pool, conn, {
+            let count = diesel::sql_query(
+                r#"INSERT INTO document_analysis_results
+                   (page_id, document_id, version_id, analysis_type, backend, status, created_at)
+                   SELECT NULL, d.id, dv.id, $1, 'backfill', 'complete', $2
+                   FROM documents d
+                   JOIN document_versions dv ON dv.document_id = d.id
+                   WHERE d.status IN ('indexed', 'ocr_complete')
+                   AND dv.id = (SELECT MAX(dv2.id) FROM document_versions dv2 WHERE dv2.document_id = d.id)
+                   AND NOT EXISTS (
+                       SELECT 1 FROM document_analysis_results dar
+                       WHERE dar.document_id = d.id
+                       AND dar.version_id = dv.id
+                       AND dar.analysis_type = $3
+                       AND dar.status = 'complete'
+                   )"#,
+            )
+            .bind::<diesel::sql_types::Text, _>(analysis_type)
+            .bind::<diesel::sql_types::Text, _>(&now)
+            .bind::<diesel::sql_types::Text, _>(analysis_type)
+            .execute(&mut conn)
+            .await?;
+            Ok(count as u64)
+        })
+    }
+
     /// Count pending analysis for a specific type.
     pub async fn count_pending_analysis(&self, analysis_type: &str) -> Result<u64, DieselError> {
         use diesel::dsl::count_star;

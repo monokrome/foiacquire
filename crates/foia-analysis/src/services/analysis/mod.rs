@@ -142,6 +142,12 @@ impl AnalysisService {
 
         // Only run OCR phases if OCR methods are requested
         if has_ocr_methods {
+            // Backfill completion rows for already-processed documents
+            // so they aren't re-scanned by Phase 0
+            for method in &methods {
+                self.backfill_analysis_completions(method).await;
+            }
+
             // ==================== PHASE 0: MIME Detection ====================
             tracing::debug!("Starting Phase 0: MIME detection");
             self.process_phase0_mime(source_id, limit, mime_type, &event_tx, &mut result)
@@ -182,6 +188,31 @@ impl AnalysisService {
         // No separate Phase 3 needed.
 
         Ok(result)
+    }
+
+    /// Backfill completion rows for already-processed documents.
+    ///
+    /// Documents with status 'indexed' or 'ocr_complete' have already been
+    /// through the analysis pipeline but may lack a `document_analysis_results`
+    /// row (e.g., they were processed before per-method tracking was added).
+    /// Without the row, `count_needing_analysis` treats them as unprocessed
+    /// and Phase 0 re-scans every file on every run.
+    async fn backfill_analysis_completions(&self, analysis_type: &str) {
+        match self
+            .doc_repo
+            .backfill_analysis_completions(analysis_type)
+            .await
+        {
+            Ok(count) if count > 0 => {
+                tracing::info!(
+                    "Backfilled {count} analysis completion rows for '{analysis_type}'"
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!("Failed to backfill analysis completions: {e}");
+            }
+        }
     }
 
     /// Migrate legacy file_path values to deterministic paths.
