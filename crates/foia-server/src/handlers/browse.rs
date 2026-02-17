@@ -7,8 +7,11 @@ use axum::{
 };
 use serde::Deserialize;
 
+use foia::utils::MimeCategory;
+
 use super::super::template_structs::{
-    ActiveTagDisplay, BrowseTemplate, DocumentRow, ErrorTemplate,
+    ActiveTagDisplay, BrowseTemplate, CategoryWithCount, DocumentRow, ErrorTemplate, SourceOption,
+    TagWithCount,
 };
 use super::super::AppState;
 use super::helpers::{paginate, parse_csv_param_limit};
@@ -33,26 +36,66 @@ pub async fn browse_documents(
     let types = parse_csv_param_limit(params.types.as_ref(), Some(20));
     let tags = parse_csv_param_limit(params.tags.as_ref(), Some(50));
 
-    // Fetch only document rows and count — tags, sources, and type stats
-    // are loaded client-side via cached API endpoints.
     let offset = page.saturating_sub(1) * per_page;
-    let (browse_result, count_result) = tokio::join!(
-        state.doc_repo.browse_fast(
-            params.source.as_deref(),
-            None,
-            &types,
-            &tags,
-            per_page as u32,
-            offset as u32,
-        ),
-        state.doc_repo.browse_count(
-            params.source.as_deref(),
-            None,
-            &types,
-            &tags,
-            params.q.as_deref(),
-        ),
-    );
+    let (browse_result, count_result, category_stats, source_counts, sources, all_tags) =
+        tokio::join!(
+            state.doc_repo.browse_fast(
+                params.source.as_deref(),
+                None,
+                &types,
+                &tags,
+                per_page as u32,
+                offset as u32,
+            ),
+            state.doc_repo.browse_count(
+                params.source.as_deref(),
+                None,
+                &types,
+                &tags,
+                params.q.as_deref(),
+            ),
+            async {
+                match state.stats_cache.get_category_stats() {
+                    Some(cached) => cached,
+                    None => {
+                        let stats = state
+                            .doc_repo
+                            .get_category_stats(None)
+                            .await
+                            .unwrap_or_default();
+                        state.stats_cache.set_category_stats(stats.clone());
+                        stats
+                    }
+                }
+            },
+            async {
+                match state.stats_cache.get_source_counts() {
+                    Some(cached) => cached,
+                    None => {
+                        let counts = state
+                            .doc_repo
+                            .get_all_source_counts()
+                            .await
+                            .unwrap_or_default();
+                        state.stats_cache.set_source_counts(counts.clone());
+                        counts
+                    }
+                }
+            },
+            state.source_repo.get_all(),
+            async {
+                match state.stats_cache.get_all_tags() {
+                    Some(cached) => cached,
+                    None => {
+                        let raw = state.doc_repo.get_all_tags().await.unwrap_or_default();
+                        let with_counts: Vec<(String, usize)> =
+                            raw.into_iter().map(|t| (t, 0)).collect();
+                        state.stats_cache.set_all_tags(with_counts.clone());
+                        with_counts
+                    }
+                }
+            },
+        );
 
     let browse_rows = match browse_result {
         Ok(result) => result,
@@ -70,10 +113,50 @@ pub async fn browse_documents(
         Err(_) => browse_rows.len() as u64,
     };
 
-    // Convert BrowseRows to DocumentRows (fast path - no Document model needed)
     let doc_rows: Vec<DocumentRow> = browse_rows
         .into_iter()
         .map(DocumentRow::from_browse_row)
+        .collect();
+
+    // Build category filter checkboxes
+    let categories: Vec<CategoryWithCount> = MimeCategory::all()
+        .iter()
+        .filter_map(|(id, name)| {
+            let count = category_stats.get(*id).copied().unwrap_or(0);
+            if count == 0 {
+                return None;
+            }
+            let checked = types.is_empty() || types.iter().any(|t| t == *id);
+            Some(CategoryWithCount {
+                id: id.to_string(),
+                name: name.to_string(),
+                count,
+                active: checked,
+                checked,
+            })
+        })
+        .collect();
+
+    // Build source dropdown options
+    let source_options: Vec<SourceOption> = sources
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| {
+            let count = source_counts.get(&s.id).copied().unwrap_or(0);
+            let selected = params.source.as_deref() == Some(&s.id);
+            SourceOption {
+                id: s.id,
+                name: s.name,
+                count,
+                selected,
+            }
+        })
+        .collect();
+
+    // Build tag datalist
+    let tag_list: Vec<TagWithCount> = all_tags
+        .into_iter()
+        .map(|(name, count)| TagWithCount::new(name, count))
         .collect();
 
     // Calculate pagination cursors
@@ -120,35 +203,17 @@ pub async fn browse_documents(
         })
         .collect();
 
-    // JSON for JavaScript
+    // JSON for JavaScript (passed via data attributes to avoid Askama HTML escaping)
     let active_tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".to_string());
-    let active_types_json = serde_json::to_string(&types).unwrap_or_else(|_| "[]".to_string());
-    let active_source_js = params
-        .source
-        .as_ref()
-        .map(|s| format!("\"{}\"", s))
-        .unwrap_or_else(|| "null".to_string());
-    let prev_cursor_js = prev_cursor
-        .as_ref()
-        .map(|c| format!("\"{}\"", c))
-        .unwrap_or_else(|| "null".to_string());
-    let next_cursor_js = next_cursor
-        .as_ref()
-        .map(|c| format!("\"{}\"", c))
-        .unwrap_or_else(|| "null".to_string());
 
     let end_position = start_position + doc_rows.len() as u64;
 
     let template = BrowseTemplate {
         title: "Browse",
         documents: doc_rows,
-        categories: Vec::new(),
-        type_stats_empty: true,
-        sources: Vec::new(),
-        sources_empty: true,
-        has_active_source: params.source.is_some(),
-        active_source_val: params.source.clone().unwrap_or_default(),
-        all_tags: Vec::new(),
+        categories,
+        sources: source_options,
+        all_tags: tag_list,
         active_tags_display,
         has_prev_cursor: prev_cursor.is_some(),
         prev_cursor_val: prev_cursor.unwrap_or_default(),
@@ -161,10 +226,6 @@ pub async fn browse_documents(
         has_pagination: has_prev || has_next,
         nav_query_string,
         active_tags_json,
-        active_types_json,
-        active_source_js,
-        prev_cursor_js,
-        next_cursor_js,
     };
 
     Html(

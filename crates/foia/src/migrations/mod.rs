@@ -10,6 +10,7 @@ mod m0009_document_entities;
 mod m0010_deterministic_paths;
 mod m0011_constraints;
 mod m0012_scraper_configs;
+mod m0013_analysis_lookup_index;
 
 use cetane::prelude::MigrationRegistry;
 
@@ -27,5 +28,6 @@ pub fn registry() -> MigrationRegistry {
     reg.register(m0010_deterministic_paths::migration());
     reg.register(m0011_constraints::migration());
     reg.register(m0012_scraper_configs::migration());
+    reg.register(m0013_analysis_lookup_index::migration());
     reg
 }

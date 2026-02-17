@@ -935,12 +935,12 @@ impl DieselDocumentRepository {
                 Ok(results.into_iter().map(|r| r.tag).collect())
             },
             postgres: conn => {
-                // PostgreSQL uses jsonb_array_elements_text for JSON array iteration
                 let results: Vec<TagRow> = diesel_async::RunQueryDsl::load(
                     diesel::sql_query(
                         r#"SELECT DISTINCT tag
-                           FROM documents, jsonb_array_elements_text(metadata->'tags') as tag
-                           WHERE LOWER(tag) LIKE $1
+                           FROM documents, jsonb_array_elements_text(documents.tags::jsonb) as tag
+                           WHERE documents.tags IS NOT NULL AND documents.tags != '[]'
+                           AND LOWER(tag) LIKE $1
                            ORDER BY tag
                            LIMIT 100"#,
                     )

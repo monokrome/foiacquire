@@ -6,17 +6,10 @@
         <div class="filter-section source-filter">
             <span class="filter-label">Source:</span>
             <select id="source-select">
-                {% if sources_empty %}
-                <option value="">Loading sources...</option>
-                {% if has_active_source %}
-                <option value="{{ active_source_val }}" selected>{{ active_source_val }}</option>
-                {% endif %}
-                {% else %}
                 <option value="">All Sources</option>
                 {% for s in sources %}
                 <option value="{{ s.id }}"{% if s.selected %} selected{% endif %}>{{ s.name }}  ({{ s.count }})</option>
                 {% endfor %}
-                {% endif %}
             </select>
         </div>
         <div class="filter-section tag-filter">
@@ -40,19 +33,13 @@
         <div class="filter-section type-filters">
             <span class="filter-label">Types:</span>
             <div class="type-toggles">
-                {% if type_stats_empty %}
-                <span class="loading-placeholder" id="types-loading">Loading types...</span>
-                {% else %}
                 {% for cat in categories %}
-                {% if cat.count > 0 %}
                 <label class="type-toggle">
                     <input type="checkbox" name="type" value="{{ cat.id }}" {% if cat.checked %}checked{% endif %} data-count="{{ cat.count }}">
                     <span class="toggle-label">{{ cat.name }}</span>
                     <span class="toggle-count">{{ cat.count }}</span>
                 </label>
-                {% endif %}
                 {% endfor %}
-                {% endif %}
             </div>
         </div>
     </div>
@@ -121,21 +108,27 @@
 {% endblock %}
 
 {% block scripts %}
+<div id="browse-config" hidden
+     data-active-tags="{{ active_tags_json }}"
+     data-prev-cursor="{{ prev_cursor_val }}"
+     data-has-prev-cursor="{{ has_prev_cursor }}"
+     data-next-cursor="{{ next_cursor_val }}"
+     data-has-next-cursor="{{ has_next_cursor }}"
+     data-per-page="{{ per_page }}"></div>
 <script>
 (function() {
-    const typeToggles = document.querySelectorAll('.type-toggle input');
-    const tagInput = document.getElementById('tag-search');
-    const sourceSelect = document.getElementById('source-select');
-    let activeTags = {{ active_tags_json }};
-    const perPage = {{ per_page }};
-    const prevCursor = {{ prev_cursor_js }};
-    const nextCursor = {{ next_cursor_js }};
+    var cfg = document.getElementById('browse-config').dataset;
+    var typeToggles = document.querySelectorAll('.type-toggle input');
+    var tagInput = document.getElementById('tag-search');
+    var sourceSelect = document.getElementById('source-select');
+    var activeTags = JSON.parse(cfg.activeTags || '[]');
+    var perPage = parseInt(cfg.perPage, 10) || 50;
 
     function buildParams(cursor) {
-        const params = new URLSearchParams();
+        var params = new URLSearchParams();
 
-        const types = [];
-        typeToggles.forEach(t => {
+        var types = [];
+        typeToggles.forEach(function(t) {
             if (t.checked) types.push(t.value);
         });
         if (types.length > 0 && types.length < typeToggles.length) {
@@ -146,7 +139,7 @@
             params.set('tags', activeTags.join(','));
         }
 
-        const source = sourceSelect.value;
+        var source = sourceSelect.value;
         if (source) params.set('source', source);
 
         if (cursor) params.set('page', cursor);
@@ -156,25 +149,25 @@
     }
 
     function updateFilters() {
-        const params = buildParams(null);
-        const qs = params.toString();
+        var params = buildParams(null);
+        var qs = params.toString();
         window.location.href = '/' + (qs ? '?' + qs : '');
     }
 
     window.goToPage = function(cursor) {
-        const params = buildParams(cursor);
-        const qs = params.toString();
+        var params = buildParams(cursor);
+        var qs = params.toString();
         window.location.href = '/' + (qs ? '?' + qs : '');
     };
 
-    typeToggles.forEach(t => {
+    typeToggles.forEach(function(t) {
         t.addEventListener('change', updateFilters);
     });
 
     sourceSelect.addEventListener('change', updateFilters);
 
     tagInput.addEventListener('change', function() {
-        const tag = tagInput.value.trim();
+        var tag = tagInput.value.trim();
         if (tag && !activeTags.includes(tag)) {
             activeTags.push(tag);
             tagInput.value = '';
@@ -185,7 +178,7 @@
     tagInput.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') {
             e.preventDefault();
-            const tag = tagInput.value.trim();
+            var tag = tagInput.value.trim();
             if (tag && !activeTags.includes(tag)) {
                 activeTags.push(tag);
                 tagInput.value = '';
@@ -198,101 +191,6 @@
         activeTags.splice(index, 1);
         updateFilters();
     };
-
-    const activeTypes = {{ active_types_json }};
-    const activeSource = {{ active_source_js }};
-
-    const TYPE_CATEGORIES = {
-        'pdf': 'Documents',
-        'image': 'Images',
-        'word': 'Word Documents',
-        'excel': 'Spreadsheets',
-        'email': 'Email',
-        'html': 'Web Pages',
-        'text': 'Text Files',
-        'archive': 'Archives',
-        'other': 'Other'
-    };
-
-    async function loadTypes() {
-        const container = document.querySelector('.type-toggles');
-        const loading = document.getElementById('types-loading');
-        if (!loading) return;
-
-        try {
-            const res = await fetch('/api/types');
-            const envelope = await res.json();
-            const data = envelope.data || envelope;
-
-            const catCounts = {};
-            data.forEach(item => {
-                const cat = item.category;
-                catCounts[cat] = (catCounts[cat] || 0) + item.count;
-            });
-
-            let html = '';
-            for (const [catId, catName] of Object.entries(TYPE_CATEGORIES)) {
-                const count = catCounts[catId] || 0;
-                if (count > 0) {
-                    const checked = activeTypes.length === 0 || activeTypes.includes(catId) ? 'checked' : '';
-                    html += `<label class="type-toggle">
-                        <input type="checkbox" name="type" value="${catId}" ${checked} data-count="${count}">
-                        <span class="toggle-label">${catName}</span>
-                        <span class="toggle-count">${count}</span>
-                    </label>`;
-                }
-            }
-            container.innerHTML = html;
-
-            document.querySelectorAll('.type-toggle input').forEach(t => {
-                t.addEventListener('change', updateFilters);
-            });
-        } catch (e) {
-            console.error('Failed to load types:', e);
-            container.innerHTML = '<span class="error">Failed to load types</span>';
-        }
-    }
-
-    async function loadSources() {
-        const select = document.getElementById('source-select');
-
-        try {
-            const res = await fetch('/api/sources');
-            const envelope = await res.json();
-            const data = envelope.data || envelope;
-
-            let html = '<option value="">All Sources</option>';
-            data.forEach(s => {
-                const selected = activeSource === s.id ? ' selected' : '';
-                html += `<option value="${s.id}"${selected}>${s.name}  (${s.count})</option>`;
-            });
-            select.innerHTML = html;
-        } catch (e) {
-            console.error('Failed to load sources:', e);
-        }
-    }
-
-    async function loadTags() {
-        const datalist = document.getElementById('tag-list');
-
-        try {
-            const res = await fetch('/api/tags');
-            const envelope = await res.json();
-            const data = envelope.data || envelope;
-
-            let html = '';
-            data.forEach(t => {
-                html += `<option value="${t.tag}" data-count="${t.count}">`;
-            });
-            datalist.innerHTML = html;
-        } catch (e) {
-            console.error('Failed to load tags:', e);
-        }
-    }
-
-    loadTypes();
-    loadSources();
-    loadTags();
 })();
 </script>
 {% endblock %}

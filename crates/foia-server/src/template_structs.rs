@@ -191,11 +191,7 @@ pub struct BrowseTemplate<'a> {
     pub title: &'a str,
     pub documents: Vec<DocumentRow>,
     pub categories: Vec<CategoryWithCount>,
-    pub type_stats_empty: bool,
     pub sources: Vec<SourceOption>,
-    pub sources_empty: bool,
-    pub has_active_source: bool,
-    pub active_source_val: String,
     pub all_tags: Vec<TagWithCount>,
     pub active_tags_display: Vec<ActiveTagDisplay>,
     pub has_prev_cursor: bool,
@@ -209,10 +205,6 @@ pub struct BrowseTemplate<'a> {
     pub has_pagination: bool,
     pub nav_query_string: String,
     pub active_tags_json: String,
-    pub active_types_json: String,
-    pub active_source_js: String,
-    pub prev_cursor_js: String,
-    pub next_cursor_js: String,
 }
 
 /// Error page template.
