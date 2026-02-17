@@ -9,6 +9,7 @@ mod date_annotator;
 mod llm_annotator;
 mod manager;
 mod ner_annotator;
+pub mod stage;
 mod types;
 mod url_annotator;
 
@@ -18,4 +19,5 @@ pub use llm_annotator::LlmAnnotator;
 pub use manager::AnnotationManager;
 pub use ner_annotator::NerAnnotator;
 pub use types::{AnnotationError, AnnotationEvent, AnnotationOutput, BatchAnnotationResult};
+pub use stage::AnnotationStage;
 pub use url_annotator::UrlAnnotator;

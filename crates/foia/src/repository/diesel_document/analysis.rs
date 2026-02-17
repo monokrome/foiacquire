@@ -547,6 +547,34 @@ impl DieselDocumentRepository {
         })
     }
 
+    /// Delete a pending claim row for a document/version/analysis_type.
+    ///
+    /// Extracts the cleanup logic from `store_analysis_result_for_document`
+    /// into a standalone method. Used by annotation queues that store results
+    /// in document metadata (not `document_analysis_results`), so the pending
+    /// row must be explicitly cleaned up after processing.
+    pub async fn delete_pending_claim(
+        &self,
+        document_id: &str,
+        version_id: i32,
+        analysis_type: &str,
+    ) -> Result<(), DieselError> {
+        with_conn!(self.pool, conn, {
+            diesel::delete(
+                document_analysis_results::table
+                    .filter(document_analysis_results::document_id.eq(document_id))
+                    .filter(document_analysis_results::version_id.eq(version_id))
+                    .filter(document_analysis_results::analysis_type.eq(analysis_type))
+                    .filter(document_analysis_results::backend.eq("pending"))
+                    .filter(document_analysis_results::status.eq("pending"))
+                    .filter(document_analysis_results::page_id.is_null()),
+            )
+            .execute(&mut conn)
+            .await?;
+            Ok(())
+        })
+    }
+
     /// Count pending analysis for a specific type.
     pub async fn count_pending_analysis(&self, analysis_type: &str) -> Result<u64, DieselError> {
         use diesel::dsl::count_star;

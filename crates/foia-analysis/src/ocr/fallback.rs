@@ -170,6 +170,12 @@ impl OcrBackend for FallbackOcrBackend {
             .unwrap_or(OcrBackendType::Tesseract)
     }
 
+    fn is_deferred(&self) -> bool {
+        self.backends
+            .first()
+            .map_or(false, |b| b.is_deferred())
+    }
+
     fn is_available(&self) -> bool {
         self.backends.iter().any(|b| b.is_available())
     }

@@ -23,3 +23,4 @@ pub mod schema;
 pub mod services;
 pub mod storage;
 pub mod utils;
+pub mod work_queue;

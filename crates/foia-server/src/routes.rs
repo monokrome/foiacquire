@@ -1,7 +1,7 @@
 //! Router configuration for the web server.
 
 use axum::{
-    routing::{get, options, post},
+    routing::{get, post},
     Router,
 };
 use tower_http::cors::CorsLayer;
@@ -81,6 +81,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/export/documents", get(handlers::export_documents))
         .route("/api/export/annotations", get(handlers::export_annotations))
         .route("/api/export/stats", get(handlers::export_stats))
+        // Search API - full-text page content search
+        .route("/api/search", get(handlers::search_content))
         // Entities API - NER-extracted entity search
         .route("/api/entities/search", get(handlers::search_entities))
         .route("/api/entities/types", get(handlers::entity_types))
@@ -102,7 +104,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/types", get(handlers::api_type_stats))
         .route("/api/sources", get(handlers::api_sources))
         // OpenAPI spec
-        .route("/api", options(handlers::openapi_spec))
+        .route("/api", get(handlers::openapi_spec).options(handlers::openapi_spec))
         .route("/api/openapi.json", get(handlers::openapi_spec))
         .layer(CorsLayer::permissive())
         .with_state(state)

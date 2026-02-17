@@ -26,6 +26,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 use foia::config::{load_settings_with_options, LoadOptions};
+use foia::work_queue::ExecutionStrategy;
 
 // Re-export ReloadMode for use by other modules
 pub use daemon::ReloadMode;
@@ -232,9 +233,18 @@ enum Commands {
         /// Hours to wait before retrying failed analyses (default: 12)
         #[arg(long, default_value = "12")]
         retry_interval: u32,
+        /// Number of documents to fetch per batch (default: 4096)
+        #[arg(long)]
+        chunk_size: Option<usize>,
         /// Config reload behavior in daemon mode [default: next-run, or inplace if flag used without value]
         #[arg(short = 'r', long, value_enum, num_args = 0..=1, default_value = "next-run", default_missing_value = "inplace", require_equals = true)]
         reload: ReloadMode,
+        /// Deep execution: interleave stages per chunk (deferred stages run concurrently)
+        #[arg(long, conflicts_with = "wide")]
+        deep: bool,
+        /// Wide execution: complete each stage before starting the next (default)
+        #[arg(long, conflicts_with = "deep")]
+        wide: bool,
     },
 
     /// Check if required analysis tools (OCR, etc.) are installed
@@ -310,6 +320,9 @@ enum Commands {
         /// LLM model name (e.g., dolphin-llama3:8b)
         #[arg(long)]
         model: Option<String>,
+        /// Number of documents to fetch per batch (default: 4096)
+        #[arg(long)]
+        chunk_size: Option<usize>,
         /// Run continuously, checking for new work
         #[arg(short, long)]
         daemon: bool,
@@ -319,6 +332,12 @@ enum Commands {
         /// Config reload behavior in daemon mode [default: next-run, or inplace if flag used without value]
         #[arg(short = 'r', long, value_enum, num_args = 0..=1, default_value = "next-run", default_missing_value = "inplace", require_equals = true)]
         reload: ReloadMode,
+        /// Deep execution: interleave stages per chunk (deferred stages run concurrently)
+        #[arg(long, conflicts_with = "wide")]
+        deep: bool,
+        /// Wide execution: complete each stage before starting the next (default)
+        #[arg(long, conflicts_with = "deep")]
+        wide: bool,
     },
 
     /// Detect and estimate publication dates for documents
@@ -993,13 +1012,21 @@ pub async fn run() -> anyhow::Result<()> {
             method,
             workers,
             limit,
+            extract_urls: _,
             mime_type,
             daemon,
             interval,
             retry_interval,
+            chunk_size,
             reload,
-            ..
+            deep,
+            wide: _,
         } => {
+            let strategy = if deep {
+                ExecutionStrategy::Deep
+            } else {
+                ExecutionStrategy::Wide
+            };
             analyze::cmd_analyze(
                 &settings,
                 source_id.as_deref(),
@@ -1011,7 +1038,9 @@ pub async fn run() -> anyhow::Result<()> {
                 daemon,
                 interval,
                 retry_interval,
+                chunk_size,
                 reload,
+                strategy,
             )
             .await
         }
@@ -1061,14 +1090,22 @@ pub async fn run() -> anyhow::Result<()> {
             limit,
             endpoint,
             model,
+            chunk_size,
             daemon,
             interval,
             reload,
+            deep,
+            wide: _,
         } => match command {
             Some(AnnotateCommands::Reset { source_id, confirm }) => {
                 annotate::cmd_annotate_reset(&settings, source_id.as_deref(), confirm).await
             }
             None => {
+                let strategy = if deep {
+                    ExecutionStrategy::Deep
+                } else {
+                    ExecutionStrategy::Wide
+                };
                 annotate::cmd_annotate(
                     &settings,
                     source_id.as_deref(),
@@ -1076,9 +1113,11 @@ pub async fn run() -> anyhow::Result<()> {
                     limit,
                     endpoint,
                     model,
+                    chunk_size,
                     daemon,
                     interval,
                     reload,
+                    strategy,
                 )
                 .await
             }

@@ -6,13 +6,27 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 
-use super::{DieselDocumentRepository, OcrResult, ReturningId};
+use super::{CountRow, DieselDocumentRepository, OcrResult, ReturningId};
 use crate::models::{DocumentPage, PageOcrStatus};
 use crate::repository::models::{DocumentPageRecord, PageOcrResultRecord};
 use crate::repository::parse_datetime;
 use crate::repository::pool::DieselError;
 use crate::schema::{document_pages, page_ocr_results};
-use crate::with_conn;
+use crate::{with_conn, with_conn_split};
+
+#[derive(diesel::QueryableByName, Debug)]
+pub struct PageSearchRow {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub document_id: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub title: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub source_id: String,
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    pub page_number: i32,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub headline: String,
+}
 
 impl From<DocumentPageRecord> for DocumentPage {
     fn from(r: DocumentPageRecord) -> Self {
@@ -480,6 +494,119 @@ impl DieselDocumentRepository {
         } else {
             Ok(Some(combined))
         }
+    }
+
+    /// Full-text search on page content.
+    ///
+    /// Postgres: uses `tsvector`/`tsquery` for ranked full-text search with headline snippets.
+    /// SQLite: falls back to LIKE matching (no headlines).
+    pub async fn search_page_content(
+        &self,
+        query: &str,
+        source_id: Option<&str>,
+        document_id: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<PageSearchRow>, DieselError> {
+        let like_pattern = format!("%{query}%");
+
+        with_conn_split!(self.pool,
+            sqlite: conn => {
+                diesel::sql_query(format!(
+                    r#"SELECT dp.document_id, d.title, d.source_id, dp.page_number,
+                              '' AS headline
+                       FROM document_pages dp
+                       JOIN documents d ON d.id = dp.document_id
+                       WHERE COALESCE(dp.final_text, dp.ocr_text, dp.pdf_text, '') LIKE ?
+                         AND (? IS NULL OR d.source_id = ?)
+                         AND (? IS NULL OR dp.document_id = ?)
+                       ORDER BY dp.document_id, dp.page_number
+                       LIMIT {limit} OFFSET {offset}"#
+                ))
+                .bind::<diesel::sql_types::Text, _>(&like_pattern)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(source_id)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(source_id)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(document_id)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(document_id)
+                .load::<PageSearchRow>(&mut conn)
+                .await
+            },
+            postgres: conn => {
+                diesel::sql_query(format!(
+                    r#"SELECT dp.document_id, d.title, d.source_id, dp.page_number,
+                              ts_headline('english',
+                                          COALESCE(dp.final_text, dp.ocr_text, dp.pdf_text, ''),
+                                          plainto_tsquery('english', $1),
+                                          'MaxFragments=3, MaxWords=30, MinWords=10') AS headline
+                       FROM document_pages dp
+                       JOIN documents d ON d.id = dp.document_id
+                       WHERE to_tsvector('english', COALESCE(dp.final_text, dp.ocr_text, dp.pdf_text, ''))
+                             @@ plainto_tsquery('english', $1)
+                         AND ($2::text IS NULL OR d.source_id = $2)
+                         AND ($3::text IS NULL OR dp.document_id = $3)
+                       ORDER BY ts_rank(
+                                  to_tsvector('english', COALESCE(dp.final_text, dp.ocr_text, dp.pdf_text, '')),
+                                  plainto_tsquery('english', $1)) DESC,
+                                dp.document_id, dp.page_number
+                       LIMIT {limit} OFFSET {offset}"#
+                ))
+                .bind::<diesel::sql_types::Text, _>(query)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(source_id)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(document_id)
+                .load::<PageSearchRow>(&mut conn)
+                .await
+            }
+        )
+    }
+
+    /// Count full-text search matches on page content.
+    pub async fn count_page_content_matches(
+        &self,
+        query: &str,
+        source_id: Option<&str>,
+        document_id: Option<&str>,
+    ) -> Result<u64, DieselError> {
+        let like_pattern = format!("%{query}%");
+
+        with_conn_split!(self.pool,
+            sqlite: conn => {
+                let result: Vec<CountRow> = diesel::sql_query(
+                    r#"SELECT COUNT(*) AS count
+                       FROM document_pages dp
+                       JOIN documents d ON d.id = dp.document_id
+                       WHERE COALESCE(dp.final_text, dp.ocr_text, dp.pdf_text, '') LIKE ?
+                         AND (? IS NULL OR d.source_id = ?)
+                         AND (? IS NULL OR dp.document_id = ?)"#,
+                )
+                .bind::<diesel::sql_types::Text, _>(&like_pattern)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(source_id)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(source_id)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(document_id)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(document_id)
+                .load(&mut conn)
+                .await?;
+                #[allow(clippy::get_first)]
+                Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
+            },
+            postgres: conn => {
+                let result: Vec<CountRow> = diesel::sql_query(
+                    r#"SELECT COUNT(*) AS count
+                       FROM document_pages dp
+                       JOIN documents d ON d.id = dp.document_id
+                       WHERE to_tsvector('english', COALESCE(dp.final_text, dp.ocr_text, dp.pdf_text, ''))
+                             @@ plainto_tsquery('english', $1)
+                         AND ($2::text IS NULL OR d.source_id = $2)
+                         AND ($3::text IS NULL OR dp.document_id = $3)"#,
+                )
+                .bind::<diesel::sql_types::Text, _>(query)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(source_id)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(document_id)
+                .load(&mut conn)
+                .await?;
+                #[allow(clippy::get_first)]
+                Ok(result.get(0).map(|r| r.count as u64).unwrap_or(0))
+            }
+        )
     }
 
     /// Get OCR results for pages in bulk (stub).

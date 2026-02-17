@@ -125,6 +125,12 @@ pub trait AnalysisBackend: Send + Sync {
     /// Get the backend identifier (e.g., "tesseract", "whisper-base", "my-extractor").
     fn backend_id(&self) -> &str;
 
+    /// Whether this backend sends work to a remote API rather than running locally.
+    /// Deferred backends can run concurrently with local stages in deep mode.
+    fn is_deferred(&self) -> bool {
+        false
+    }
+
     /// Check if this backend is available (dependencies installed, models present).
     fn is_available(&self) -> bool;
 

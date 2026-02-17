@@ -46,6 +46,10 @@ impl AnalysisBackend for OcrAnalysisAdapter {
         AnalysisType::Ocr
     }
 
+    fn is_deferred(&self) -> bool {
+        self.backend.is_deferred()
+    }
+
     fn backend_id(&self) -> &str {
         match self.backend.backend_type() {
             OcrBackendType::Tesseract => "tesseract",

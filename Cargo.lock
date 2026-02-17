@@ -2818,6 +2818,7 @@ name = "foia-analysis"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64",
  "console 0.15.11",
  "dirs 5.0.1",

@@ -26,6 +26,12 @@ pub trait Annotator: Send + Sync {
         1
     }
 
+    /// Whether this backend sends work to a remote API rather than running locally.
+    /// Deferred backends can run concurrently with local stages in deep mode.
+    fn is_deferred(&self) -> bool {
+        false
+    }
+
     /// Whether the backend is ready to run.
     /// LLM checks service availability; date/URL always return true.
     async fn is_available(&self) -> bool {

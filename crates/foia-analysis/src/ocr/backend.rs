@@ -77,6 +77,11 @@ pub enum OcrBackendType {
 }
 
 impl OcrBackendType {
+    /// Whether this backend type sends work to a remote API rather than running locally.
+    pub fn is_deferred(&self) -> bool {
+        matches!(self, OcrBackendType::Gemini | OcrBackendType::Groq)
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             OcrBackendType::Tesseract => "tesseract",
@@ -120,6 +125,12 @@ pub trait OcrBackend: Send + Sync {
 
     /// Core OCR: extract text from an image file.
     fn run_ocr(&self, image_path: &Path) -> Result<String, OcrError>;
+
+    /// Whether this backend sends work to a remote API rather than running locally.
+    /// Deferred backends can run concurrently with local stages in deep mode.
+    fn is_deferred(&self) -> bool {
+        self.backend_type().is_deferred()
+    }
 
     /// Model name for this backend, if applicable.
     fn model_name(&self) -> Option<String> {

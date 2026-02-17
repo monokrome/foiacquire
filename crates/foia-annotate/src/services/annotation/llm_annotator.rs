@@ -40,6 +40,10 @@ impl Annotator for LlmAnnotator {
         "LLM Summarization"
     }
 
+    fn is_deferred(&self) -> bool {
+        true
+    }
+
     async fn is_available(&self) -> bool {
         self.llm_client.is_available().await
     }

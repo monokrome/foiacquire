@@ -69,7 +69,7 @@ pub enum AnalysisEvent {
 }
 
 /// Result of document analysis.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AnalysisResult {
     pub mime_checked: usize,
     pub mime_fixed: usize,

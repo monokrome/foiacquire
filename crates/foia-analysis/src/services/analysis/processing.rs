@@ -1,11 +1,58 @@
 //! OCR processing helper functions.
 
+use std::fs::File;
+use std::io::Read;
+
 use crate::ocr::{BackendConfig, FallbackOcrBackend, OcrBackend, TextExtractor};
 use foia::config::OcrConfig;
 use foia::models::{Document, DocumentPage, PageOcrStatus};
 use foia::repository::DieselDocumentRepository;
 
 use super::types::PageOcrResult;
+
+/// Detect MIME type from file content and check if it differs from the stored type.
+///
+/// Returns `Some((detected_mime, old_mime))` if they differ meaningfully, `None` otherwise.
+/// Reads the first 8KB of the file for magic-byte detection.
+pub fn detect_mime_mismatch(
+    path: &std::path::Path,
+    stored_mime: &str,
+) -> Option<(String, String)> {
+    let mut file = File::open(path).ok()?;
+    let mut buffer = [0u8; 8192];
+    let bytes_read = file.read(&mut buffer).ok()?;
+
+    if bytes_read == 0 {
+        return None;
+    }
+
+    let detected = infer::get(&buffer[..bytes_read])?;
+    let detected_mime = detected.mime_type();
+
+    let stored_normalized = stored_mime
+        .split(';')
+        .next()
+        .unwrap_or(stored_mime)
+        .trim()
+        .to_lowercase();
+
+    if detected_mime != stored_normalized {
+        if stored_normalized == "application/octet-stream"
+            || stored_normalized == "binary/octet-stream"
+        {
+            return Some((detected_mime.to_string(), stored_normalized));
+        }
+
+        let stored_base = stored_normalized.split('/').next().unwrap_or("");
+        let detected_base = detected_mime.split('/').next().unwrap_or("");
+
+        if stored_base != detected_base {
+            return Some((detected_mime.to_string(), stored_normalized));
+        }
+    }
+
+    None
+}
 
 /// Extract text from a document per-page using pdftotext.
 /// This function runs in a blocking context and uses the runtime handle to call async methods.

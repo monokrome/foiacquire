@@ -6,6 +6,7 @@ use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use foia::config::{Config, Settings};
+use foia::work_queue::ExecutionStrategy;
 use foia_analysis::ocr::TextExtractor;
 
 use crate::cli::commands::daemon::{ConfigWatcher, DaemonAction, ReloadMode};
@@ -23,7 +24,9 @@ pub async fn cmd_analyze(
     daemon: bool,
     interval: u64,
     retry_interval: u32,
+    chunk_size: Option<usize>,
     reload: ReloadMode,
+    strategy: ExecutionStrategy,
 ) -> anyhow::Result<()> {
     // Parse methods from comma-separated string (e.g., "ocr,whisper")
     let methods: Vec<String> = method
@@ -373,7 +376,7 @@ pub async fn cmd_analyze(
 
         // Run service
         let _result = service
-            .process(source_id, &methods, workers, limit, mime_type, event_tx)
+            .process(source_id, &methods, workers, limit, mime_type, chunk_size, strategy, event_tx)
             .await?;
 
         // Wait for event handler to finish

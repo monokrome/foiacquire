@@ -7,6 +7,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use tokio::sync::mpsc;
 
 use foia::config::{Config, Settings};
+use foia::work_queue::ExecutionStrategy;
 use foia_annotate::services::annotation::{
     AnnotationEvent, AnnotationManager, Annotator, DateAnnotator, LlmAnnotator, NerAnnotator,
 };
@@ -105,9 +106,11 @@ pub async fn cmd_annotate(
     limit: usize,
     endpoint: Option<String>,
     model: Option<String>,
+    chunk_size: Option<usize>,
     daemon: bool,
     interval: u64,
     reload: ReloadMode,
+    strategy: ExecutionStrategy,
 ) -> anyhow::Result<()> {
     let repos = settings.repositories()?;
     let manager = AnnotationManager::new(repos.documents.clone());
@@ -239,8 +242,9 @@ pub async fn cmd_annotate(
         let (event_tx, event_rx) = mpsc::channel::<AnnotationEvent>(100);
         let event_handler = spawn_progress_handler(event_rx, "Annotation");
 
+        let annotator_arc: Arc<dyn Annotator> = Arc::new(LlmAnnotator::new(llm_config.clone()));
         let _result = manager
-            .run_batch(&annotator, source_id, limit, event_tx)
+            .run_batch(annotator_arc, source_id, limit, chunk_size, strategy, event_tx)
             .await?;
 
         if let Err(e) = event_handler.await {
@@ -303,8 +307,9 @@ pub async fn cmd_detect_dates(
     let (event_tx, event_rx) = mpsc::channel::<AnnotationEvent>(100);
     let event_handler = spawn_progress_handler(event_rx, "Date detection");
 
+    let annotator_arc: Arc<dyn Annotator> = Arc::new(annotator);
     let result = manager
-        .run_batch(&annotator, source_id, limit, event_tx)
+        .run_batch(annotator_arc, source_id, limit, None, ExecutionStrategy::Wide, event_tx)
         .await?;
 
     if let Err(e) = event_handler.await {
@@ -358,8 +363,9 @@ pub async fn cmd_extract_entities(
     let (event_tx, event_rx) = mpsc::channel::<AnnotationEvent>(100);
     let event_handler = spawn_progress_handler(event_rx, "Entity extraction");
 
+    let annotator_arc: Arc<dyn Annotator> = Arc::new(annotator);
     let _result = manager
-        .run_batch(&annotator, source_id, limit, event_tx)
+        .run_batch(annotator_arc, source_id, limit, None, ExecutionStrategy::Wide, event_tx)
         .await?;
 
     if let Err(e) = event_handler.await {
